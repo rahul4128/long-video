@@ -18,11 +18,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Set up Node.js 20
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
 
       - name: Install System & Python Dependencies
         run: |
@@ -31,7 +30,7 @@ jobs:
           pip install edge-tts requests
 
       - name: Install Node.js Dependencies
-        run: npm ci || npm install
+        run: npm install
 
       - name: Generate Assets (TTS Voiceover & 16:9 Images)
         env:
