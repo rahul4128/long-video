@@ -34,14 +34,14 @@ def download_single_image(scene_info):
     encoded = urllib.parse.quote(clean_prompt)
     url = f"https://image.pollinations.ai/prompt/{encoded}?width=1920&height=1080&model=flux&nologo=true"
     
-    print(f"🔄 [Scene {idx}] Generating image...", flush=True)
+    print(f"🔄 [Scene {idx}] Generating visual...", flush=True)
     for attempt in range(1, 4):
         try:
             res = requests.get(url, headers=HEADERS, timeout=60)
             if res.status_code == 200:
                 with open(img_dest, "wb") as f:
                     f.write(res.content)
-                print(f"✅ [Scene {idx}] Image downloaded successfully.", flush=True)
+                print(f"✅ [Scene {idx}] Image ready.", flush=True)
                 return True
         except Exception as e:
             print(f"⚠️ [Scene {idx}] Attempt {attempt} failed: {e}", flush=True)
@@ -65,16 +65,37 @@ def get_audio_duration(file_path: str) -> float:
     except Exception:
         return 8.0
 
+# Semaphore limits concurrent connections to Edge TTS to avoid rate-limiting
+tts_semaphore = asyncio.Semaphore(2)
+
 async def generate_single_audio(idx, narration, audio_dest):
-    print(f"🎙️ [Scene {idx}] Synthesizing Hindi voiceover...", flush=True)
-    communicate = edge_tts.Communicate(narration, "hi-IN-MadhurNeural", rate="-2%")
-    await communicate.save(audio_dest)
-    print(f"✅ [Scene {idx}] Voiceover ready.", flush=True)
+    async with tts_semaphore:
+        clean_text = narration.strip() if narration else "हरि ॐ तत्सत्"
+        if not clean_text:
+            clean_text = "हरि ॐ तत्सत्"
+            
+        print(f"🎙️ [Scene {idx}] Synthesizing voiceover...", flush=True)
+        for attempt in range(1, 4):
+            try:
+                communicate = edge_tts.Communicate(clean_text, "hi-IN-MadhurNeural", rate="-2%")
+                await communicate.save(audio_dest)
+                if os.path.exists(audio_dest) and os.path.getsize(audio_dest) > 0:
+                    print(f"✅ [Scene {idx}] Voiceover ready.", flush=True)
+                    return
+            except Exception as e:
+                print(f"⚠️ [Scene {idx}] Audio attempt {attempt} retry: {e}", flush=True)
+                await asyncio.sleep(1.5)
+
+        # Fallback silent audio in case of network drop
+        subprocess.run([
+            "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
+            "-t", "5", "-q:a", "9", "-acodec", "libmp3lame", audio_dest
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 async def process():
     print(f"🚀 Starting asset generation for {len(scenes)} scenes...", flush=True)
 
-    # 1. Background Music fallback
+    # 1. Ensure BGM
     bgm_path = "public/audio/bgm.mp3"
     if not os.path.exists(bgm_path):
         subprocess.run([
@@ -82,7 +103,7 @@ async def process():
             "-t", "30", "-q:a", "9", "-acodec", "libmp3lame", bgm_path
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    # 2. Parallel Image Downloads (6 concurrent workers)
+    # 2. Parallel Image Downloads
     image_tasks = []
     for i, scene in enumerate(scenes):
         idx = i + 1
@@ -94,8 +115,8 @@ async def process():
     with ThreadPoolExecutor(max_workers=6) as executor:
         list(executor.map(download_single_image, image_tasks))
 
-    # 3. Parallel Audio Generation
-    print("⚡ Synthesizing all scene voiceovers in parallel...", flush=True)
+    # 3. Controlled Parallel Audio Generation (throttled by Semaphore)
+    print("⚡ Synthesizing scene voiceovers...", flush=True)
     audio_tasks = []
     for i, scene in enumerate(scenes):
         idx = i + 1
