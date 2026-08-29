@@ -32,9 +32,12 @@ jobs:
       - name: Install Node.js Dependencies
         run: npm install
 
-      - name: Generate Assets (TTS Voiceover & 16:9 Images)
+      - name: Generate Assets (Cloudflare FLUX.1 + Pexels 4K + Voiceover)
         env:
           DISPATCH_PAYLOAD: ${{ toJson(github.event.client_payload) }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
         run: python generate_assets.py
 
       - name: Render Video with Remotion
