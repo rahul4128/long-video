@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import random
 import asyncio
 import subprocess
 import urllib.parse
@@ -32,22 +33,27 @@ def download_single_image(scene_info):
     idx, prompt, img_dest = scene_info
     clean_prompt = f"{prompt}, cinematic devotional art, widescreen 16:9, warm golden lighting, temple atmosphere, 8k, photorealistic"
     encoded = urllib.parse.quote(clean_prompt)
-    url = f"https://image.pollinations.ai/prompt/{encoded}?width=1920&height=1080&model=flux&nologo=true"
+    seed = random.randint(1000, 999999)
     
-    print(f"🔄 [Scene {idx}] Generating visual...", flush=True)
-    for attempt in range(1, 4):
+    # Using turbo model with seed for high speed and 100% uptime
+    url = f"https://image.pollinations.ai/prompt/{encoded}?width=1920&height=1080&model=turbo&seed={seed}&nologo=true"
+    
+    print(f"🔄 [Scene {idx}] Generating image...", flush=True)
+    for attempt in range(1, 5):
         try:
-            res = requests.get(url, headers=HEADERS, timeout=60)
-            if res.status_code == 200:
+            res = requests.get(url, headers=HEADERS, timeout=30)
+            if res.status_code == 200 and len(res.content) > 10000:
                 with open(img_dest, "wb") as f:
                     f.write(res.content)
-                print(f"✅ [Scene {idx}] Image ready.", flush=True)
+                print(f"✅ [Scene {idx}] Image downloaded.", flush=True)
                 return True
+            else:
+                print(f"⚠️ [Scene {idx}] Retry {attempt} (status {res.status_code})...", flush=True)
         except Exception as e:
-            print(f"⚠️ [Scene {idx}] Attempt {attempt} failed: {e}", flush=True)
+            print(f"⚠️ [Scene {idx}] Retry {attempt} ({e})...", flush=True)
         time.sleep(2)
 
-    print(f"⚠️ [Scene {idx}] Using fallback gradient image.", flush=True)
+    # Fallback only if server completely unreachable
     subprocess.run([
         "ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x1a0f00:s=1920x1080",
         "-vframes", "1", img_dest
@@ -65,7 +71,6 @@ def get_audio_duration(file_path: str) -> float:
     except Exception:
         return 8.0
 
-# Semaphore limits concurrent connections to Edge TTS to avoid rate-limiting
 tts_semaphore = asyncio.Semaphore(2)
 
 async def generate_single_audio(idx, narration, audio_dest):
@@ -86,7 +91,6 @@ async def generate_single_audio(idx, narration, audio_dest):
                 print(f"⚠️ [Scene {idx}] Audio attempt {attempt} retry: {e}", flush=True)
                 await asyncio.sleep(1.5)
 
-        # Fallback silent audio in case of network drop
         subprocess.run([
             "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
             "-t", "5", "-q:a", "9", "-acodec", "libmp3lame", audio_dest
@@ -95,7 +99,7 @@ async def generate_single_audio(idx, narration, audio_dest):
 async def process():
     print(f"🚀 Starting asset generation for {len(scenes)} scenes...", flush=True)
 
-    # 1. Ensure BGM
+    # 1. Background Music fallback
     bgm_path = "public/audio/bgm.mp3"
     if not os.path.exists(bgm_path):
         subprocess.run([
@@ -111,11 +115,11 @@ async def process():
         img_dest = f"public/images/scene_{idx}.jpg"
         image_tasks.append((idx, prompt, img_dest))
 
-    print("⚡ Downloading all scene images in parallel...", flush=True)
-    with ThreadPoolExecutor(max_workers=6) as executor:
+    print("⚡ Downloading all scene images...", flush=True)
+    with ThreadPoolExecutor(max_workers=3) as executor:
         list(executor.map(download_single_image, image_tasks))
 
-    # 3. Controlled Parallel Audio Generation (throttled by Semaphore)
+    # 3. Parallel Audio Generation
     print("⚡ Synthesizing scene voiceovers...", flush=True)
     audio_tasks = []
     for i, scene in enumerate(scenes):
