@@ -22,10 +22,13 @@ export const Scene: React.FC<SceneProps> = ({
 }) => {
   const frame = useCurrentFrame();
 
+  const safeDuration = Math.max(30, durationInFrames);
+  const fadeDuration = 15;
+
   // Smooth Cross-fade
   const opacity = interpolate(
     frame,
-    [0, 15, durationInFrames - 15, durationInFrames],
+    [0, fadeDuration, safeDuration - fadeDuration, safeDuration],
    ,
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
   );
@@ -33,16 +36,16 @@ export const Scene: React.FC<SceneProps> = ({
   // Ken Burns Motion
   const scale =
     direction === 'zoom-in'
-      ? interpolate(frame, [0, durationInFrames], [1.0, 1.15], {
+      ? interpolate(frame, [0, safeDuration], [1.0, 1.15], {
           extrapolateRight: 'clamp',
         })
-      : interpolate(frame, [0, durationInFrames], [1.12, 1.05], {
+      : interpolate(frame, [0, safeDuration], [1.12, 1.05], {
           extrapolateRight: 'clamp',
         });
 
   const translateX =
     direction === 'pan-right'
-      ? interpolate(frame, [0, durationInFrames], [-25, 25], {
+      ? interpolate(frame, [0, safeDuration], [-25, 25], {
           extrapolateRight: 'clamp',
         })
       : 0;
