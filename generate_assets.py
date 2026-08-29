@@ -22,6 +22,21 @@ if isinstance(scenes, str):
     except Exception:
         scenes = []
 
+# Fallback test scenes for direct workflow_dispatch testing
+if not scenes:
+    scenes = [
+        {
+            "scene_number": 1,
+            "text": "जीवन के हर मोड़ पर हमें कर्म और धर्म का सही मार्ग चुनना होता है।",
+            "imagePrompt": "Lord Krishna golden aura standing in serene ancient temple at sunrise 16:9"
+        },
+        {
+            "scene_number": 2,
+            "text": "जब मन में शांति और श्रद्धा होती है तो सभी संशय स्वतः दूर हो जाते हैं।",
+            "imagePrompt": "Ancient Himalayan spiritual temple with glowing diya flames golden light 16:9"
+        }
+    ]
+
 os.makedirs("public/images", exist_ok=True)
 os.makedirs("public/audio", exist_ok=True)
 
@@ -31,29 +46,33 @@ HEADERS = {
 
 def download_single_image(scene_info):
     idx, prompt, img_dest = scene_info
-    clean_prompt = f"{prompt}, cinematic devotional art, widescreen 16:9, warm golden lighting, temple atmosphere, 8k, photorealistic"
-    encoded = urllib.parse.quote(clean_prompt)
+    
+    clean_text = prompt.replace("\n", " ").strip()
+    trimmed_prompt = clean_text[:160]
+    final_prompt = f"{trimmed_prompt}, devotional cinematic art, warm golden lighting, temple atmosphere, 16:9"
+    encoded = urllib.parse.quote(final_prompt[:220])
     seed = random.randint(1000, 999999)
     
-    # Using turbo model with seed for high speed and 100% uptime
-    url = f"https://image.pollinations.ai/prompt/{encoded}?width=1920&height=1080&model=turbo&seed={seed}&nologo=true"
+    engines = [
+        f"https://image.pollinations.ai/prompt/{encoded}?width=1920&height=1080&model=turbo&seed={seed}&nologo=true",
+        f"https://image.pollinations.ai/prompt/{encoded}?width=1280&height=720&model=turbo&seed={seed}&nologo=true",
+        f"https://image.pollinations.ai/prompt/{encoded}?width=1920&height=1080&model=flux&seed={seed}&nologo=true",
+        "https://images.unsplash.com/photo-1545128485-c400e7702796?auto=format&fit=crop&w=1920&q=80"
+    ]
     
     print(f"🔄 [Scene {idx}] Generating image...", flush=True)
-    for attempt in range(1, 5):
+    for engine_num, url in enumerate(engines, 1):
         try:
-            res = requests.get(url, headers=HEADERS, timeout=30)
+            res = requests.get(url, headers=HEADERS, timeout=40)
             if res.status_code == 200 and len(res.content) > 10000:
                 with open(img_dest, "wb") as f:
                     f.write(res.content)
-                print(f"✅ [Scene {idx}] Image downloaded.", flush=True)
+                print(f"✅ [Scene {idx}] Image downloaded (Engine {engine_num}).", flush=True)
                 return True
-            else:
-                print(f"⚠️ [Scene {idx}] Retry {attempt} (status {res.status_code})...", flush=True)
         except Exception as e:
-            print(f"⚠️ [Scene {idx}] Retry {attempt} ({e})...", flush=True)
-        time.sleep(2)
+            print(f"⚠️ [Scene {idx}] Engine {engine_num} failed ({e}), trying next...", flush=True)
+        time.sleep(1)
 
-    # Fallback only if server completely unreachable
     subprocess.run([
         "ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x1a0f00:s=1920x1080",
         "-vframes", "1", img_dest
@@ -76,9 +95,6 @@ tts_semaphore = asyncio.Semaphore(2)
 async def generate_single_audio(idx, narration, audio_dest):
     async with tts_semaphore:
         clean_text = narration.strip() if narration else "हरि ॐ तत्सत्"
-        if not clean_text:
-            clean_text = "हरि ॐ तत्सत्"
-            
         print(f"🎙️ [Scene {idx}] Synthesizing voiceover...", flush=True)
         for attempt in range(1, 4):
             try:
@@ -99,7 +115,6 @@ async def generate_single_audio(idx, narration, audio_dest):
 async def process():
     print(f"🚀 Starting asset generation for {len(scenes)} scenes...", flush=True)
 
-    # 1. Background Music fallback
     bgm_path = "public/audio/bgm.mp3"
     if not os.path.exists(bgm_path):
         subprocess.run([
@@ -107,7 +122,6 @@ async def process():
             "-t", "30", "-q:a", "9", "-acodec", "libmp3lame", bgm_path
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    # 2. Parallel Image Downloads
     image_tasks = []
     for i, scene in enumerate(scenes):
         idx = i + 1
@@ -119,7 +133,6 @@ async def process():
     with ThreadPoolExecutor(max_workers=3) as executor:
         list(executor.map(download_single_image, image_tasks))
 
-    # 3. Parallel Audio Generation
     print("⚡ Synthesizing scene voiceovers...", flush=True)
     audio_tasks = []
     for i, scene in enumerate(scenes):
@@ -130,7 +143,6 @@ async def process():
     
     await asyncio.gather(*audio_tasks)
 
-    # 4. Measure durations and build Remotion props
     enriched_scenes = []
     audio_files = []
     for i, scene in enumerate(scenes):
@@ -146,7 +158,6 @@ async def process():
         })
         audio_files.append(audio_name)
 
-    # 5. Concatenate audio
     with open("audio_list.txt", "w") as f:
         for a in audio_files:
             f.write(f"file '{os.path.abspath(a)}'\n")
@@ -156,7 +167,6 @@ async def process():
         "-i", "audio_list.txt", "-c", "copy", "public/audio/voiceover.mp3"
     ], check=True)
 
-    # 6. Save props
     props = {
         "title": title,
         "fps": 30,
