@@ -1,5 +1,8 @@
 import React from 'react';
 import { AbsoluteFill } from 'remotion';
+import { loadFont } from '@remotion/google-fonts/NotoSansDevanagari';
+
+const { fontFamily } = loadFont();
 
 interface SubtitlesProps {
   text: string;
@@ -35,7 +38,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ text }) => {
           style={{
             margin: 0,
             fontSize: 36,
-            fontFamily: `'Noto Sans Devanagari', 'Poppins', sans-serif`,
+            fontFamily,
             fontWeight: 700,
             color: '#FFEAA7',
             lineHeight: 1.45,
