@@ -1,0 +1,50 @@
+name: Render Devotional Long Video
+
+on:
+  repository_dispatch:
+    types: [trigger-render-long]
+  workflow_dispatch:
+
+jobs:
+  render-video:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install System & Python Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          pip install edge-tts requests
+
+      - name: Install Node.js Dependencies
+        run: npm ci || npm install
+
+      - name: Generate Assets (TTS Voiceover & 16:9 Images)
+        env:
+          DISPATCH_PAYLOAD: ${{ toJson(github.event.client_payload) }}
+        run: python generate_assets.py
+
+      - name: Render Video with Remotion
+        run: |
+          npx remotion render DevotionalComposition out/final_video.mp4 --props=public/props.json --concurrency=2
+
+      - name: Upload Video as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: devotional-video-${{ github.run_id }}
+          path: out/final_video.mp4
+          retention-days: 14
