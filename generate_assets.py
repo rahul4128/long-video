@@ -4,6 +4,7 @@ import time
 import asyncio
 import subprocess
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 import requests
 import edge_tts
 
@@ -14,7 +15,6 @@ payload = json.loads(raw_payload) if raw_payload else {}
 title = payload.get("title", "Devotional Story")
 scenes = payload.get("scenes", [])
 
-# Handle stringified scenes if passed as JSON string
 if isinstance(scenes, str):
     try:
         scenes = json.loads(scenes)
@@ -28,20 +28,30 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 }
 
-def download_file_with_retry(url: str, dest_path: str, max_retries: int = 3):
-    """Downloads a file using requests with browser headers and retry logic."""
-    for attempt in range(1, max_retries + 1):
+def download_single_image(scene_info):
+    idx, prompt, img_dest = scene_info
+    clean_prompt = f"{prompt}, cinematic devotional art, widescreen 16:9, warm golden lighting, temple atmosphere, 8k, photorealistic"
+    encoded = urllib.parse.quote(clean_prompt)
+    url = f"https://image.pollinations.ai/prompt/{encoded}?width=1920&height=1080&model=flux&nologo=true"
+    
+    print(f"🔄 [Scene {idx}] Generating image...", flush=True)
+    for attempt in range(1, 4):
         try:
-            response = requests.get(url, headers=HEADERS, timeout=60)
-            if response.status_code == 200:
-                with open(dest_path, "wb") as f:
-                    f.write(response.content)
+            res = requests.get(url, headers=HEADERS, timeout=60)
+            if res.status_code == 200:
+                with open(img_dest, "wb") as f:
+                    f.write(res.content)
+                print(f"✅ [Scene {idx}] Image downloaded successfully.", flush=True)
                 return True
-            else:
-                print(f"Attempt {attempt}: Received status code {response.status_code}")
         except Exception as e:
-            print(f"Attempt {attempt} failed: {e}")
+            print(f"⚠️ [Scene {idx}] Attempt {attempt} failed: {e}", flush=True)
         time.sleep(2)
+
+    print(f"⚠️ [Scene {idx}] Using fallback gradient image.", flush=True)
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x1a0f00:s=1920x1080",
+        "-vframes", "1", img_dest
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return False
 
 def get_audio_duration(file_path: str) -> float:
@@ -55,60 +65,63 @@ def get_audio_duration(file_path: str) -> float:
     except Exception:
         return 8.0
 
-async def process():
-    enriched_scenes = []
-    audio_files = []
+async def generate_single_audio(idx, narration, audio_dest):
+    print(f"🎙️ [Scene {idx}] Synthesizing Hindi voiceover...", flush=True)
+    communicate = edge_tts.Communicate(narration, "hi-IN-MadhurNeural", rate="-2%")
+    await communicate.save(audio_dest)
+    print(f"✅ [Scene {idx}] Voiceover ready.", flush=True)
 
-    # Ensure background music exists (or generate gentle ambient silence if missing)
+async def process():
+    print(f"🚀 Starting asset generation for {len(scenes)} scenes...", flush=True)
+
+    # 1. Background Music fallback
     bgm_path = "public/audio/bgm.mp3"
     if not os.path.exists(bgm_path):
-        print("Creating placeholder background track...")
         subprocess.run([
             "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
             "-t", "30", "-q:a", "9", "-acodec", "libmp3lame", bgm_path
-        ], check=True)
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    print(f"Processing {len(scenes)} scenes...")
-
+    # 2. Parallel Image Downloads (6 concurrent workers)
+    image_tasks = []
     for i, scene in enumerate(scenes):
         idx = i + 1
-        img_name = f"scene_{idx}.jpg"
-        img_dest = f"public/images/{img_name}"
-        audio_name = f"public/audio/chunk_{idx}.mp3"
-
-        # 1. Download 16:9 Devotional Visual from Pollinations
         prompt = scene.get("imagePrompt") or scene.get("image_prompt", "Indian spiritual temple golden lighting 16:9")
-        clean_prompt = f"{prompt}, cinematic devotional art, widescreen 16:9, warm golden lighting, temple atmosphere, 8k, photorealistic"
-        encoded = urllib.parse.quote(clean_prompt)
-        url = f"https://image.pollinations.ai/prompt/{encoded}?width=1920&height=1080&model=flux&nologo=true"
-        
-        print(f"[{idx}/{len(scenes)}] Downloading image for Scene {idx}...")
-        success = download_file_with_retry(url, img_dest)
-        if not success:
-            # Fallback placeholder if image API is busy
-            print(f"Using fallback image for scene {idx}")
-            subprocess.run([
-                "ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x1a0f00:s=1920x1080",
-                "-vframes", "1", img_dest
-            ], check=True)
+        img_dest = f"public/images/scene_{idx}.jpg"
+        image_tasks.append((idx, prompt, img_dest))
 
-        # 2. Synthesize Hindi Voiceover
+    print("⚡ Downloading all scene images in parallel...", flush=True)
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        list(executor.map(download_single_image, image_tasks))
+
+    # 3. Parallel Audio Generation
+    print("⚡ Synthesizing all scene voiceovers in parallel...", flush=True)
+    audio_tasks = []
+    for i, scene in enumerate(scenes):
+        idx = i + 1
         narration = scene.get("text") or scene.get("narration_chunk", "")
-        print(f"[{idx}/{len(scenes)}] Synthesizing audio for Scene {idx}...")
-        communicate = edge_tts.Communicate(narration, "hi-IN-MadhurNeural", rate="-2%")
-        await communicate.save(audio_name)
+        audio_dest = f"public/audio/chunk_{idx}.mp3"
+        audio_tasks.append(generate_single_audio(idx, narration, audio_dest))
+    
+    await asyncio.gather(*audio_tasks)
 
-        # 3. Calculate audio timing
+    # 4. Measure durations and build Remotion props
+    enriched_scenes = []
+    audio_files = []
+    for i, scene in enumerate(scenes):
+        idx = i + 1
+        audio_name = f"public/audio/chunk_{idx}.mp3"
         duration = get_audio_duration(audio_name)
+        narration = scene.get("text") or scene.get("narration_chunk", "")
         enriched_scenes.append({
             "scene_number": idx,
             "durationInSeconds": round(duration + 0.4, 2),
             "narration_chunk": narration,
-            "imageFileName": img_name
+            "imageFileName": f"scene_{idx}.jpg"
         })
         audio_files.append(audio_name)
 
-    # 4. Merge audio chunks into voiceover.mp3
+    # 5. Concatenate audio
     with open("audio_list.txt", "w") as f:
         for a in audio_files:
             f.write(f"file '{os.path.abspath(a)}'\n")
@@ -118,7 +131,7 @@ async def process():
         "-i", "audio_list.txt", "-c", "copy", "public/audio/voiceover.mp3"
     ], check=True)
 
-    # 5. Export props.json for Remotion
+    # 6. Save props
     props = {
         "title": title,
         "fps": 30,
@@ -127,7 +140,7 @@ async def process():
     with open("public/props.json", "w", encoding="utf-8") as f:
         json.dump(props, f, ensure_ascii=False, indent=2)
 
-    print("✅ All assets and public/props.json generated successfully.")
+    print("🎉 All assets & props.json generated successfully!", flush=True)
 
 if __name__ == "__main__":
     asyncio.run(process())
