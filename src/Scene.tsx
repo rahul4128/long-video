@@ -22,6 +22,7 @@ export const Scene: React.FC<SceneProps> = ({
 }) => {
   const frame = useCurrentFrame();
 
+  // Smooth Cross-fade
   const opacity = interpolate(
     frame,
     [0, 15, durationInFrames - 15, durationInFrames],
@@ -29,6 +30,7 @@ export const Scene: React.FC<SceneProps> = ({
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
   );
 
+  // Ken Burns Motion
   const scale =
     direction === 'zoom-in'
       ? interpolate(frame, [0, durationInFrames], [1.0, 1.15], {
