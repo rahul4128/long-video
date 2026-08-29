@@ -9,12 +9,16 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 import edge_tts
 
-# Read payload sent from Make.com
+# Read payload and secrets
 raw_payload = os.environ.get("DISPATCH_PAYLOAD", "{}")
 payload = json.loads(raw_payload) if raw_payload else {}
 
 title = payload.get("title", "Devotional Story")
 scenes = payload.get("scenes", [])
+
+CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "")
+PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "")
 
 if isinstance(scenes, str):
     try:
@@ -44,98 +48,129 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 }
 
-# Themed Devotional Fallback Pool (Ensures distinct 1080p visuals even during complete AI server outages)
-DEVOTIONAL_FALLBACK_POOL = [
-    "https://images.unsplash.com/photo-1545128485-c400e7702796?auto=format&fit=crop&w=1920&q=80", # Ancient Indian Temple
-    "https://images.unsplash.com/photo-1609766857041-ed402ea8069a?auto=format&fit=crop&w=1920&q=80", # Glowing Diya & Aarti
-    "https://images.unsplash.com/photo-1561361058-c24cecae35ca?auto=format&fit=crop&w=1920&q=80", # Himalayan Sunrise Temple
-    "https://images.unsplash.com/photo-1582510003544-4d00b7f74220?auto=format&fit=crop&w=1920&q=80", # Sacred River Ghats
-    "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=1920&q=80", # Spiritual Golden Light
-    "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1920&q=80", # Serene Divine Nature
-    "https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=1920&q=80", # Divine Mountain Peaks
-    "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1920&q=80"  # Golden Sunrise Mist
-]
-
-def fetch_lexica_image(prompt: str) -> str:
-    """Searches Lexica Art database for pre-generated high quality AI images."""
-    try:
-        clean_q = urllib.parse.quote(prompt[:80])
-        res = requests.get(f"https://lexica.art/api/v1/search?q={clean_q}", headers=HEADERS, timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            images = data.get("images", [])
-            if images and len(images) > 0:
-                return images[0].get("src", "")
-    except Exception:
-        pass
-    return ""
-
-def download_single_image(scene_info):
-    idx, prompt, img_dest = scene_info
+# -------------------------------------------------------------
+# 1. STORY-MATCHED CLOUDFLARE FLUX.1 IMAGE GENERATION
+# -------------------------------------------------------------
+def generate_cloudflare_image(prompt: str, dest_path: str) -> bool:
+    if not CLOUDFLARE_ACCOUNT_ID or not CLOUDFLARE_API_TOKEN:
+        return False
+    url = f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/black-forest-labs/flux-1-schnell"
+    headers = {
+        "Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
     
     clean_text = prompt.replace("\n", " ").replace("\"", "").strip()
-    trimmed_prompt = clean_text[:140]
-    final_prompt = f"{trimmed_prompt}, devotional cinematic art, golden lighting, temple atmosphere, 16:9"
-    encoded = urllib.parse.quote(final_prompt[:200])
-    seed = random.randint(1000, 999999)
+    final_prompt = f"{clean_text}, cinematic mythological devotional art, 16:9 widescreen composition, warm divine lighting, 8k, highly detailed"
     
-    # 8-Tier Multi-Engine URLs
-    providers = [
-        ("Pollinations Turbo 1080p", f"https://image.pollinations.ai/prompt/{encoded}?width=1920&height=1080&model=turbo&seed={seed}&nologo=true"),
-        ("Pollinations Flux 1080p", f"https://image.pollinations.ai/prompt/{encoded}?width=1920&height=1080&model=flux&seed={seed}&nologo=true"),
-        ("Pollinations Realism", f"https://image.pollinations.ai/prompt/{encoded}?width=1920&height=1080&model=flux-realism&seed={seed}&nologo=true"),
-        ("Pollinations 720p Fast", f"https://image.pollinations.ai/prompt/{encoded}?width=1280&height=720&model=turbo&seed={seed}&nologo=true"),
-        ("Pollinations SDXL", f"https://image.pollinations.ai/prompt/{encoded}?width=1920&height=1080&model=sdxl&seed={seed}&nologo=true"),
-    ]
+    try:
+        res = requests.post(url, headers=headers, json={"prompt": final_prompt[:450], "num_steps": 4}, timeout=50)
+        if res.status_code == 200 and len(res.content) > 10000:
+            with open(dest_path, "wb") as f:
+                f.write(res.content)
+            return True
+        else:
+            print(f"Cloudflare FLUX status: {res.status_code}")
+    except Exception as e:
+        print(f"Cloudflare FLUX note: {e}")
+    return False
 
-    print(f"🔄 [Scene {idx}] Generating visual...", flush=True)
+# -------------------------------------------------------------
+# 2. REAL 4K STOCK VIDEO B-ROLL (PEXELS API)
+# -------------------------------------------------------------
+def fetch_pexels_video(query: str, dest_path: str) -> bool:
+    if not PEXELS_API_KEY:
+        return False
+    try:
+        url = f"https://api.pexels.com/videos/search?query={urllib.parse.quote(query)}&orientation=landscape&per_page=5"
+        res = requests.get(url, headers={"Authorization": PEXELS_API_KEY}, timeout=15)
+        if res.status_code == 200:
+            videos = res.json().get("videos", [])
+            if videos:
+                files = videos[0].get("video_files", [])
+                hd_files = [f for f in files if f.get("width", 0) >= 1280]
+                target_file = hd_files[0] if hd_files else files[0]
+                video_url = target_file.get("link")
+                
+                v_res = requests.get(video_url, timeout=45)
+                if v_res.status_code == 200:
+                    with open(dest_path, "wb") as f:
+                        f.write(v_res.content)
+                    return True
+    except Exception as e:
+        print(f"Pexels fetch note: {e}")
+    return False
 
-    # 1. Try Pollinations Multi-Models
-    for name, url in providers:
+# -------------------------------------------------------------
+# 3. POLLINATIONS FLUX FALLBACK
+# -------------------------------------------------------------
+def download_pollinations_image(prompt: str, img_dest: str) -> bool:
+    clean_text = prompt.replace("\n", " ").replace("\"", "").strip()[:200]
+    encoded = urllib.parse.quote(f"{clean_text}, cinematic devotional art, 16:9")
+    seed = random.randint(1000, 999999)
+    url = f"https://image.pollinations.ai/prompt/{encoded}?width=1920&height=1080&model=flux&seed={seed}&nologo=true"
+    
+    for attempt in range(1, 3):
         try:
             res = requests.get(url, headers=HEADERS, timeout=35)
             if res.status_code == 200 and len(res.content) > 8000:
                 with open(img_dest, "wb") as f:
                     f.write(res.content)
-                print(f"✅ [Scene {idx}] Success via {name}.", flush=True)
-                return True
-        except Exception:
-            continue
-        time.sleep(0.5)
-
-    # 2. Try Lexica Art API
-    print(f"⚠️ [Scene {idx}] Checking Lexica AI database...", flush=True)
-    lexica_url = fetch_lexica_image(trimmed_prompt)
-    if lexica_url:
-        try:
-            res = requests.get(lexica_url, headers=HEADERS, timeout=20)
-            if res.status_code == 200 and len(res.content) > 8000:
-                with open(img_dest, "wb") as f:
-                    f.write(res.content)
-                print(f"✅ [Scene {idx}] Success via Lexica Art.", flush=True)
                 return True
         except Exception:
             pass
+        time.sleep(1)
 
-    # 3. Dedicated Themed Devotional Image Pool
-    print(f"⚠️ [Scene {idx}] Using curated high-res devotional background...", flush=True)
-    pool_url = DEVOTIONAL_FALLBACK_POOL[(idx - 1) % len(DEVOTIONAL_FALLBACK_POOL)]
-    try:
-        res = requests.get(pool_url, headers=HEADERS, timeout=20)
-        if res.status_code == 200:
-            with open(img_dest, "wb") as f:
-                f.write(res.content)
-            print(f"✅ [Scene {idx}] Devotional background assigned.", flush=True)
-            return True
-    except Exception:
-        pass
-
-    # 4. Ultimate Local Fallback (Dark Temple Amber Frame)
     subprocess.run([
         "ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x150a00:s=1920x1080",
         "-vframes", "1", img_dest
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return False
+
+def process_scene_visual(scene_info):
+    idx, scene = scene_info
+    prompt = scene.get("imagePrompt") or scene.get("image_prompt", "Indian spiritual mythological story scene")
+    
+    # 1. Check if scene is pure environment (temple aarti, diya, river, sunrise) and mix 4K B-Roll
+    broll_keywords = ["temple bells", "diya flame", "aarti", "sunrise ghats", "ganga river", "incense smoke"]
+    if any(k in prompt.lower() for k in broll_keywords) and (idx % 3 == 0) and PEXELS_API_KEY:
+        video_name = f"scene_{idx}.mp4"
+        video_dest = f"public/images/{video_name}"
+        print(f"🎥 [Scene {idx}] Fetching 4K Stock Video from Pexels...", flush=True)
+        if fetch_pexels_video(prompt, video_dest):
+            print(f"✅ [Scene {idx}] 4K Video B-Roll attached.", flush=True)
+            return video_name
+
+    # 2. Primary: Story-accurate Cloudflare FLUX.1
+    img_name = f"scene_{idx}.jpg"
+    img_dest = f"public/images/{img_name}"
+    print(f"🎨 [Scene {idx}] Generating FLUX.1 story visual: {prompt[:60]}...", flush=True)
+    if generate_cloudflare_image(prompt, img_dest):
+        print(f"✅ [Scene {idx}] Cloudflare FLUX.1 visual ready.", flush=True)
+        return img_name
+
+    # 3. Fallback: Pollinations FLUX
+    print(f"⚠️ [Scene {idx}] Using Pollinations FLUX engine...", flush=True)
+    download_pollinations_image(prompt, img_dest)
+    print(f"✅ [Scene {idx}] Visual ready.", flush=True)
+    return img_name
+
+# -------------------------------------------------------------
+# 4. HUMANIZED AUDIO SYNTHESIS WITH SSML & MASTERING
+# -------------------------------------------------------------
+def format_hindi_ssml(text: str) -> str:
+    formatted = text.replace("।", "। <break time=\"450ms\"/> ")
+    formatted = formatted.replace(",", ", <break time=\"200ms\"/> ")
+    formatted = formatted.replace("?", "? <break time=\"450ms\"/> ")
+    formatted = formatted.replace("!", "! <break time=\"350ms\"/> ")
+    
+    return f"""<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="hi-IN">
+    <voice name="hi-IN-MadhurNeural">
+        <prosody rate="-4%" pitch="-2Hz">
+            {formatted}
+        </prosody>
+    </voice>
+</speak>"""
 
 def get_audio_duration(file_path: str) -> float:
     cmd = [
@@ -150,28 +185,37 @@ def get_audio_duration(file_path: str) -> float:
 
 tts_semaphore = asyncio.Semaphore(2)
 
-async def generate_single_audio(idx, narration, audio_dest):
+async def generate_humanized_audio(idx, narration, raw_audio_dest):
     async with tts_semaphore:
         clean_text = narration.strip() if narration else "हरि ॐ तत्सत्"
-        print(f"🎙️ [Scene {idx}] Synthesizing voiceover...", flush=True)
+        ssml_content = format_hindi_ssml(clean_text)
+        
+        print(f"🎙️ [Scene {idx}] Synthesizing humanized voiceover...", flush=True)
         for attempt in range(1, 4):
             try:
-                communicate = edge_tts.Communicate(clean_text, "hi-IN-MadhurNeural", rate="-2%")
-                await communicate.save(audio_dest)
-                if os.path.exists(audio_dest) and os.path.getsize(audio_dest) > 0:
+                communicate = edge_tts.Communicate(ssml_content, "hi-IN-MadhurNeural")
+                await communicate.save(raw_audio_dest)
+                if os.path.exists(raw_audio_dest) and os.path.getsize(raw_audio_dest) > 0:
                     print(f"✅ [Scene {idx}] Voiceover ready.", flush=True)
                     return
-            except Exception as e:
-                print(f"⚠️ [Scene {idx}] Audio retry {attempt}: {e}", flush=True)
-                await asyncio.sleep(1.5)
+            except Exception:
+                try:
+                    communicate = edge_tts.Communicate(clean_text, "hi-IN-MadhurNeural", rate="-4%", pitch="-2Hz")
+                    await communicate.save(raw_audio_dest)
+                    return
+                except:
+                    await asyncio.sleep(1.5)
 
         subprocess.run([
             "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
-            "-t", "5", "-q:a", "9", "-acodec", "libmp3lame", audio_dest
+            "-t", "5", "-q:a", "9", "-acodec", "libmp3lame", raw_audio_dest
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+# -------------------------------------------------------------
+# 5. MASTER PIPELINE
+# -------------------------------------------------------------
 async def process():
-    print(f"🚀 Starting generation for {len(scenes)} scenes...", flush=True)
+    print(f"🚀 Generating assets for {len(scenes)} story scenes...", flush=True)
 
     # 1. Background Music fallback
     bgm_path = "public/audio/bgm.mp3"
@@ -181,30 +225,22 @@ async def process():
             "-t", "30", "-q:a", "9", "-acodec", "libmp3lame", bgm_path
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    # 2. Parallel Image Downloads
-    image_tasks = []
-    for i, scene in enumerate(scenes):
-        idx = i + 1
-        prompt = scene.get("imagePrompt") or scene.get("image_prompt", "Indian spiritual temple golden lighting 16:9")
-        img_dest = f"public/images/scene_{idx}.jpg"
-        image_tasks.append((idx, prompt, img_dest))
-
-    print("⚡ Fetching all scene visuals in parallel...", flush=True)
+    # 2. Parallel Visuals
+    scene_items = [(i + 1, s) for i, s in enumerate(scenes)]
     with ThreadPoolExecutor(max_workers=3) as executor:
-        list(executor.map(download_single_image, image_tasks))
+        visual_file_names = list(executor.map(process_scene_visual, scene_items))
 
-    # 3. Parallel Audio Generation
-    print("⚡ Synthesizing scene voiceovers...", flush=True)
+    # 3. Parallel Humanized Audio
     audio_tasks = []
     for i, scene in enumerate(scenes):
         idx = i + 1
         narration = scene.get("text") or scene.get("narration_chunk", "")
         audio_dest = f"public/audio/chunk_{idx}.mp3"
-        audio_tasks.append(generate_single_audio(idx, narration, audio_dest))
+        audio_tasks.append(generate_humanized_audio(idx, narration, audio_dest))
     
     await asyncio.gather(*audio_tasks)
 
-    # 4. Measure durations and build Remotion props
+    # 4. Construct Remotion Props
     enriched_scenes = []
     audio_files = []
     for i, scene in enumerate(scenes):
@@ -216,21 +252,26 @@ async def process():
             "scene_number": idx,
             "durationInSeconds": round(duration + 0.4, 2),
             "narration_chunk": narration,
-            "imageFileName": f"scene_{idx}.jpg"
+            "imageFileName": visual_file_names[i]
         })
         audio_files.append(audio_name)
 
-    # 5. Concatenate audio
+    # 5. Concatenate & Apply Vocal Warmth Filter
     with open("audio_list.txt", "w") as f:
         for a in audio_files:
             f.write(f"file '{os.path.abspath(a)}'\n")
 
+    vocal_filter = "highpass=f=75,equalizer=f=220:t=q:w=1.2:g=3,equalizer=f=3500:t=q:w=1.5:g=1.5,compand=attacks=0.03:decays=0.3:points=-80/-80|-24/-16|0/-3"
+
     subprocess.run([
         "ffmpeg", "-y", "-f", "concat", "-safe", "0",
-        "-i", "audio_list.txt", "-c", "copy", "public/audio/voiceover.mp3"
+        "-i", "audio_list.txt",
+        "-af", vocal_filter,
+        "-c:a", "libmp3lame", "-b:a", "192k",
+        "public/audio/voiceover.mp3"
     ], check=True)
 
-    # 6. Save props
+    # 6. Save props.json
     props = {
         "title": title,
         "fps": 30,
@@ -239,7 +280,7 @@ async def process():
     with open("public/props.json", "w", encoding="utf-8") as f:
         json.dump(props, f, ensure_ascii=False, indent=2)
 
-    print("🎉 All assets & props.json generated successfully!", flush=True)
+    print("🎉 All story-matched assets & mastered audio ready!", flush=True)
 
 if __name__ == "__main__":
     asyncio.run(process())
