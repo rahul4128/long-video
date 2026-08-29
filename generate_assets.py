@@ -1,9 +1,10 @@
 import os
 import json
+import time
 import asyncio
 import subprocess
 import urllib.parse
-import urllib.request
+import requests
 import edge_tts
 
 # Read payload sent from Make.com
@@ -15,10 +16,33 @@ scenes = payload.get("scenes", [])
 
 # Handle stringified scenes if passed as JSON string
 if isinstance(scenes, str):
-    scenes = json.loads(scenes)
+    try:
+        scenes = json.loads(scenes)
+    except Exception:
+        scenes = []
 
 os.makedirs("public/images", exist_ok=True)
 os.makedirs("public/audio", exist_ok=True)
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+}
+
+def download_file_with_retry(url: str, dest_path: str, max_retries: int = 3):
+    """Downloads a file using requests with browser headers and retry logic."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=60)
+            if response.status_code == 200:
+                with open(dest_path, "wb") as f:
+                    f.write(response.content)
+                return True
+            else:
+                print(f"Attempt {attempt}: Received status code {response.status_code}")
+        except Exception as e:
+            print(f"Attempt {attempt} failed: {e}")
+        time.sleep(2)
+    return False
 
 def get_audio_duration(file_path: str) -> float:
     cmd = [
@@ -28,12 +52,23 @@ def get_audio_duration(file_path: str) -> float:
     res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     try:
         return float(res.stdout.strip())
-    except:
-        return 10.0
+    except Exception:
+        return 8.0
 
 async def process():
     enriched_scenes = []
     audio_files = []
+
+    # Ensure background music exists (or generate gentle ambient silence if missing)
+    bgm_path = "public/audio/bgm.mp3"
+    if not os.path.exists(bgm_path):
+        print("Creating placeholder background track...")
+        subprocess.run([
+            "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+            "-t", "30", "-q:a", "9", "-acodec", "libmp3lame", bgm_path
+        ], check=True)
+
+    print(f"Processing {len(scenes)} scenes...")
 
     for i, scene in enumerate(scenes):
         idx = i + 1
@@ -41,30 +76,33 @@ async def process():
         img_dest = f"public/images/{img_name}"
         audio_name = f"public/audio/chunk_{idx}.mp3"
 
-        # 1. Download 16:9 Devotional Visual from Pollinations (Free Flux)
-        prompt = scene.get("imagePrompt") or scene.get("image_prompt", "Lord Krishna divine serene 16:9")
+        # 1. Download 16:9 Devotional Visual from Pollinations
+        prompt = scene.get("imagePrompt") or scene.get("image_prompt", "Indian spiritual temple golden lighting 16:9")
         clean_prompt = f"{prompt}, cinematic devotional art, widescreen 16:9, warm golden lighting, temple atmosphere, 8k, photorealistic"
         encoded = urllib.parse.quote(clean_prompt)
         url = f"https://image.pollinations.ai/prompt/{encoded}?width=1920&height=1080&model=flux&nologo=true"
         
         print(f"[{idx}/{len(scenes)}] Downloading image for Scene {idx}...")
-        try:
-            urllib.request.urlretrieve(url, img_dest)
-        except Exception as e:
-            print(f"Warning: Image download error ({e}), retrying...")
-            urllib.request.urlretrieve(url, img_dest)
+        success = download_file_with_retry(url, img_dest)
+        if not success:
+            # Fallback placeholder if image API is busy
+            print(f"Using fallback image for scene {idx}")
+            subprocess.run([
+                "ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=0x1a0f00:s=1920x1080",
+                "-vframes", "1", img_dest
+            ], check=True)
 
-        # 2. Synthesize Hindi Voiceover (Madhur - Male or Swara - Female)
+        # 2. Synthesize Hindi Voiceover
         narration = scene.get("text") or scene.get("narration_chunk", "")
         print(f"[{idx}/{len(scenes)}] Synthesizing audio for Scene {idx}...")
         communicate = edge_tts.Communicate(narration, "hi-IN-MadhurNeural", rate="-2%")
         await communicate.save(audio_name)
 
-        # 3. Calculate timing
+        # 3. Calculate audio timing
         duration = get_audio_duration(audio_name)
         enriched_scenes.append({
             "scene_number": idx,
-            "durationInSeconds": round(duration + 0.4, 2), # gentle pause
+            "durationInSeconds": round(duration + 0.4, 2),
             "narration_chunk": narration,
             "imageFileName": img_name
         })
