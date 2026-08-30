@@ -3,6 +3,7 @@ import {
   AbsoluteFill,
   Audio,
   Img,
+  Video,
   interpolate,
   staticFile,
   useCurrentFrame,
@@ -24,7 +25,7 @@ export const Scene: React.FC<SceneProps> = ({
   const safeDuration = Math.max(30, durationInFrames);
   const fadeDuration = 12;
 
-  // Smooth Cross-fade between scenes
+  // Smooth Cross-fade transition
   let opacity = 1;
   if (frame < fadeDuration) {
     opacity = frame / fadeDuration;
@@ -33,7 +34,9 @@ export const Scene: React.FC<SceneProps> = ({
   }
   opacity = Math.max(0, Math.min(1, opacity));
 
-  // Ken Burns Motion
+  const isVideo = scene.imageFileName?.endsWith('.mp4');
+
+  // Ken Burns Motion for fallback images
   const scale =
     direction === 'zoom-in'
       ? interpolate(frame, Array.of(0, safeDuration), Array.of(1.0, 1.15), {
@@ -43,31 +46,32 @@ export const Scene: React.FC<SceneProps> = ({
           extrapolateRight: 'clamp',
         });
 
-  const translateX =
-    direction === 'pan-right'
-      ? interpolate(frame, Array.of(0, safeDuration), Array.of(-25, 25), {
-          extrapolateRight: 'clamp',
-        })
-      : 0;
-
   return (
-    <AbsoluteFill style={{ opacity, overflow: 'hidden' }}>
-      {/* 1. Scene Audio Track (Guarantees exact voice sync for every scene) */}
+    <AbsoluteFill style={{ opacity, overflow: 'hidden', backgroundColor: '#000000' }}>
+      {/* 1. Scene Audio Track (100% synchronized voiceover) */}
       <Audio
         src={staticFile(`audio/chunk_${scene.scene_number}.mp3`)}
         volume={1.0}
       />
 
-      {/* 2. Fullscreen Character Visual with Ken Burns Motion */}
-      <Img
-        src={staticFile(`images/${scene.imageFileName}`)}
-        style={{
-          width: '100%',
-          height: '100%',
-          objectFit: 'cover',
-          transform: `scale(${scale}) translateX(${translateX}px)`,
-        }}
-      />
+      {/* 2. Visual Layer: Renders true AI Video or High-Res Visual */}
+      {isVideo ? (
+        <Video
+          src={staticFile(`images/${scene.imageFileName}`)}
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          muted
+        />
+      ) : (
+        <Img
+          src={staticFile(`images/${scene.imageFileName}`)}
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            transform: `scale(${scale})`,
+          }}
+        />
+      )}
 
       {/* 3. Subtle Cinematic Vignette */}
       <AbsoluteFill
