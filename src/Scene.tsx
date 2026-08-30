@@ -1,13 +1,13 @@
 import React from 'react';
 import {
   AbsoluteFill,
+  Audio,
   Img,
   interpolate,
   staticFile,
   useCurrentFrame,
 } from 'remotion';
 import { SceneItem } from './types';
-import { Subtitles } from './Subtitles';
 
 interface SceneProps {
   scene: SceneItem;
@@ -21,11 +21,10 @@ export const Scene: React.FC<SceneProps> = ({
   direction,
 }) => {
   const frame = useCurrentFrame();
-
   const safeDuration = Math.max(30, durationInFrames);
-  const fadeDuration = 15;
+  const fadeDuration = 12;
 
-  // Clean arithmetic cross-fade (100% error-free)
+  // Smooth Cross-fade between scenes
   let opacity = 1;
   if (frame < fadeDuration) {
     opacity = frame / fadeDuration;
@@ -53,6 +52,13 @@ export const Scene: React.FC<SceneProps> = ({
 
   return (
     <AbsoluteFill style={{ opacity, overflow: 'hidden' }}>
+      {/* 1. Scene Audio Track (Guarantees exact voice sync for every scene) */}
+      <Audio
+        src={staticFile(`audio/chunk_${scene.scene_number}.mp3`)}
+        volume={1.0}
+      />
+
+      {/* 2. Fullscreen Character Visual with Ken Burns Motion */}
       <Img
         src={staticFile(`images/${scene.imageFileName}`)}
         style={{
@@ -62,13 +68,14 @@ export const Scene: React.FC<SceneProps> = ({
           transform: `scale(${scale}) translateX(${translateX}px)`,
         }}
       />
+
+      {/* 3. Subtle Cinematic Vignette */}
       <AbsoluteFill
         style={{
           background:
-            'radial-gradient(circle at center, transparent 45%, rgba(0, 0, 0, 0.6) 100%), linear-gradient(to top, rgba(0, 0, 0, 0.75) 0%, transparent 35%)',
+            'radial-gradient(circle at center, transparent 60%, rgba(0, 0, 0, 0.45) 100%)',
         }}
       />
-      <Subtitles text={scene.narration_chunk} />
     </AbsoluteFill>
   );
 };
