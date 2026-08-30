@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 import edge_tts
 
-# Safe payload reader (handles null, strings, and missing webhooks)
+# Read payload and secrets safely
 raw_payload = os.environ.get("DISPATCH_PAYLOAD", "").strip()
 payload = {}
 if raw_payload and raw_payload != "null":
@@ -24,18 +24,6 @@ if raw_payload and raw_payload != "null":
 title = payload.get("title", "Devotional Story")
 scenes = payload.get("scenes", [])
 
-# Parse array of Google Flow session tokens with clean whitespace stripping
-raw_tokens = os.environ.get("FLOW_SESSION_TOKENS", "").strip()
-flow_tokens = []
-if raw_tokens.startswith("["):
-    try:
-        loaded = json.loads(raw_tokens)
-        flow_tokens = ["".join(str(t).split()).strip() for t in loaded if t]
-    except Exception:
-        flow_tokens = []
-if not flow_tokens and raw_tokens:
-    flow_tokens = ["".join(t.split()).strip() for t in raw_tokens.split() if len(t.strip()) > 50]
-
 CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
 CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "").strip()
@@ -46,13 +34,13 @@ if isinstance(scenes, str):
     except Exception:
         scenes = []
 
-# Fallback test scenes for direct workflow_dispatch testing
+# Fallback test scenes for workflow_dispatch testing
 if not scenes:
     scenes = [
         {
             "scene_number": 1,
             "text": "जीवन के हर मोड़ पर हमें कर्म और धर्म का सही मार्ग चुनना होता है।",
-            "imagePrompt": "Lord Krishna with peacock feather crown in golden chariot talking to warrior Arjuna on Kurukshetra battlefield, cinematic 16:9, warm divine lighting"
+            "imagePrompt": "Lord Krishna in yellow silk robes standing on golden chariot talking to warrior Arjuna on Kurukshetra battlefield, cinematic 16:9, warm divine lighting"
         },
         {
             "scene_number": 2,
@@ -69,51 +57,34 @@ HEADERS = {
 }
 
 # -------------------------------------------------------------
-# 1. GOOGLE FLOW MULTI-ACCOUNT VIDEO GENERATOR
+# 1. REAL 4K TEMPLE B-ROLL (PEXELS API)
 # -------------------------------------------------------------
-def generate_google_flow_video(prompt: str, dest_path: str, token_pool: list) -> bool:
-    if not token_pool:
+def fetch_pexels_video(query: str, dest_path: str) -> bool:
+    if not PEXELS_API_KEY:
         return False
-    
-    clean_prompt = f"{prompt}, highly detailed cinematic 4k mythological video, sacred golden atmosphere, 8 seconds"
-    
-    for i, token in enumerate(token_pool):
-        clean_token = "".join(token.split()).strip()
-        if not clean_token or len(clean_token) < 50:
-            continue
-            
-        print(f"🎬 Trying Google Flow Account #{i+1}...", flush=True)
-        headers = {
-            "Cookie": f"__Secure-next-auth.session-token={clean_token}; next-auth.session-token={clean_token}",
-            "Content-Type": "application/json",
-            "User-Agent": HEADERS["User-Agent"],
-            "Origin": "https://labs.google",
-            "Referer": "https://labs.google/fx/tools/flow"
-        }
-        data = {
-            "prompt": clean_prompt,
-            "aspectRatio": "16:9",
-            "duration": 8
-        }
-        
-        try:
-            res = requests.post("https://labs.google/fx/api/trpc/videoFx.generate", headers=headers, json=data, timeout=60)
-            if res.status_code == 200 and len(res.content) > 50000:
-                with open(dest_path, "wb") as f:
-                    f.write(res.content)
-                print(f"✅ Video generated using Google Flow Account #{i+1}!", flush=True)
-                return True
-            elif res.status_code in [401, 429]:
-                print(f"⚠️ Account #{i+1} exhausted or unauthorized (Status {res.status_code}). Switching to next account...", flush=True)
-                continue
-        except Exception as e:
-            print(f"⚠️ Flow Account #{i+1} notice: {e}", flush=True)
-            continue
-
+    try:
+        clean_q = urllib.parse.quote(query[:60])
+        url = f"https://api.pexels.com/videos/search?query={clean_q}&orientation=landscape&per_page=4"
+        res = requests.get(url, headers={"Authorization": PEXELS_API_KEY}, timeout=15)
+        if res.status_code == 200:
+            videos = res.json().get("videos", [])
+            if videos:
+                files = videos[0].get("video_files", [])
+                hd_files = [f for f in files if f.get("width", 0) >= 1280]
+                target_file = hd_files[0] if hd_files else files[0]
+                video_url = target_file.get("link")
+                
+                v_res = requests.get(video_url, timeout=45)
+                if v_res.status_code == 200 and len(v_res.content) > 100000:
+                    with open(dest_path, "wb") as f:
+                        f.write(v_res.content)
+                    return True
+    except Exception as e:
+        print(f"Pexels fetch note: {e}", flush=True)
     return False
 
 # -------------------------------------------------------------
-# 2. CLOUDFLARE FLUX.1 & POLLINATIONS FALLBACKS
+# 2. CHARACTER-ACCURATE CLOUDFLARE FLUX.1 IMAGE GENERATION
 # -------------------------------------------------------------
 def generate_cloudflare_flux(prompt: str, dest_path: str) -> bool:
     if not CLOUDFLARE_ACCOUNT_ID or not CLOUDFLARE_API_TOKEN:
@@ -169,27 +140,33 @@ def download_pollinations_fallback(prompt: str, img_dest: str) -> bool:
     return False
 
 # -------------------------------------------------------------
-# 3. ROUTE SCENE ASSET (AI Video -> FLUX.1 -> Pollinations)
+# 3. ROUTE SCENE ASSETS (50% Real 4K B-Roll + 50% FLUX.1)
 # -------------------------------------------------------------
 def process_scene_visual(scene_info):
     idx, scene = scene_info
     prompt = scene.get("imagePrompt") or scene.get("image_prompt", "Indian spiritual story scene")
     
-    # 1. Try Google Flow multi-account video generator
-    video_name = f"scene_{idx}.mp4"
-    video_dest = f"public/images/{video_name}"
-    if generate_google_flow_video(prompt, video_dest, flow_tokens):
-        return video_name
+    # Atmospheric B-Roll for environmental scenes (Every 3rd scene)
+    broll_keywords = ["temple bells", "diya flame", "ganga aarti", "morning river ghats", "incense smoke", "himalayan sunrise mist"]
+    is_pure_broll = any(k in prompt.lower() for k in broll_keywords) and (idx % 3 == 0)
 
-    # 2. Try Cloudflare FLUX.1 character visual
+    if is_pure_broll and PEXELS_API_KEY:
+        video_name = f"scene_{idx}.mp4"
+        video_dest = f"public/images/{video_name}"
+        print(f"🎥 [Scene {idx}] Fetching Real 4K Stock Video from Pexels...", flush=True)
+        if fetch_pexels_video(prompt, video_dest):
+            print(f"✅ [Scene {idx}] 4K Real Video attached.", flush=True)
+            return video_name
+
+    # Character & Deity Story Scenes (Cloudflare FLUX.1)
     img_name = f"scene_{idx}.jpg"
     img_dest = f"public/images/{img_name}"
-    print(f"🎨 [Scene {idx}] Generating character visual with Cloudflare FLUX.1...", flush=True)
+    print(f"🎨 [Scene {idx}] Generating character visual with Cloudflare FLUX.1: {prompt[:50]}...", flush=True)
     if generate_cloudflare_flux(prompt, img_dest):
-        print(f"✅ [Scene {idx}] Story-matched FLUX.1 visual ready.", flush=True)
+        print(f"✅ [Scene {idx}] Story-matched FLUX.1 image ready.", flush=True)
         return img_name
 
-    # 3. Fallback to Pollinations Turbo
+    # Fallback to Pollinations Turbo
     print(f"⚠️ [Scene {idx}] Using Pollinations fallback...", flush=True)
     download_pollinations_fallback(prompt, img_dest)
     print(f"✅ [Scene {idx}] Visual ready.", flush=True)
@@ -251,7 +228,7 @@ async def process():
             "-t", "30", "-q:a", "9", "-acodec", "libmp3lame", bgm_path
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    # 2. Process Visuals (Google Flow Video -> Cloudflare FLUX.1 -> Pollinations)
+    # 2. Parallel Visuals (Pexels 4K B-Roll + Cloudflare FLUX.1)
     scene_items = [(i + 1, s) for i, s in enumerate(scenes)]
     with ThreadPoolExecutor(max_workers=3) as executor:
         visual_file_names = list(executor.map(process_scene_visual, scene_items))
