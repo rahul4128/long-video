@@ -25,7 +25,7 @@ export const Scene: React.FC<SceneProps> = ({
   const safeDuration = Math.max(30, durationInFrames);
   const fadeDuration = 12;
 
-  // Smooth Cross-fade transition
+  // Smooth Cross-fade
   let opacity = 1;
   if (frame < fadeDuration) {
     opacity = frame / fadeDuration;
@@ -36,7 +36,7 @@ export const Scene: React.FC<SceneProps> = ({
 
   const isVideo = scene.imageFileName?.endsWith('.mp4');
 
-  // Ken Burns Motion for fallback images
+  // Ken Burns Motion for images
   const scale =
     direction === 'zoom-in'
       ? interpolate(frame, Array.of(0, safeDuration), Array.of(1.0, 1.15), {
@@ -46,15 +46,22 @@ export const Scene: React.FC<SceneProps> = ({
           extrapolateRight: 'clamp',
         });
 
+  const translateX =
+    direction === 'pan-right'
+      ? interpolate(frame, Array.of(0, safeDuration), Array.of(-25, 25), {
+          extrapolateRight: 'clamp',
+        })
+      : 0;
+
   return (
     <AbsoluteFill style={{ opacity, overflow: 'hidden', backgroundColor: '#000000' }}>
-      {/* 1. Scene Audio Track (100% synchronized voiceover) */}
+      {/* 1. Scene Audio Track (100% synchronized voiceover per scene) */}
       <Audio
         src={staticFile(`audio/chunk_${scene.scene_number}.mp3`)}
         volume={1.0}
       />
 
-      {/* 2. Visual Layer: Renders true AI Video or High-Res Visual */}
+      {/* 2. Visual Layer: Renders Real 4K Video or High-Res Deity Art */}
       {isVideo ? (
         <Video
           src={staticFile(`images/${scene.imageFileName}`)}
@@ -68,7 +75,7 @@ export const Scene: React.FC<SceneProps> = ({
             width: '100%',
             height: '100%',
             objectFit: 'cover',
-            transform: `scale(${scale})`,
+            transform: `scale(${scale}) translateX(${translateX}px)`,
           }}
         />
       )}
