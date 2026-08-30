@@ -9,21 +9,21 @@ import {
 import { DevotionalVideoProps } from './types';
 import { Scene } from './Scene';
 
-export const DevotionalComposition: React.FC<DevotionalVideoProps> = ({
+export const DevotionalShortsComposition: React.FC<DevotionalVideoProps> = ({
   scenes = [],
 }) => {
   const { fps } = useVideoConfig();
 
   return (
-    <AbsoluteFill style={{ backgroundColor: '#0b090a' }}>
-      {/* Background Devotional Flute / Tanpura Music (Soft 8% volume mix) */}
+    <AbsoluteFill style={{ backgroundColor: '#000000' }}>
+      {/* Background Devotional Flute / Tanpura Music */}
       <Audio
         src={staticFile('audio/bgm.mp3')}
-        volume={0.08}
+        volume={0.10}
         loop
       />
 
-      {/* Sequential Scenes */}
+      {/* Sequential Shorts Scenes (Vertical 9:16) */}
       <Series>
         {scenes.map((scene, index) => {
           const sceneDurationInFrames = Math.max(
