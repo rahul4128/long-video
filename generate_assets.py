@@ -63,6 +63,7 @@ CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
 CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "").strip()
 PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "").strip()
+COVERR_API_KEY = os.environ.get("COVERR_API_KEY", "").strip()
 
 os.makedirs("public/images", exist_ok=True)
 os.makedirs("public/audio", exist_ok=True)
@@ -73,7 +74,7 @@ HEADERS = {
 }
 
 # -------------------------------------------------------------
-# 1. MULTI-PLATFORM STOCK VIDEO ENGINE (Pexels + Pixabay)
+# 1. MULTI-PLATFORM STOCK VIDEO ENGINE (Pexels + Pixabay + Coverr)
 # -------------------------------------------------------------
 def fetch_pexels_video(query: str, dest_path: str, orientation: str = "landscape") -> bool:
     if not PEXELS_API_KEY or not query:
@@ -104,23 +105,48 @@ def fetch_pexels_video(query: str, dest_path: str, orientation: str = "landscape
 def fetch_pixabay_video(query: str, dest_path: str) -> bool:
     if not PIXABAY_API_KEY or not query:
         return False
+    clean_q = urllib.parse.quote(query.strip()[:60])
+    # Prefer motion-graphic / 3D animation loops first (spinning chakras, glowing diyas,
+    # temple bell loops) for a more cinematic, less static-slideshow feel. Fall back to
+    # any video type if no animation-tagged result is found for this query.
+    for video_type in ("animation", "all"):
+        try:
+            url = f"https://pixabay.com/api/videos/?key={PIXABAY_API_KEY}&q={clean_q}&video_type={video_type}&per_page=4"
+            res = requests.get(url, timeout=15)
+            if res.status_code == 200:
+                hits = res.json().get("hits", [])
+                if hits:
+                    videos_dict = hits[0].get("videos", {})
+                    target = videos_dict.get("large") or videos_dict.get("medium") or videos_dict.get("small")
+                    if target and target.get("url"):
+                        v_res = requests.get(target.get("url"), timeout=45)
+                        if v_res.status_code == 200 and len(v_res.content) > 100000:
+                            with open(dest_path, "wb") as f:
+                                f.write(v_res.content)
+                            return True
+        except Exception as e:
+            print(f"Pixabay notice ({video_type}): {e}", flush=True)
+    return False
+
+def fetch_coverr_video(query: str, dest_path: str) -> bool:
+    if not COVERR_API_KEY or not query:
+        return False
     try:
         clean_q = urllib.parse.quote(query.strip()[:60])
-        url = f"https://pixabay.com/api/videos/?key={PIXABAY_API_KEY}&q={clean_q}&video_type=all&per_page=4"
-        res = requests.get(url, timeout=15)
+        url = f"https://api.coverr.co/videos?query={clean_q}&urls=true&page_size=4"
+        res = requests.get(url, headers={"Authorization": f"Bearer {COVERR_API_KEY}"}, timeout=15)
         if res.status_code == 200:
             hits = res.json().get("hits", [])
             if hits:
-                videos_dict = hits[0].get("videos", {})
-                target = videos_dict.get("large") or videos_dict.get("medium") or videos_dict.get("small")
-                if target and target.get("url"):
-                    v_res = requests.get(target.get("url"), timeout=45)
+                video_url = (hits[0].get("urls") or {}).get("mp4")
+                if video_url:
+                    v_res = requests.get(video_url, timeout=45)
                     if v_res.status_code == 200 and len(v_res.content) > 100000:
                         with open(dest_path, "wb") as f:
                             f.write(v_res.content)
                         return True
     except Exception as e:
-        print(f"Pixabay notice: {e}", flush=True)
+        print(f"Coverr notice: {e}", flush=True)
     return False
 
 def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "landscape") -> bool:
@@ -131,6 +157,10 @@ def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "lan
     # 2. Try Pixabay (3D Sacred Animations & Diyas)
     if fetch_pixabay_video(query, dest_path):
         print(f"  ✅ Video fetched from Pixabay 3D ('{query}')", flush=True)
+        return True
+    # 3. Try Coverr (free stock B-roll, demo tier)
+    if fetch_coverr_video(query, dest_path):
+        print(f"  ✅ Video fetched from Coverr ('{query}')", flush=True)
         return True
     return False
 
@@ -147,7 +177,7 @@ def generate_cloudflare_flux(prompt: str, dest_path: str, aspect_ratio: str = "1
     }
     clean_text = prompt.replace("\n", " ").replace("\"", "").strip()
     final_prompt = f"{clean_text}, Indian mythological devotional art, {aspect_ratio} composition, warm divine lighting, 8k, highly detailed"
-    
+
     try:
         res = requests.post(url, headers=headers, json={"prompt": final_prompt[:450], "steps": 4}, timeout=50)
         if res.status_code == 200:
@@ -172,7 +202,7 @@ def download_pollinations_fallback(prompt: str, img_dest: str, width: int = 1920
     encoded = urllib.parse.quote(f"{clean_text}, Indian devotional art")
     seed = random.randint(1000, 999999)
     url = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&model=turbo&seed={seed}&nologo=true"
-    
+
     for attempt in range(1, 4):
         try:
             res = requests.get(url, headers=HEADERS, timeout=30)
@@ -229,13 +259,13 @@ async def generate_clean_audio(narration: str, audio_dest: str):
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 # -------------------------------------------------------------
-# 4. PROCESS LONG VIDEO SCENES (Pexels + Pixabay + FLUX.1)
+# 4. PROCESS LONG VIDEO SCENES (Pexels + Pixabay + Coverr + FLUX.1)
 # -------------------------------------------------------------
 def process_long_scene_visual(scene_info):
     idx, scene = scene_info
     prompt = scene.get("imagePrompt") or scene.get("image_prompt", "Indian spiritual story scene")
     media_type = scene.get("mediaType", "auto").lower()
-    
+
     video_query = scene.get("videoSearchQuery")
     if not video_query:
         words = [w for w in prompt.split() if w.lower() not in ["the", "a", "an", "and", "with", "in", "on", "of", "cinematic", "16:9", "lighting", "shot"]]
@@ -246,7 +276,7 @@ def process_long_scene_visual(scene_info):
     if should_try_video and video_query:
         video_name = f"scene_{idx}.mp4"
         video_dest = f"public/images/{video_name}"
-        print(f"🎥 [Long Scene {idx}] Searching 4K Video (Pexels + Pixabay) for: '{video_query}'...", flush=True)
+        print(f"🎥 [Long Scene {idx}] Searching 4K Video (Pexels + Pixabay + Coverr) for: '{video_query}'...", flush=True)
         if fetch_multi_source_video(video_query, video_dest, orientation="landscape"):
             return video_name
 
@@ -267,7 +297,7 @@ def process_shorts_scene_visual(scene_info):
 
     video_name = f"shorts_scene_{idx}.mp4"
     video_dest = f"public/images/{video_name}"
-    print(f"🎥 [Shorts Scene {idx}] Searching Vertical Video (Pexels + Pixabay)...", flush=True)
+    print(f"🎥 [Shorts Scene {idx}] Searching Vertical Video (Pexels + Pixabay + Coverr)...", flush=True)
     if fetch_multi_source_video(video_query, video_dest, orientation="portrait"):
         return video_name
 
@@ -300,10 +330,10 @@ async def process():
         download_pollinations_fallback(thumb_prompt, thumb_dest, width=1920, height=1080)
     subprocess.run(["cp", thumb_dest, "out/thumbnail.jpg"], check=False)
 
-    # 3. Parallel Visuals (Pexels + Pixabay + FLUX.1 for Long & Shorts)
+    # 3. Parallel Visuals (Pexels + Pixabay + Coverr + FLUX.1 for Long & Shorts)
     long_items = [(i + 1, s) for i, s in enumerate(long_scenes)]
     shorts_items = [(i + 1, s) for i, s in enumerate(shorts_scenes)]
-    
+
     with ThreadPoolExecutor(max_workers=4) as executor:
         long_visuals = list(executor.map(process_long_scene_visual, long_items))
         shorts_visuals = list(executor.map(process_shorts_scene_visual, shorts_items))
@@ -372,7 +402,7 @@ async def process():
     with open("out/metadata.json", "w", encoding="utf-8") as f:
         json.dump(seo_metadata, f, ensure_ascii=False, indent=2)
 
-    print("🎉 All Multi-Source Assets (Pexels + Pixabay + FLUX), Thumbnail, and Metadata ready!", flush=True)
+    print("🎉 All Multi-Source Assets (Pexels + Pixabay + Coverr + FLUX), Thumbnail, and Metadata ready!", flush=True)
 
 if __name__ == "__main__":
     asyncio.run(process())
