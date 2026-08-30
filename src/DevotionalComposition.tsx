@@ -8,8 +8,9 @@ import {
 } from 'remotion';
 import { DevotionalVideoProps } from './types';
 import { Scene } from './Scene';
+import { Subtitles } from './Subtitles';
 
-export const DevotionalShortsComposition: React.FC<DevotionalVideoProps> = ({
+export const DevotionalComposition: React.FC<DevotionalVideoProps> = ({
   scenes = [],
 }) => {
   const { fps } = useVideoConfig();
@@ -23,7 +24,7 @@ export const DevotionalShortsComposition: React.FC<DevotionalVideoProps> = ({
         loop
       />
 
-      {/* Sequential Shorts Scenes (Vertical 9:16) */}
+      {/* Sequential Long-Form Scenes (Widescreen 16:9) */}
       <Series>
         {scenes.map((scene, index) => {
           const sceneDurationInFrames = Math.max(
@@ -40,6 +41,7 @@ export const DevotionalShortsComposition: React.FC<DevotionalVideoProps> = ({
                 durationInFrames={sceneDurationInFrames}
                 direction={index % 2 === 0 ? 'zoom-in' : 'pan-right'}
               />
+              <Subtitles text={scene.narration_chunk} />
             </Series.Sequence>
           );
         })}
