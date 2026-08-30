@@ -16,14 +16,14 @@ export const DevotionalComposition: React.FC<DevotionalVideoProps> = ({
 
   return (
     <AbsoluteFill style={{ backgroundColor: '#0b090a' }}>
-      {/* Background Devotional Flute / Tanpura Music (Soft Ambient Mix at 8% volume) */}
+      {/* Background Devotional Flute / Tanpura Music (Soft 8% volume mix) */}
       <Audio
         src={staticFile('audio/bgm.mp3')}
         volume={0.08}
         loop
       />
 
-      {/* Synchronized Scene Sequences */}
+      {/* Sequential Scenes */}
       <Series>
         {scenes.map((scene, index) => {
           const sceneDurationInFrames = Math.max(
