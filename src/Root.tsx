@@ -4,16 +4,24 @@ import { DevotionalComposition } from './DevotionalComposition';
 import { DevotionalShortsComposition } from './DevotionalShortsComposition';
 import { DevotionalVideoProps } from './types';
 import defaultPropsLong from '../public/props.json';
+import defaultPropsShorts from '../public/props_shorts.json';
 
 export const RemotionRoot: React.FC = () => {
   const fps = 30;
   const typedPropsLong = defaultPropsLong as DevotionalVideoProps;
+  const typedPropsShorts = defaultPropsShorts as DevotionalVideoProps;
 
   // Calculate dynamic duration for Long Video
   const totalLongSeconds = typedPropsLong.scenes?.length
     ? typedPropsLong.scenes.reduce((acc, scene) => acc + (scene.durationInSeconds || 5), 0)
     : 10;
   const durationInFramesLong = Math.max(30, Math.round(totalLongSeconds * fps));
+
+  // Calculate dynamic duration for Shorts Video (no longer hardcoded to 45s)
+  const totalShortsSeconds = typedPropsShorts.scenes?.length
+    ? typedPropsShorts.scenes.reduce((acc, scene) => acc + (scene.durationInSeconds || 5), 0)
+    : 45;
+  const durationInFramesShorts = Math.max(30, Math.round(totalShortsSeconds * fps));
 
   return (
     <>
@@ -32,11 +40,11 @@ export const RemotionRoot: React.FC = () => {
       <Composition
         id="DevotionalShortsComposition"
         component={DevotionalShortsComposition}
-        durationInFrames={Math.max(30, Math.round(45 * fps))}
+        durationInFrames={durationInFramesShorts}
         fps={fps}
         width={1080}
         height={1920}
-        defaultProps={typedPropsLong}
+        defaultProps={typedPropsShorts}
       />
     </>
   );
