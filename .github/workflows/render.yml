@@ -32,16 +32,15 @@ jobs:
       - name: Install Node.js Dependencies
         run: npm install
 
-      - name: Generate Multi-Account Video & Audio Assets
+      - name: Generate Unified Assets (4K B-Roll + FLUX.1 + Voiceover)
         env:
           DISPATCH_PAYLOAD: ${{ toJson(github.event.client_payload) }}
-          FLOW_SESSION_TOKENS: ${{ secrets.FLOW_SESSION_TOKENS }}
-          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
         run: python generate_assets.py
 
-      - name: Render Cinematic Video with Remotion
+      - name: Render Video with Remotion
         run: |
           npx remotion render DevotionalComposition out/final_video.mp4 --props=public/props.json --concurrency=2
 
