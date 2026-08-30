@@ -14,12 +14,14 @@ interface SceneProps {
   scene: SceneItem;
   durationInFrames: number;
   direction: 'zoom-in' | 'pan-right';
+  format?: 'long' | 'shorts';
 }
 
 export const Scene: React.FC<SceneProps> = ({
   scene,
   durationInFrames,
   direction,
+  format = 'long',
 }) => {
   const frame = useCurrentFrame();
   const safeDuration = Math.max(30, durationInFrames);
@@ -35,6 +37,13 @@ export const Scene: React.FC<SceneProps> = ({
   opacity = Math.max(0, Math.min(1, opacity));
 
   const isVideo = scene.imageFileName?.endsWith('.mp4');
+
+  // Long and Shorts renders write narration audio under different filename prefixes
+  // (see generate_assets.py: chunk_N.mp3 vs shorts_chunk_N.mp3) - pick the right one.
+  const narrationFile =
+    format === 'shorts'
+      ? `audio/shorts_chunk_${scene.scene_number}.mp3`
+      : `audio/chunk_${scene.scene_number}.mp3`;
 
   // Ken Burns Motion for images
   const scale =
@@ -57,9 +66,17 @@ export const Scene: React.FC<SceneProps> = ({
     <AbsoluteFill style={{ opacity, overflow: 'hidden', backgroundColor: '#000000' }}>
       {/* 1. Scene Audio Track (100% synchronized voiceover per scene) */}
       <Audio
-        src={staticFile(`audio/chunk_${scene.scene_number}.mp3`)}
+        src={staticFile(narrationFile)}
         volume={1.0}
       />
+
+      {/* 1b. Optional Sound-Effect Layer (temple bell / shankh / om drone / flute swell) */}
+      {scene.soundEffect && scene.soundEffect !== 'none' && (
+        <Audio
+          src={staticFile(`audio/effects/${scene.soundEffect}.mp3`)}
+          volume={0.35}
+        />
+      )}
 
       {/* 2. Visual Layer: Renders Real 4K Video or High-Res Deity Art */}
       {isVideo ? (
