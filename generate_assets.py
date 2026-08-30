@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import base64
 import random
 import asyncio
 import subprocess
@@ -9,25 +10,35 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 import edge_tts
 
-# Read payload and secrets
-raw_payload = os.environ.get("DISPATCH_PAYLOAD", "{}")
-payload = json.loads(raw_payload) if raw_payload else {}
+# Safe payload reader (handles null, strings, and missing webhooks)
+raw_payload = os.environ.get("DISPATCH_PAYLOAD", "").strip()
+payload = {}
+if raw_payload and raw_payload != "null":
+    try:
+        loaded = json.loads(raw_payload)
+        if isinstance(loaded, dict):
+            payload = loaded
+    except Exception:
+        payload = {}
 
-title = payload.get("title", "Devotional Video")
+title = payload.get("title", "Devotional Story")
 scenes = payload.get("scenes", [])
 
-# Parse array of Google Flow session tokens
-raw_tokens = os.environ.get("FLOW_SESSION_TOKENS", "[]")
-try:
-    flow_tokens = json.loads(raw_tokens)
-    if isinstance(flow_tokens, str):
-        flow_tokens = [flow_tokens]
-except Exception:
-    flow_tokens = [t.strip() for t in raw_tokens.split(",") if t.strip()]
+# Parse array of Google Flow session tokens with clean whitespace stripping
+raw_tokens = os.environ.get("FLOW_SESSION_TOKENS", "").strip()
+flow_tokens = []
+if raw_tokens.startswith("["):
+    try:
+        loaded = json.loads(raw_tokens)
+        flow_tokens = ["".join(str(t).split()).strip() for t in loaded if t]
+    except Exception:
+        flow_tokens = []
+if not flow_tokens and raw_tokens:
+    flow_tokens = ["".join(t.split()).strip() for t in raw_tokens.split() if len(t.strip()) > 50]
 
-CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
-CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "")
-PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "")
+CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
+CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
+PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "").strip()
 
 if isinstance(scenes, str):
     try:
@@ -35,7 +46,7 @@ if isinstance(scenes, str):
     except Exception:
         scenes = []
 
-# Fallback test scenes for workflow_dispatch testing
+# Fallback test scenes for direct workflow_dispatch testing
 if not scenes:
     scenes = [
         {
@@ -67,13 +78,17 @@ def generate_google_flow_video(prompt: str, dest_path: str, token_pool: list) ->
     clean_prompt = f"{prompt}, highly detailed cinematic 4k mythological video, sacred golden atmosphere, 8 seconds"
     
     for i, token in enumerate(token_pool):
-        if not token:
+        clean_token = "".join(token.split()).strip()
+        if not clean_token or len(clean_token) < 50:
             continue
+            
         print(f"🎬 Trying Google Flow Account #{i+1}...", flush=True)
         headers = {
-            "Authorization": f"Bearer {token}",
+            "Cookie": f"__Secure-next-auth.session-token={clean_token}; next-auth.session-token={clean_token}",
             "Content-Type": "application/json",
-            "User-Agent": HEADERS["User-Agent"]
+            "User-Agent": HEADERS["User-Agent"],
+            "Origin": "https://labs.google",
+            "Referer": "https://labs.google/fx/tools/flow"
         }
         data = {
             "prompt": clean_prompt,
@@ -89,10 +104,10 @@ def generate_google_flow_video(prompt: str, dest_path: str, token_pool: list) ->
                 print(f"✅ Video generated using Google Flow Account #{i+1}!", flush=True)
                 return True
             elif res.status_code in [401, 429]:
-                print(f"⚠️ Account #{i+1} exhausted or unauthorized. Switching to next account...", flush=True)
+                print(f"⚠️ Account #{i+1} exhausted or unauthorized (Status {res.status_code}). Switching to next account...", flush=True)
                 continue
         except Exception as e:
-            print(f"⚠️ Flow Account #{i+1} notice: {e}")
+            print(f"⚠️ Flow Account #{i+1} notice: {e}", flush=True)
             continue
 
     return False
@@ -112,15 +127,22 @@ def generate_cloudflare_flux(prompt: str, dest_path: str) -> bool:
     final_prompt = f"{clean_text}, Indian mythological devotional art, 16:9 widescreen composition, warm divine lighting, 8k, highly detailed"
     
     try:
-        res = requests.post(url, headers=headers, json={"prompt": final_prompt[:450], "num_steps": 4}, timeout=50)
-        if res.status_code == 200 and len(res.content) > 10000:
-            with open(dest_path, "wb") as f:
-                f.write(res.content)
-            return True
-        else:
-            print(f"Cloudflare note: {res.status_code}")
+        res = requests.post(url, headers=headers, json={"prompt": final_prompt[:450], "steps": 4}, timeout=50)
+        if res.status_code == 200:
+            content_type = res.headers.get("content-type", "")
+            if "application/json" in content_type:
+                data = res.json()
+                if "result" in data and "image" in data["result"]:
+                    img_bytes = base64.b64decode(data["result"]["image"])
+                    with open(dest_path, "wb") as f:
+                        f.write(img_bytes)
+                    return True
+            elif len(res.content) > 5000:
+                with open(dest_path, "wb") as f:
+                    f.write(res.content)
+                return True
     except Exception as e:
-        print(f"Cloudflare error: {e}")
+        print(f"Cloudflare error: {e}", flush=True)
     return False
 
 def download_pollinations_fallback(prompt: str, img_dest: str) -> bool:
@@ -196,7 +218,6 @@ async def generate_clean_audio(idx, narration, audio_dest):
         
         for attempt in range(1, 4):
             try:
-                # Calm, meditative pitch and natural storytelling pace
                 communicate = edge_tts.Communicate(
                     clean_text,
                     voice="hi-IN-MadhurNeural",
