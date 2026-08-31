@@ -6,9 +6,13 @@ on:
   workflow_dispatch:
 
 jobs:
-  render-video:
+  # ---------------------------------------------------------------
+  # JOB 1: Generate all assets (images/video clips, narration audio,
+  # sound effects, thumbnail). Python-only - no Node.js needed here,
+  # so this job no longer wastes time installing Node/npm at all.
+  # ---------------------------------------------------------------
+  generate-assets:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -17,20 +21,26 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      # Caches the downloaded .deb files, keyed on the package list below.
+      # Only re-downloads from the network if you change the package list
+      # (i.e. edit the "key" or the packages themselves) - otherwise this
+      # step restores from cache and apt-get skips the network fetch.
+      - name: Cache apt packages (ffmpeg)
+        uses: actions/cache@v4
         with:
-          node-version: '20'
+          path: /var/cache/apt/archives/*.deb
+          key: apt-archives-${{ runner.os }}-ffmpeg-v1
 
-      - name: Install System Dependencies & FFmpeg
+      - name: Install System Dependencies (ffmpeg)
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-noto-core fonts-deva
-          pip install edge-tts requests
+          sudo apt-get install -y --no-install-recommends ffmpeg
 
-      - name: Install Node.js Dependencies
-        run: npm install
+      - name: Install Python Dependencies
+        run: pip install -r requirements.txt
 
       - name: Generate Unified Assets (4K B-Roll + FLUX.1 + Voiceover)
         env:
@@ -43,13 +53,71 @@ jobs:
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
         run: python generate_assets.py
 
-      - name: Render Video with Remotion
-        run: |
-          npx remotion render DevotionalComposition out/final_video.mp4 --props=public/props.json --concurrency=2
+      # Hand the generated files off to the two render jobs below. Short
+      # retention since this is only needed for the rest of this one run.
+      - name: Upload generated assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-assets-${{ github.run_id }}
+          path: |
+            public/images
+            public/audio
+            public/props.json
+            public/props_shorts.json
+            out/thumbnail.jpg
+            out/metadata.json
+          retention-days: 1
 
-      - name: Render Shorts Video with Remotion
+  # ---------------------------------------------------------------
+  # JOB 2 & JOB 3: Render the long video and the shorts video.
+  # Both only depend on generate-assets, NOT on each other, so GitHub
+  # runs them on two separate runners AT THE SAME TIME instead of one
+  # after another - this is the main speed win for render time.
+  # ---------------------------------------------------------------
+  render-long:
+    needs: generate-assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Skips "npm install" completely on a cache hit - only reinstalls
+      # when package.json / package-lock.json actually change.
+      - name: Cache node modules
+        id: npm-cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'package.json') }}
+
+      - name: Install Node.js Dependencies
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        run: npm install
+
+      - name: Cache apt packages (ffmpeg + fonts)
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives/*.deb
+          key: apt-archives-${{ runner.os }}-ffmpeg-fonts-v1
+
+      - name: Install System Dependencies (ffmpeg + fonts)
         run: |
-          npx remotion render DevotionalShortsComposition out/final_video_shorts.mp4 --props=public/props_shorts.json --concurrency=2
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-core fonts-deva
+
+      - name: Download generated assets
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-assets-${{ github.run_id }}
+
+      - name: Render Long Video with Remotion
+        run: |
+          npx remotion render DevotionalComposition out/final_video.mp4 --props=public/props.json --concurrency=$(nproc)
 
       - name: Upload Video Artifact
         uses: actions/upload-artifact@v4
@@ -57,6 +125,49 @@ jobs:
           name: devotional-video-${{ github.run_id }}
           path: out/final_video.mp4
           retention-days: 14
+
+  render-shorts:
+    needs: generate-assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache node modules
+        id: npm-cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'package.json') }}
+
+      - name: Install Node.js Dependencies
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        run: npm install
+
+      - name: Cache apt packages (ffmpeg + fonts)
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives/*.deb
+          key: apt-archives-${{ runner.os }}-ffmpeg-fonts-v1
+
+      - name: Install System Dependencies (ffmpeg + fonts)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-core fonts-deva
+
+      - name: Download generated assets
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-assets-${{ github.run_id }}
+
+      - name: Render Shorts Video with Remotion
+        run: |
+          npx remotion render DevotionalShortsComposition out/final_video_shorts.mp4 --props=public/props_shorts.json --concurrency=$(nproc)
 
       - name: Upload Shorts Video Artifact
         uses: actions/upload-artifact@v4
