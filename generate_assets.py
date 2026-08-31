@@ -264,50 +264,81 @@ async def generate_clean_audio(narration: str, audio_dest: str):
 # -------------------------------------------------------------
 # 3b. DYNAMIC SOUND-EFFECT ENGINE (Freesound, CC0-only, with local fallback)
 # -------------------------------------------------------------
-# Each value here is the search phrase sent to Freesound for that soundEffect label.
+# Several phrasings per soundEffect label, tried in order - CC0-only results are scarce
+# for some of these, so one narrow phrase can easily come back empty even though CC0
+# clips exist under a slightly different search term.
 SOUND_EFFECT_QUERIES = {
-    "temple_bell": "temple bell ring",
-    "shankh": "conch shell horn blow",
-    "om_drone": "om chant drone meditation",
-    "flute_swell": "indian bansuri flute swell",
+    "temple_bell": ["temple bell ring", "temple bell", "bell ring", "bell chime"],
+    "shankh": ["conch shell horn blow", "conch shell", "conch horn", "horn blast"],
+    "om_drone": ["om chanting drone", "meditation drone ambient", "singing bowl drone", "deep drone ambient"],
+    "flute_swell": ["bansuri flute", "indian flute melody", "flute swell", "flute ambient"],
 }
 
 def fetch_freesound_effect(effect_name: str, dest_path: str) -> bool:
     if not FREESOUND_API_KEY:
         return False
-    query = SOUND_EFFECT_QUERIES.get(effect_name)
-    if not query:
+    queries = SOUND_EFFECT_QUERIES.get(effect_name)
+    if not queries:
         return False
-    try:
-        clean_q = urllib.parse.quote(query)
-        # CC0 ("Creative Commons 0") only - no attribution required, safe for a
-        # monetized channel.
-        url = (
-            f"https://freesound.org/apiv2/search/text/?query={clean_q}"
-            f"&filter=license:\"Creative Commons 0\"&fields=id,previews"
-            f"&token={FREESOUND_API_KEY}"
-        )
-        res = requests.get(url, timeout=15)
-        if res.status_code == 200:
-            results = res.json().get("results", [])
-            if results:
-                previews = results[0].get("previews", {})
-                preview_url = previews.get("preview-hq-mp3") or previews.get("preview-lq-mp3")
-                if preview_url:
-                    v_res = requests.get(preview_url, timeout=30)
-                    if v_res.status_code == 200 and len(v_res.content) > 1000:
-                        with open(dest_path, "wb") as f:
-                            f.write(v_res.content)
-                        return True
-    except Exception as e:
-        print(f"Freesound notice ({effect_name}): {e}", flush=True)
+    for query in queries:
+        try:
+            clean_q = urllib.parse.quote(query)
+            # CC0 ("Creative Commons 0") only - no attribution required, safe for a
+            # monetized channel.
+            url = (
+                f"https://freesound.org/apiv2/search/text/?query={clean_q}"
+                f"&filter=license:\"Creative Commons 0\"&fields=id,previews"
+                f"&token={FREESOUND_API_KEY}"
+            )
+            res = requests.get(url, timeout=15)
+            if res.status_code == 200:
+                results = res.json().get("results", [])
+                if results:
+                    previews = results[0].get("previews", {})
+                    preview_url = previews.get("preview-hq-mp3") or previews.get("preview-lq-mp3")
+                    if preview_url:
+                        v_res = requests.get(preview_url, timeout=30)
+                        if v_res.status_code == 200 and len(v_res.content) > 1000:
+                            with open(dest_path, "wb") as f:
+                                f.write(v_res.content)
+                            return True
+        except Exception as e:
+            print(f"Freesound notice ({effect_name}, '{query}'): {e}", flush=True)
     return False
 
+def extract_bgm_clip(dest_path: str, clip_seconds: float = 3.0) -> bool:
+    """Fallback tier: cut a short, faded clip from the existing background
+    music track (public/audio/bgm.mp3) to use as a generic ambient effect
+    layer when Freesound has no CC0 match and no local library file exists
+    either. This only produces something audible if bgm.mp3 is itself a real
+    music track (i.e. you've checked one in) rather than the silent
+    placeholder generated when it's missing - either way it's safe to call."""
+    bgm_path = "public/audio/bgm.mp3"
+    if not os.path.exists(bgm_path):
+        return False
+    try:
+        bgm_duration = get_audio_duration(bgm_path)
+        max_start = max(0.0, bgm_duration - clip_seconds - 0.5)
+        start = random.uniform(0.0, max_start) if max_start > 0 else 0.0
+        fade_out_start = max(0.0, clip_seconds - 0.5)
+        subprocess.run([
+            "ffmpeg", "-y", "-ss", f"{start:.2f}", "-t", f"{clip_seconds:.2f}",
+            "-i", bgm_path,
+            "-af", f"afade=t=in:st=0:d=0.5,afade=t=out:st={fade_out_start:.2f}:d=0.5",
+            "-q:a", "9", "-acodec", "libmp3lame", dest_path
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        return os.path.exists(dest_path) and os.path.getsize(dest_path) > 1000
+    except Exception as e:
+        print(f"BGM-clip fallback notice: {e}", flush=True)
+        return False
+
 def resolve_sound_effect_audio(effect_name: str, dest_path: str) -> None:
-    """Guarantees dest_path exists for a scene's sound-effect layer: try a fresh
-    CC0 clip from Freesound first, fall back to a checked-in generic clip under
-    public/audio/effects_library/<effect_name>.mp3, and fall back to silence
-    last so a render never breaks over a missing sound effect."""
+    """Guarantees dest_path exists for a scene's sound-effect layer, trying
+    four tiers in order: (1) a fresh CC0 clip from Freesound (across several
+    query phrasings), (2) a checked-in generic clip under
+    public/audio/effects_library/<effect_name>.mp3, (3) a short clip lifted
+    from the existing bgm.mp3 track, and (4) silence as the last resort, so a
+    render never breaks over a missing effect."""
     if fetch_freesound_effect(effect_name, dest_path):
         print(f"  ✅ Sound effect '{effect_name}' fetched from Freesound (CC0)", flush=True)
         return
@@ -316,11 +347,15 @@ def resolve_sound_effect_audio(effect_name: str, dest_path: str) -> None:
         shutil.copyfile(library_path, dest_path)
         print(f"  ℹ️ Sound effect '{effect_name}' used from local library fallback", flush=True)
         return
+    if extract_bgm_clip(dest_path):
+        print(f"  🎵 Sound effect '{effect_name}' had no Freesound/library match - used a clip from bgm.mp3 instead", flush=True)
+        return
+    reason = "no FREESOUND_API_KEY set" if not FREESOUND_API_KEY else "no CC0 match found on Freesound"
     subprocess.run([
         "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
         "-t", "1", "-q:a", "9", "-acodec", "libmp3lame", dest_path
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    print(f"  ⚠️ Sound effect '{effect_name}' unavailable (no key, no library file) - using silence", flush=True)
+    print(f"  ⚠️ Sound effect '{effect_name}' unavailable ({reason}, no library file, no bgm.mp3) - using silence", flush=True)
 
 # -------------------------------------------------------------
 # 4. PROCESS LONG VIDEO SCENES (Pexels + Pixabay + Coverr + FLUX.1)
