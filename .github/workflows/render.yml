@@ -219,8 +219,8 @@ jobs:
           set -e
           TAG="devotional-${{ github.run_id }}"
           gh release create "$TAG" \
-            "video/out/final_video.mp4" \
-            "shorts/out/final_video_shorts.mp4" \
+            "video/final_video.mp4" \
+            "shorts/final_video_shorts.mp4" \
             "assets/out/thumbnail.jpg" \
             --repo "${{ github.repository }}" \
             --title "Devotional upload $TAG" \
