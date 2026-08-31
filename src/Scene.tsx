@@ -45,6 +45,12 @@ export const Scene: React.FC<SceneProps> = ({
       ? `audio/shorts_chunk_${scene.scene_number}.mp3`
       : `audio/chunk_${scene.scene_number}.mp3`;
 
+  // generate_assets.py always guarantees this file exists whenever soundEffect !== 'none'
+  // (a fresh Freesound CC0 clip, a checked-in library fallback, or silence as a last
+  // resort) - see resolve_sound_effect_audio(). Currently only the long-video payload
+  // carries a soundEffect field.
+  const effectFile = `audio/effects/${format}_effect_${scene.scene_number}.mp3`;
+
   // Ken Burns Motion for images
   const scale =
     direction === 'zoom-in'
@@ -73,7 +79,7 @@ export const Scene: React.FC<SceneProps> = ({
       {/* 1b. Optional Sound-Effect Layer (temple bell / shankh / om drone / flute swell) */}
       {scene.soundEffect && scene.soundEffect !== 'none' && (
         <Audio
-          src={staticFile(`audio/effects/${scene.soundEffect}.mp3`)}
+          src={staticFile(effectFile)}
           volume={0.35}
         />
       )}
