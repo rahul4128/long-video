@@ -175,3 +175,98 @@ jobs:
           name: devotional-shorts-${{ github.run_id }}
           path: out/final_video_shorts.mp4
           retention-days: 14
+
+  # ---------------------------------------------------------------
+  # JOB 4: Once both renders are done, publish a GitHub Release
+  # carrying the long video, the shorts video and the thumbnail as
+  # public, no-auth-required download links, then notify the Make.com
+  # scenario (one webhook call, handles both videos) so it uploads
+  # both to YouTube with title/description/thumbnail and files each
+  # into its playlist.
+  # ---------------------------------------------------------------
+  publish-and-notify:
+    needs: [generate-assets, render-long, render-shorts]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download generated assets (thumbnail + metadata)
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-assets-${{ github.run_id }}
+          path: assets
+
+      - name: Download long video
+        uses: actions/download-artifact@v4
+        with:
+          name: devotional-video-${{ github.run_id }}
+          path: video
+
+      - name: Download shorts video
+        uses: actions/download-artifact@v4
+        with:
+          name: devotional-shorts-${{ github.run_id }}
+          path: shorts
+
+      - name: Create GitHub Release with video + thumbnail assets
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG="devotional-${{ github.run_id }}"
+          gh release create "$TAG" \
+            "video/out/final_video.mp4" \
+            "shorts/out/final_video_shorts.mp4" \
+            "assets/out/thumbnail.jpg" \
+            --repo "${{ github.repository }}" \
+            --title "Devotional upload $TAG" \
+            --notes "Automated release - source assets for the Make.com YouTube upload webhook."
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Look up public download URLs for the release assets
+        id: assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG="${{ steps.release.outputs.tag }}"
+          JSON=$(gh api "repos/${{ github.repository }}/releases/tags/$TAG")
+          echo "long_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="final_video.mp4") | .browser_download_url')" >> "$GITHUB_OUTPUT"
+          echo "shorts_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="final_video_shorts.mp4") | .browser_download_url')" >> "$GITHUB_OUTPUT"
+          echo "thumb_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="thumbnail.jpg") | .browser_download_url')" >> "$GITHUB_OUTPUT"
+
+      - name: Notify Make.com (uploads long video + Shorts to YouTube)
+        env:
+          MAKE_WEBHOOK_URL: ${{ secrets.MAKE_YOUTUBE_WEBHOOK_URL }}
+        run: |
+          set -e
+          jq -n \
+            --arg releaseTag "${{ steps.release.outputs.tag }}" \
+            --arg longUrl "${{ steps.assets.outputs.long_url }}" \
+            --arg shortsUrl "${{ steps.assets.outputs.shorts_url }}" \
+            --arg thumbUrl "${{ steps.assets.outputs.thumb_url }}" \
+            --slurpfile meta "assets/out/metadata.json" \
+            '{
+              releaseTag: $releaseTag,
+              long_video: {
+                downloadUrl: $longUrl,
+                title: $meta[0].long_video_title,
+                description: $meta[0].long_video_description,
+                tags: $meta[0].tags
+              },
+              shorts: {
+                downloadUrl: $shortsUrl,
+                title: $meta[0].shorts_title,
+                description: $meta[0].shorts_description,
+                tags: $meta[0].hashtags
+              },
+              thumbnail: {
+                downloadUrl: $thumbUrl
+              }
+            }' > payload.json
+          curl -sS -f -X POST -H "Content-Type: application/json" \
+            --data @payload.json "$MAKE_WEBHOOK_URL"
