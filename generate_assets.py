@@ -3,6 +3,7 @@ import json
 import time
 import base64
 import random
+import shutil
 import asyncio
 import subprocess
 import urllib.parse
@@ -64,9 +65,11 @@ CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "").strip()
 PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "").strip()
 COVERR_API_KEY = os.environ.get("COVERR_API_KEY", "").strip()
+FREESOUND_API_KEY = os.environ.get("FREESOUND_API_KEY", "").strip()
 
 os.makedirs("public/images", exist_ok=True)
 os.makedirs("public/audio", exist_ok=True)
+os.makedirs("public/audio/effects", exist_ok=True)
 os.makedirs("out", exist_ok=True)
 
 HEADERS = {
@@ -259,6 +262,67 @@ async def generate_clean_audio(narration: str, audio_dest: str):
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 # -------------------------------------------------------------
+# 3b. DYNAMIC SOUND-EFFECT ENGINE (Freesound, CC0-only, with local fallback)
+# -------------------------------------------------------------
+# Each value here is the search phrase sent to Freesound for that soundEffect label.
+SOUND_EFFECT_QUERIES = {
+    "temple_bell": "temple bell ring",
+    "shankh": "conch shell horn blow",
+    "om_drone": "om chant drone meditation",
+    "flute_swell": "indian bansuri flute swell",
+}
+
+def fetch_freesound_effect(effect_name: str, dest_path: str) -> bool:
+    if not FREESOUND_API_KEY:
+        return False
+    query = SOUND_EFFECT_QUERIES.get(effect_name)
+    if not query:
+        return False
+    try:
+        clean_q = urllib.parse.quote(query)
+        # CC0 ("Creative Commons 0") only - no attribution required, safe for a
+        # monetized channel.
+        url = (
+            f"https://freesound.org/apiv2/search/text/?query={clean_q}"
+            f"&filter=license:\"Creative Commons 0\"&fields=id,previews"
+            f"&token={FREESOUND_API_KEY}"
+        )
+        res = requests.get(url, timeout=15)
+        if res.status_code == 200:
+            results = res.json().get("results", [])
+            if results:
+                previews = results[0].get("previews", {})
+                preview_url = previews.get("preview-hq-mp3") or previews.get("preview-lq-mp3")
+                if preview_url:
+                    v_res = requests.get(preview_url, timeout=30)
+                    if v_res.status_code == 200 and len(v_res.content) > 1000:
+                        with open(dest_path, "wb") as f:
+                            f.write(v_res.content)
+                        return True
+    except Exception as e:
+        print(f"Freesound notice ({effect_name}): {e}", flush=True)
+    return False
+
+def resolve_sound_effect_audio(effect_name: str, dest_path: str) -> None:
+    """Guarantees dest_path exists for a scene's sound-effect layer: try a fresh
+    CC0 clip from Freesound first, fall back to a checked-in generic clip under
+    public/audio/effects_library/<effect_name>.mp3, and fall back to silence
+    last so a render never breaks over a missing sound effect."""
+    if fetch_freesound_effect(effect_name, dest_path):
+        print(f"  ✅ Sound effect '{effect_name}' fetched from Freesound (CC0)", flush=True)
+        return
+    library_path = f"public/audio/effects_library/{effect_name}.mp3"
+    if os.path.exists(library_path):
+        shutil.copyfile(library_path, dest_path)
+        print(f"  ℹ️ Sound effect '{effect_name}' used from local library fallback", flush=True)
+        return
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
+        "-t", "1", "-q:a", "9", "-acodec", "libmp3lame", dest_path
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print(f"  ⚠️ Sound effect '{effect_name}' unavailable (no key, no library file) - using silence", flush=True)
+
+# -------------------------------------------------------------
 # 4. PROCESS LONG VIDEO SCENES (Pexels + Pixabay + Coverr + FLUX.1)
 # -------------------------------------------------------------
 def process_long_scene_visual(scene_info):
@@ -352,6 +416,13 @@ async def process():
 
     await asyncio.gather(*audio_tasks)
 
+    # 4b. Sound-Effect Layer (Long video only - the shorts payload has no soundEffect field)
+    for i, scene in enumerate(long_scenes):
+        idx = i + 1
+        effect_name = scene.get("soundEffect", "none")
+        if effect_name and effect_name != "none":
+            resolve_sound_effect_audio(effect_name, f"public/audio/effects/long_effect_{idx}.mp3")
+
     # 5. Build Remotion Props for Long Video
     enriched_long = []
     for i, scene in enumerate(long_scenes):
@@ -402,7 +473,7 @@ async def process():
     with open("out/metadata.json", "w", encoding="utf-8") as f:
         json.dump(seo_metadata, f, ensure_ascii=False, indent=2)
 
-    print("🎉 All Multi-Source Assets (Pexels + Pixabay + Coverr + FLUX), Thumbnail, and Metadata ready!", flush=True)
+    print("🎉 All Multi-Source Assets (Pexels + Pixabay + Coverr + FLUX), Thumbnail, Sound Effects, and Metadata ready!", flush=True)
 
 if __name__ == "__main__":
     asyncio.run(process())
