@@ -15,24 +15,55 @@ CF_ACCOUNT = os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
 CF_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "")
 
 payload_raw = os.getenv("DISPATCH_PAYLOAD", "{}")
-payload = json.loads(payload_raw) if payload_raw else {}
+try:
+    payload = json.loads(payload_raw) if payload_raw else {}
+except Exception:
+    payload = {}
 
-scenes_input = payload.get("scenes", [
+# Handle Make.com nested payloads cleanly
+if isinstance(payload, str):
+    try:
+        payload = json.loads(payload)
+    except Exception:
+        payload = {}
+
+long_video_data = payload.get("long_video", {})
+if isinstance(long_video_data, str):
+    try:
+        long_video_data = json.loads(long_video_data)
+    except Exception:
+        long_video_data = {}
+
+shorts_data = payload.get("shorts", {})
+if isinstance(shorts_data, str):
+    try:
+        shorts_data = json.loads(shorts_data)
+    except Exception:
+        shorts_data = {}
+
+seo_meta = payload.get("seo_metadata", {})
+if isinstance(seo_meta, str):
+    try:
+        seo_meta = json.loads(seo_meta)
+    except Exception:
+        seo_meta = {}
+
+scenes_input = long_video_data.get("scenes") or payload.get("scenes") or [
     {
-        "id": 1,
+        "text": "काशी के पावन तट पर हर संध्या एक दिव्य शांति छा जाती है।",
         "mediaType": "video",
         "videoSearchQuery": "varanasi ganga aarti diya evening",
-        "imagePrompt": "Lord Shiva meditating in snow mountain, cinematic 8k",
-        "narration": "काशी के पावन तट पर हर संध्या एक दिव्य शांति छा जाती है।"
+        "imagePrompt": "Lord Shiva meditating in snow mountain, cinematic 8k"
     },
     {
-        "id": 2,
+        "text": "भोलेनाथ अपने मौन में पूरे ब्रह्मांड का गूढ़ रहस्य समाए हुए हैं।",
         "mediaType": "ai_image",
         "videoSearchQuery": "",
-        "imagePrompt": "Lord Shiva in deep meditation on Kailash, glowing third eye aura, hyperrealistic",
-        "narration": "भोलेनाथ अपने मौन में पूरे ब्रह्मांड का गूढ़ रहस्य समाए हुए हैं।"
+        "imagePrompt": "Lord Shiva in deep meditation on Kailash, glowing third eye aura, hyperrealistic"
     }
-])
+]
+
+shorts_scenes_input = shorts_data.get("scenes") or scenes_input
 
 def fetch_pexels_video(query: str, orientation: str = "landscape") -> str | None:
     if not PEXELS_KEY or not query:
@@ -48,7 +79,7 @@ def fetch_pexels_video(query: str, orientation: str = "landscape") -> str | None
                 hd_files = [f for f in files if f.get("width") == 1920 or f.get("height") == 1080]
                 return hd_files[0]["link"] if hd_files else files[0]["link"]
     except Exception as e:
-        print(f"Pexels search notice for '{query}': {e}")
+        print(f"Pexels fetch notice: {e}")
     return None
 
 def generate_cloudflare_flux(prompt: str, out_path: str):
@@ -73,7 +104,8 @@ props_scenes = []
 full_narration = []
 
 for idx, sc in enumerate(scenes_input, start=1):
-    full_narration.append(sc.get("narration", ""))
+    narration_text = sc.get("text", "")
+    full_narration.append(narration_text)
     media_type = sc.get("mediaType", "ai_image")
     query = sc.get("videoSearchQuery", "")
     prompt = sc.get("imagePrompt", "")
@@ -105,14 +137,14 @@ for idx, sc in enumerate(scenes_input, start=1):
             "durationInFrames": 120
         })
 
-# Voiceover via Edge-TTS
+# Edge-TTS voiceover
 combined_script = " ".join(full_narration)
 with open("temp_script.txt", "w", encoding="utf-8") as f:
     f.write(combined_script)
 
 os.system("edge-tts --voice hi-IN-MadhurNeural --file temp_script.txt --write-media public/audio/narration.mp3")
 
-# Word-level subtitles
+# Word-level subtitles via Whisper
 captions = []
 try:
     model = WhisperModel("base", device="cpu", compute_type="int8")
@@ -125,30 +157,47 @@ try:
                 "endMs": int(w.end * 1000)
             })
 except Exception as e:
-    print(f"Whisper subtitle generation notice: {e}")
+    print(f"Whisper subtitle notice: {e}")
 
-props = {
+props_long = {
     "audioUrl": "audio/narration.mp3",
     "captions": captions,
     "scenes": props_scenes
 }
 
 with open("public/props.json", "w", encoding="utf-8") as f:
-    json.dump(props, f, indent=2, ensure_ascii=False)
+    json.dump(props_long, f, indent=2, ensure_ascii=False)
+
+shorts_props_scenes = []
+for idx, sc in enumerate(shorts_scenes_input, start=1):
+    src_file = f"videos/scene_{idx}.mp4" if os.path.exists(f"public/videos/scene_{idx}.mp4") else f"images/scene_{idx}.png"
+    shorts_props_scenes.append({
+        "id": idx,
+        "type": "video" if "videos/" in src_file else "image",
+        "src": src_file,
+        "durationInFrames": 120
+    })
+
+props_shorts = {
+    "audioUrl": "audio/narration.mp3",
+    "captions": captions,
+    "scenes": shorts_props_scenes
+}
 
 with open("public/props_shorts.json", "w", encoding="utf-8") as f:
-    json.dump(props, f, indent=2, ensure_ascii=False)
+    json.dump(props_shorts, f, indent=2, ensure_ascii=False)
 
-# YouTube upload metadata
+# YouTube Upload Metadata
 meta = {
-    "long_video_title": payload.get("long_video_title", "महाकाल का रहस्य | Divine Devotional Story"),
-    "long_video_description": payload.get("long_video_description", "श्री महाकाल कथा एवं दर्शन #devotional #shiva"),
-    "tags": ["Mahakal", "Shiva", "Bhakti", "Devotional"],
-    "shorts_title": payload.get("shorts_title", "भोलेनाथ की असीम कृपा #shorts #shiva"),
-    "shorts_description": payload.get("shorts_description", "हर हर महादेव #shorts"),
-    "hashtags": ["#shorts", "#shiva", "#mahadev"]
+    "long_video_title": seo_meta.get("long_video_title", "महाकाल का रहस्य | Divine Devotional Story"),
+    "long_video_description": seo_meta.get("long_video_description", "श्री महाकाल कथा एवं दर्शन #devotional #shiva"),
+    "tags": seo_meta.get("tags", ["Mahakal", "Shiva", "Bhakti", "Devotional"]),
+    "shorts_title": seo_meta.get("shorts_title", "भोलेनाथ की असीम कृपा #shorts #shiva"),
+    "shorts_description": seo_meta.get("shorts_description", "हर हर महादेव #shorts"),
+    "hashtags": seo_meta.get("hashtags", ["#shorts", "#shiva", "#mahadev"])
 }
 with open("out/metadata.json", "w", encoding="utf-8") as f:
     json.dump(meta, f, indent=2, ensure_ascii=False)
 
-generate_cloudflare_flux(scenes_input[0].get("imagePrompt", "Lord Shiva high quality"), "out/thumbnail.jpg")
+thumb_prompt = payload.get("thumbnail", {}).get("imagePrompt") if isinstance(payload.get("thumbnail"), dict) else scenes_input[0].get("imagePrompt", "Lord Shiva divine aura")
+generate_cloudflare_flux(thumb_prompt or "Lord Shiva divine aura", "out/thumbnail.jpg")
