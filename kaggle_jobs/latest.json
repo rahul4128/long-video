@@ -1,0 +1,38 @@
+{
+  "long_video": {
+    "scenes": [
+      {
+        "text": "काशी के पावन तट पर हर संध्या एक दिव्य शांति छा जाती है।",
+        "mediaType": "video",
+        "videoSearchQuery": "varanasi ganga aarti diya evening",
+        "imagePrompt": "Lord Shiva meditating in snow mountain, cinematic 8k"
+      },
+      {
+        "text": "भोलेनाथ अपने मौन में पूरे ब्रह्मांड का गूढ़ रहस्य समाए हुए हैं।",
+        "mediaType": "ai_image",
+        "videoSearchQuery": "",
+        "imagePrompt": "Lord Shiva in deep meditation on Kailash, glowing third eye aura, hyperrealistic"
+      }
+    ]
+  },
+  "shorts": {
+    "scenes": [
+      {
+        "text": "क्या आप जानते हैं शिव के मौन में क्या रहस्य छिपा है?",
+        "imagePrompt": "Lord Shiva extreme close-up, glowing third eye, dramatic low-angle, golden hour light",
+        "videoSearchQuery": "himalayan mist mountain glow"
+      }
+    ]
+  },
+  "seo_metadata": {
+    "long_video_title": "महाकाल का रहस्य | Divine Devotional Story",
+    "long_video_description": "श्री महाकाल कथा एवं दर्शन #devotional #shiva",
+    "tags": ["Mahakal", "Shiva", "Bhakti", "Devotional"],
+    "shorts_title": "भोलेनाथ की असीम कृपा #shorts #shiva",
+    "shorts_description": "हर हर महादेव #shorts",
+    "hashtags": ["#shorts", "#shiva", "#mahadev"]
+  },
+  "thumbnail": {
+    "imagePrompt": "Dramatic close-up of Lord Shiva, glowing third eye, Sudarshan-like divine light, strong contrast, 16:9 cinematic thumbnail"
+  }
+}
