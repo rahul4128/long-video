@@ -1,0 +1,16 @@
+node_modules/
+.remotion/
+out/
+public/images/*
+public/videos/*
+public/audio/*
+!public/images/.gitkeep
+!public/videos/.gitkeep
+!public/audio/.gitkeep
+public/props.json
+public/props_shorts.json
+temp_script.txt
+payload.json
+myenv/
+__pycache__/
+*.deb
