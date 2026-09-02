@@ -60,6 +60,38 @@ scenes_input = long_video_data.get("scenes") or payload.get("scenes") or [
 
 shorts_scenes_input = shorts_data.get("scenes") or scenes_input
 
+GITHUB_REPO = os.getenv("GITHUB_REPOSITORY", "")
+ASSET_RELEASE_TAG = payload.get("asset_release_tag", "")
+
+
+def fetch_kaggle_release_assets(tag: str) -> dict:
+    """Look up a GitHub Release's assets by filename -> download URL.
+
+    Used for the Kaggle hybrid pipeline: when a Kaggle notebook run has already
+    rendered scene clips and uploaded them as a release, generate_assets.py uses
+    those clips instead of calling Cloudflare FLUX for the matching scenes.
+    Public repo, so this works without a token.
+    """
+    if not tag or not GITHUB_REPO:
+        return {}
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/tags/{tag}"
+    try:
+        res = requests.get(url, headers={"Accept": "application/vnd.github+json"}, timeout=15)
+        if res.status_code == 200:
+            return {
+                a["name"]: a["browser_download_url"]
+                for a in res.json().get("assets", [])
+            }
+        print(f"Kaggle release lookup notice: {url} returned {res.status_code}")
+    except Exception as e:
+        print(f"Kaggle release lookup notice: {e}")
+    return {}
+
+
+KAGGLE_ASSETS = fetch_kaggle_release_assets(ASSET_RELEASE_TAG)
+if KAGGLE_ASSETS:
+    print(f"Found {len(KAGGLE_ASSETS)} Kaggle-rendered clip(s) in release '{ASSET_RELEASE_TAG}'.")
+
 
 def fetch_pexels_video(query: str, orientation: str = "landscape") -> str | None:
     if not PEXELS_KEY or not query:
@@ -115,9 +147,29 @@ def build_scene_assets(scenes, id_prefix, orientation):
         query = sc.get("videoSearchQuery", "")
         prompt = sc.get("imagePrompt", "")
 
-        wants_video = media_type == "video" or (media_type != "ai_image" and query)
         downloaded = False
-        if wants_video and query:
+
+        # Prefer a Kaggle-rendered clip for this scene, if the dispatch came with one.
+        kaggle_filename = f"{id_prefix}_{idx}.mp4"
+        if kaggle_filename in KAGGLE_ASSETS:
+            try:
+                v_res = requests.get(KAGGLE_ASSETS[kaggle_filename], timeout=60)
+                if v_res.status_code == 200:
+                    v_path = f"public/videos/{kaggle_filename}"
+                    with open(v_path, "wb") as f:
+                        f.write(v_res.content)
+                    scene_props.append({
+                        "id": idx,
+                        "type": "video",
+                        "src": f"videos/{kaggle_filename}",
+                        "durationInFrames": 120
+                    })
+                    downloaded = True
+            except Exception as e:
+                print(f"Kaggle clip download notice ({kaggle_filename}): {e}")
+
+        wants_video = media_type == "video" or (media_type != "ai_image" and query)
+        if not downloaded and wants_video and query:
             video_url = fetch_pexels_video(query, orientation=orientation)
             if video_url:
                 try:
