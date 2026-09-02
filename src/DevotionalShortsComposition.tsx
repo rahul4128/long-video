@@ -27,6 +27,7 @@ export interface DevotionalShortsProps {
   audioUrl: string;
   captions: CaptionWord[];
   scenes: SceneItem[];
+  [key: string]: unknown;
 }
 
 export const DevotionalShortsComposition: React.FC<DevotionalShortsProps> = ({
