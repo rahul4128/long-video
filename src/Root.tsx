@@ -1,6 +1,10 @@
+import React from "react";
 import { Composition } from "remotion";
 import { DevotionalComposition, DevotionalProps } from "./DevotionalComposition";
-import { DevotionalShortsComposition, DevotionalShortsProps } from "./DevotionalShortsComposition";
+import {
+  DevotionalShortsComposition,
+  DevotionalShortsProps,
+} from "./DevotionalShortsComposition";
 
 const defaultProps: DevotionalProps = {
   audioUrl: "audio/narration.mp3",
@@ -20,10 +24,11 @@ export const RemotionRoot: React.FC = () => {
         height={1080}
         defaultProps={defaultProps}
         calculateMetadata={({ props }) => {
-          const totalDuration = props.scenes?.reduce(
-            (acc, s) => acc + (s.durationInFrames || 120),
-            0
-          ) || 300;
+          const totalDuration =
+            props.scenes?.reduce(
+              (acc, s) => acc + (s.durationInFrames || 120),
+              0
+            ) || 300;
           return {
             durationInFrames: totalDuration,
           };
@@ -39,10 +44,11 @@ export const RemotionRoot: React.FC = () => {
         height={1920}
         defaultProps={defaultProps as DevotionalShortsProps}
         calculateMetadata={({ props }) => {
-          const totalDuration = props.scenes?.reduce(
-            (acc, s) => acc + (s.durationInFrames || 120),
-            0
-          ) || 300;
+          const totalDuration =
+            props.scenes?.reduce(
+              (acc, s) => acc + (s.durationInFrames || 120),
+              0
+            ) || 300;
           return {
             durationInFrames: totalDuration,
           };
