@@ -1,11 +1,7 @@
 import { Config } from "@remotion/cli/config";
 
-Config.setChromiumOpenGlRenderer("angle");
-Config.setBrowserExecutable(null);
+// Software OpenGL rendering for headless Linux runners
+Config.setChromiumOpenGlRenderer("swangle");
+
+// Automatically overwrite output video files
 Config.setOverwriteOutput(true);
-Config.setChromiumFlags([
-  "--no-sandbox",
-  "--disable-setuid-sandbox",
-  "--disable-dev-shm-usage",
-  "--disable-gpu",
-]);
