@@ -1,20 +1,20 @@
 {
-  "name": "devotional-long-video-generator",
+  "name": "long-video",
   "version": "1.0.0",
+  "description": "Automated devotional video renderer for long-form and shorts",
   "scripts": {
-    "start": "remotion preview src/index.ts",
-    "build": "remotion render DevotionalComposition out/final_video.mp4"
+    "start": "remotion preview",
+    "build": "remotion render DevotionalComposition out/final_video.mp4",
+    "build:shorts": "remotion render DevotionalShortsComposition out/final_video_shorts.mp4"
   },
   "dependencies": {
-    "@remotion/cli": "^4.0.0",
-    "@remotion/google-fonts": "^4.0.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "remotion": "^4.0.0",
-    "@remotion/media": "^4.0.218"
+    "@remotion/media": "^4.0.218",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.218"
   },
   "devDependencies": {
-    "@types/react": "^18.2.0",
-    "typescript": "^5.0.0"
+    "@types/react": "^18.3.3",
+    "typescript": "^5.4.5"
   }
 }
