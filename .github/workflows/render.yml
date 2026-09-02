@@ -7,9 +7,7 @@ on:
 
 jobs:
   # ---------------------------------------------------------------
-  # JOB 1: Generate all assets (images/video clips, narration audio,
-  # sound effects, thumbnail). Python-only - no Node.js needed here,
-  # so this job no longer wastes time installing Node/npm at all.
+  # JOB 1: Generate Assets (Pexels Stock + Cloudflare FLUX + Edge-TTS)
   # ---------------------------------------------------------------
   generate-assets:
     runs-on: ubuntu-latest
@@ -24,16 +22,6 @@ jobs:
           cache: 'pip'
           cache-dependency-path: requirements.txt
 
-      # Caches the downloaded .deb files, keyed on the package list below.
-      # Only re-downloads from the network if you change the package list
-      # (i.e. edit the "key" or the packages themselves) - otherwise this
-      # step restores from cache and apt-get skips the network fetch.
-      - name: Cache apt packages (ffmpeg)
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt/archives/*.deb
-          key: apt-archives-${{ runner.os }}-ffmpeg-v1
-
       - name: Install System Dependencies (ffmpeg)
         run: |
           sudo apt-get update
@@ -42,25 +30,22 @@ jobs:
       - name: Install Python Dependencies
         run: pip install -r requirements.txt
 
-      - name: Generate Unified Assets (4K B-Roll + FLUX.1 + Voiceover)
+      - name: Generate Unified Assets
         env:
           DISPATCH_PAYLOAD: ${{ toJson(github.event.client_payload) }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
-          COVERR_API_KEY: ${{ secrets.COVERR_API_KEY }}
-          FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
         run: python generate_assets.py
 
-      # Hand the generated files off to the two render jobs below. Short
-      # retention since this is only needed for the rest of this one run.
       - name: Upload generated assets
         uses: actions/upload-artifact@v4
         with:
           name: generated-assets-${{ github.run_id }}
           path: |
             public/images
+            public/videos
             public/audio
             public/props.json
             public/props_shorts.json
@@ -69,10 +54,7 @@ jobs:
           retention-days: 1
 
   # ---------------------------------------------------------------
-  # JOB 2 & JOB 3: Render the long video and the shorts video.
-  # Both only depend on generate-assets, NOT on each other, so GitHub
-  # runs them on two separate runners AT THE SAME TIME instead of one
-  # after another - this is the main speed win for render time.
+  # JOB 2: Render Long Video (16:9)
   # ---------------------------------------------------------------
   render-long:
     needs: generate-assets
@@ -86,8 +68,6 @@ jobs:
         with:
           node-version: '20'
 
-      # Skips "npm install" completely on a cache hit - only reinstalls
-      # when package.json / package-lock.json actually change.
       - name: Cache node modules
         id: npm-cache
         uses: actions/cache@v4
@@ -98,12 +78,6 @@ jobs:
       - name: Install Node.js Dependencies
         if: steps.npm-cache.outputs.cache-hit != 'true'
         run: npm install
-
-      - name: Cache apt packages (ffmpeg + fonts)
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt/archives/*.deb
-          key: apt-archives-${{ runner.os }}-ffmpeg-fonts-v1
 
       - name: Install System Dependencies (ffmpeg + fonts)
         run: |
@@ -117,7 +91,7 @@ jobs:
 
       - name: Render Long Video with Remotion
         run: |
-          npx remotion render DevotionalComposition out/final_video.mp4 --props=public/props.json --concurrency=$(nproc)
+          npx remotion render DevotionalComposition out/final_video.mp4 --props=public/props.json --concurrency=2
 
       - name: Upload Video Artifact
         uses: actions/upload-artifact@v4
@@ -126,6 +100,9 @@ jobs:
           path: out/final_video.mp4
           retention-days: 14
 
+  # ---------------------------------------------------------------
+  # JOB 3: Render Shorts Video (9:16)
+  # ---------------------------------------------------------------
   render-shorts:
     needs: generate-assets
     runs-on: ubuntu-latest
@@ -149,12 +126,6 @@ jobs:
         if: steps.npm-cache.outputs.cache-hit != 'true'
         run: npm install
 
-      - name: Cache apt packages (ffmpeg + fonts)
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt/archives/*.deb
-          key: apt-archives-${{ runner.os }}-ffmpeg-fonts-v1
-
       - name: Install System Dependencies (ffmpeg + fonts)
         run: |
           sudo apt-get update
@@ -167,7 +138,7 @@ jobs:
 
       - name: Render Shorts Video with Remotion
         run: |
-          npx remotion render DevotionalShortsComposition out/final_video_shorts.mp4 --props=public/props_shorts.json --concurrency=$(nproc)
+          npx remotion render DevotionalShortsComposition out/final_video_shorts.mp4 --props=public/props_shorts.json --concurrency=2
 
       - name: Upload Shorts Video Artifact
         uses: actions/upload-artifact@v4
@@ -177,12 +148,7 @@ jobs:
           retention-days: 14
 
   # ---------------------------------------------------------------
-  # JOB 4: Once both renders are done, publish a GitHub Release
-  # carrying the long video, the shorts video and the thumbnail as
-  # public, no-auth-required download links, then notify the Make.com
-  # scenario (one webhook call, handles both videos) so it uploads
-  # both to YouTube with title/description/thumbnail and files each
-  # into its playlist.
+  # JOB 4: Create GitHub Release and Notify Make.com
   # ---------------------------------------------------------------
   publish-and-notify:
     needs: [generate-assets, render-long, render-shorts]
@@ -224,7 +190,7 @@ jobs:
             "assets/out/thumbnail.jpg" \
             --repo "${{ github.repository }}" \
             --title "Devotional upload $TAG" \
-            --notes "Automated release - source assets for the Make.com YouTube upload webhook."
+            --notes "Automated release for Make.com YouTube upload webhook."
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Look up public download URLs for the release assets
