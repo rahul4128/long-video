@@ -1,50 +1,52 @@
-import React from 'react';
-import { Composition } from 'remotion';
-import { DevotionalComposition } from './DevotionalComposition';
-import { DevotionalShortsComposition } from './DevotionalShortsComposition';
-import { DevotionalVideoProps } from './types';
-import defaultPropsLong from '../public/props.json';
-import defaultPropsShorts from '../public/props_shorts.json';
+import { Composition } from "remotion";
+import { DevotionalComposition, DevotionalProps } from "./DevotionalComposition";
+import { DevotionalShortsComposition, DevotionalShortsProps } from "./DevotionalShortsComposition";
+
+const defaultProps: DevotionalProps = {
+  audioUrl: "audio/narration.mp3",
+  captions: [],
+  scenes: [],
+};
 
 export const RemotionRoot: React.FC = () => {
-  const fps = 30;
-  const typedPropsLong = defaultPropsLong as DevotionalVideoProps;
-  const typedPropsShorts = defaultPropsShorts as DevotionalVideoProps;
-
-  // Calculate dynamic duration for Long Video
-  const totalLongSeconds = typedPropsLong.scenes?.length
-    ? typedPropsLong.scenes.reduce((acc, scene) => acc + (scene.durationInSeconds || 5), 0)
-    : 10;
-  const durationInFramesLong = Math.max(30, Math.round(totalLongSeconds * fps));
-
-  // Calculate dynamic duration for Shorts Video (no longer hardcoded to 45s)
-  const totalShortsSeconds = typedPropsShorts.scenes?.length
-    ? typedPropsShorts.scenes.reduce((acc, scene) => acc + (scene.durationInSeconds || 5), 0)
-    : 45;
-  const durationInFramesShorts = Math.max(30, Math.round(totalShortsSeconds * fps));
-
   return (
     <>
-      {/* 1. Long Devotional Video (16:9 Widescreen) */}
+      {/* Long Video (16:9 - 1920x1080) */}
       <Composition
         id="DevotionalComposition"
         component={DevotionalComposition}
-        durationInFrames={durationInFramesLong}
-        fps={fps}
+        fps={30}
         width={1920}
         height={1080}
-        defaultProps={typedPropsLong}
+        defaultProps={defaultProps}
+        calculateMetadata={({ props }) => {
+          const totalDuration = props.scenes?.reduce(
+            (acc, s) => acc + (s.durationInFrames || 120),
+            0
+          ) || 300;
+          return {
+            durationInFrames: totalDuration,
+          };
+        }}
       />
 
-      {/* 2. YouTube Shorts Video (9:16 Vertical) */}
+      {/* Shorts Video (9:16 - 1080x1920) */}
       <Composition
         id="DevotionalShortsComposition"
         component={DevotionalShortsComposition}
-        durationInFrames={durationInFramesShorts}
-        fps={fps}
+        fps={30}
         width={1080}
         height={1920}
-        defaultProps={typedPropsShorts}
+        defaultProps={defaultProps as DevotionalShortsProps}
+        calculateMetadata={({ props }) => {
+          const totalDuration = props.scenes?.reduce(
+            (acc, s) => acc + (s.durationInFrames || 120),
+            0
+          ) || 300;
+          return {
+            durationInFrames: totalDuration,
+          };
+        }}
       />
     </>
   );
