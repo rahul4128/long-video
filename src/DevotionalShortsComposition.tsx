@@ -3,12 +3,12 @@ import {
   AbsoluteFill,
   Audio,
   Img,
-  OffthreadVideo,
   interpolate,
   staticFile,
   useCurrentFrame,
   Series,
 } from "remotion";
+import { OffthreadVideo } from "@remotion/media";
 
 export interface SceneItem {
   id: number;
@@ -37,14 +37,13 @@ export const DevotionalShortsComposition: React.FC<DevotionalShortsProps> = ({
   const frame = useCurrentFrame();
   const currentMs = (frame / 30) * 1000;
 
-  // Active subtitle word
   const activeWord = captions.find(
     (c) => currentMs >= c.startMs && currentMs <= c.endMs
   );
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#000000" }}>
-      {/* 1. Scenes Sequence (9:16 Vertical Cropping) */}
+      {/* 9:16 Scenes */}
       <Series>
         {scenes.map((scene) => (
           <Series.Sequence
@@ -56,16 +55,15 @@ export const DevotionalShortsComposition: React.FC<DevotionalShortsProps> = ({
         ))}
       </Series>
 
-      {/* 2. Audio Track */}
       {audioUrl && <Audio src={staticFile(audioUrl)} />}
 
-      {/* 3. YouTube Shorts Center-High Subtitles (Keeps clear of UI icons) */}
+      {/* Safe-zone subtitles for Shorts */}
       {activeWord && (
         <AbsoluteFill
           style={{
             justifyContent: "center",
             alignItems: "center",
-            paddingTop: 180, // Sits above YouTube Shorts like/comment buttons
+            paddingTop: 180,
           }}
         >
           <div
@@ -92,7 +90,6 @@ export const DevotionalShortsComposition: React.FC<DevotionalShortsProps> = ({
 const ShortsSceneRenderer: React.FC<{ scene: SceneItem }> = ({ scene }) => {
   const frame = useCurrentFrame();
 
-  // Subtle zoom to keep static images dynamic in vertical format
   const scale = interpolate(frame, [0, 120], [1.02, 1.15], {
     extrapolateRight: "clamp",
   });
@@ -125,7 +122,6 @@ const ShortsSceneRenderer: React.FC<{ scene: SceneItem }> = ({ scene }) => {
         />
       )}
 
-      {/* Vertical vignette to highlight center content */}
       <div
         style={{
           position: "absolute",
