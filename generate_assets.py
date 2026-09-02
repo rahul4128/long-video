@@ -27,26 +27,21 @@ if isinstance(payload, str):
     except Exception:
         payload = {}
 
-long_video_data = payload.get("long_video", {})
-if isinstance(long_video_data, str):
-    try:
-        long_video_data = json.loads(long_video_data)
-    except Exception:
-        long_video_data = {}
 
-shorts_data = payload.get("shorts", {})
-if isinstance(shorts_data, str):
-    try:
-        shorts_data = json.loads(shorts_data)
-    except Exception:
-        shorts_data = {}
+def as_dict(value):
+    """Make.com often serializes nested JSON fields as strings. Normalize to a dict."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except Exception:
+            return {}
+    return value if isinstance(value, dict) else {}
 
-seo_meta = payload.get("seo_metadata", {})
-if isinstance(seo_meta, str):
-    try:
-        seo_meta = json.loads(seo_meta)
-    except Exception:
-        seo_meta = {}
+
+long_video_data = as_dict(payload.get("long_video", {}))
+shorts_data = as_dict(payload.get("shorts", {}))
+seo_meta = as_dict(payload.get("seo_metadata", {}))
+thumbnail_data = as_dict(payload.get("thumbnail", {}))
 
 scenes_input = long_video_data.get("scenes") or payload.get("scenes") or [
     {
@@ -65,6 +60,7 @@ scenes_input = long_video_data.get("scenes") or payload.get("scenes") or [
 
 shorts_scenes_input = shorts_data.get("scenes") or scenes_input
 
+
 def fetch_pexels_video(query: str, orientation: str = "landscape") -> str | None:
     if not PEXELS_KEY or not query:
         return None
@@ -81,6 +77,7 @@ def fetch_pexels_video(query: str, orientation: str = "landscape") -> str | None
     except Exception as e:
         print(f"Pexels fetch notice: {e}")
     return None
+
 
 def generate_cloudflare_flux(prompt: str, out_path: str):
     if not CF_ACCOUNT or not CF_TOKEN:
@@ -100,87 +97,122 @@ def generate_cloudflare_flux(prompt: str, out_path: str):
     except Exception as e:
         print(f"Cloudflare FLUX error: {e}")
 
-props_scenes = []
-full_narration = []
 
-for idx, sc in enumerate(scenes_input, start=1):
-    narration_text = sc.get("text", "")
-    full_narration.append(narration_text)
-    media_type = sc.get("mediaType", "ai_image")
-    query = sc.get("videoSearchQuery", "")
-    prompt = sc.get("imagePrompt", "")
+def build_scene_assets(scenes, id_prefix, orientation):
+    """Download/generate visuals for a list of story scenes and return Remotion scene props.
 
-    downloaded = False
-    if media_type == "video" and query:
-        video_url = fetch_pexels_video(query, orientation="landscape")
-        if video_url:
-            v_res = requests.get(video_url, timeout=25)
-            if v_res.status_code == 200:
-                v_path = f"public/videos/scene_{idx}.mp4"
-                with open(v_path, "wb") as f:
-                    f.write(v_res.content)
-                props_scenes.append({
-                    "id": idx,
-                    "type": "video",
-                    "src": f"videos/scene_{idx}.mp4",
-                    "durationInFrames": 120
-                })
-                downloaded = True
+    Each scene tries stock video first (when a search query is given), falling back to an
+    AI-generated still image. Files are namespaced by id_prefix so the long-form and Shorts
+    pipelines never clobber each other's assets.
+    """
+    scene_props = []
+    narration_lines = []
 
-    if not downloaded:
-        img_path = f"public/images/scene_{idx}.png"
-        generate_cloudflare_flux(prompt, img_path)
-        props_scenes.append({
-            "id": idx,
-            "type": "image",
-            "src": f"images/scene_{idx}.png",
-            "durationInFrames": 120
-        })
+    for idx, sc in enumerate(scenes, start=1):
+        narration_text = sc.get("text", "")
+        narration_lines.append(narration_text)
+        media_type = sc.get("mediaType", "ai_image")
+        query = sc.get("videoSearchQuery", "")
+        prompt = sc.get("imagePrompt", "")
 
-# Edge-TTS voiceover
-combined_script = " ".join(full_narration)
-with open("temp_script.txt", "w", encoding="utf-8") as f:
-    f.write(combined_script)
+        wants_video = media_type == "video" or (media_type != "ai_image" and query)
+        downloaded = False
+        if wants_video and query:
+            video_url = fetch_pexels_video(query, orientation=orientation)
+            if video_url:
+                try:
+                    v_res = requests.get(video_url, timeout=25)
+                    if v_res.status_code == 200:
+                        v_path = f"public/videos/{id_prefix}_{idx}.mp4"
+                        with open(v_path, "wb") as f:
+                            f.write(v_res.content)
+                        scene_props.append({
+                            "id": idx,
+                            "type": "video",
+                            "src": f"videos/{id_prefix}_{idx}.mp4",
+                            "durationInFrames": 120
+                        })
+                        downloaded = True
+                except Exception as e:
+                    print(f"Stock video download notice ({id_prefix}_{idx}): {e}")
 
-os.system("edge-tts --voice hi-IN-MadhurNeural --file temp_script.txt --write-media public/audio/narration.mp3")
-
-# Word-level subtitles via Whisper
-captions = []
-try:
-    model = WhisperModel("base", device="cpu", compute_type="int8")
-    segments, _ = model.transcribe("public/audio/narration.mp3", word_timestamps=True)
-    for seg in segments:
-        for w in seg.words:
-            captions.append({
-                "text": w.word.strip(),
-                "startMs": int(w.start * 1000),
-                "endMs": int(w.end * 1000)
+        if not downloaded:
+            img_path = f"public/images/{id_prefix}_{idx}.png"
+            generate_cloudflare_flux(prompt, img_path)
+            scene_props.append({
+                "id": idx,
+                "type": "image",
+                "src": f"images/{id_prefix}_{idx}.png",
+                "durationInFrames": 120
             })
+
+    return scene_props, narration_lines
+
+
+def synthesize_narration(text: str, audio_path: str, whisper_model) -> list:
+    """Generate a voiceover with edge-tts and return word-level captions via Whisper."""
+    with open("temp_script.txt", "w", encoding="utf-8") as f:
+        f.write(text)
+
+    exit_code = os.system(
+        f'edge-tts --voice hi-IN-MadhurNeural --file temp_script.txt --write-media "{audio_path}"'
+    )
+    if exit_code != 0:
+        print(f"edge-tts notice: narration synthesis for {audio_path} exited with code {exit_code}")
+
+    captions = []
+    if whisper_model is None or not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
+        return captions
+
+    try:
+        segments, _ = whisper_model.transcribe(audio_path, word_timestamps=True)
+        for seg in segments:
+            for w in seg.words:
+                captions.append({
+                    "text": w.word.strip(),
+                    "startMs": int(w.start * 1000),
+                    "endMs": int(w.end * 1000)
+                })
+    except Exception as e:
+        print(f"Whisper subtitle notice ({audio_path}): {e}")
+
+    return captions
+
+
+# ---- Long-form video: visuals, voiceover, captions ----
+props_scenes, long_narration_lines = build_scene_assets(scenes_input, "scene", orientation="landscape")
+
+whisper_model = None
+try:
+    whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
 except Exception as e:
-    print(f"Whisper subtitle notice: {e}")
+    print(f"Whisper model load notice: {e}")
+
+long_captions = synthesize_narration(
+    " ".join(long_narration_lines), "public/audio/narration.mp3", whisper_model
+)
 
 props_long = {
     "audioUrl": "audio/narration.mp3",
-    "captions": captions,
+    "captions": long_captions,
     "scenes": props_scenes
 }
 
 with open("public/props.json", "w", encoding="utf-8") as f:
     json.dump(props_long, f, indent=2, ensure_ascii=False)
 
-shorts_props_scenes = []
-for idx, sc in enumerate(shorts_scenes_input, start=1):
-    src_file = f"videos/scene_{idx}.mp4" if os.path.exists(f"public/videos/scene_{idx}.mp4") else f"images/scene_{idx}.png"
-    shorts_props_scenes.append({
-        "id": idx,
-        "type": "video" if "videos/" in src_file else "image",
-        "src": src_file,
-        "durationInFrames": 120
-    })
+# ---- Shorts teaser: its own visuals (vertical), its own voiceover and captions ----
+shorts_props_scenes, shorts_narration_lines = build_scene_assets(
+    shorts_scenes_input, "shorts_scene", orientation="portrait"
+)
+
+shorts_captions = synthesize_narration(
+    " ".join(shorts_narration_lines), "public/audio/narration_shorts.mp3", whisper_model
+)
 
 props_shorts = {
-    "audioUrl": "audio/narration.mp3",
-    "captions": captions,
+    "audioUrl": "audio/narration_shorts.mp3",
+    "captions": shorts_captions,
     "scenes": shorts_props_scenes
 }
 
@@ -199,5 +231,5 @@ meta = {
 with open("out/metadata.json", "w", encoding="utf-8") as f:
     json.dump(meta, f, indent=2, ensure_ascii=False)
 
-thumb_prompt = payload.get("thumbnail", {}).get("imagePrompt") if isinstance(payload.get("thumbnail"), dict) else scenes_input[0].get("imagePrompt", "Lord Shiva divine aura")
+thumb_prompt = thumbnail_data.get("imagePrompt") or scenes_input[0].get("imagePrompt", "Lord Shiva divine aura")
 generate_cloudflare_flux(thumb_prompt or "Lord Shiva divine aura", "out/thumbnail.jpg")
