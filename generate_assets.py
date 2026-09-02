@@ -48,7 +48,7 @@ def fetch_pexels_video(query: str, orientation: str = "landscape") -> str | None
                 hd_files = [f for f in files if f.get("width") == 1920 or f.get("height") == 1080]
                 return hd_files[0]["link"] if hd_files else files[0]["link"]
     except Exception as e:
-        print(f"Pexels fetch notice for '{query}': {e}")
+        print(f"Pexels search notice for '{query}': {e}")
     return None
 
 def generate_cloudflare_flux(prompt: str, out_path: str):
@@ -69,7 +69,6 @@ def generate_cloudflare_flux(prompt: str, out_path: str):
     except Exception as e:
         print(f"Cloudflare FLUX error: {e}")
 
-# Process Scenes
 props_scenes = []
 full_narration = []
 
@@ -113,7 +112,7 @@ with open("temp_script.txt", "w", encoding="utf-8") as f:
 
 os.system("edge-tts --voice hi-IN-MadhurNeural --file temp_script.txt --write-media public/audio/narration.mp3")
 
-# Word timestamps via Whisper
+# Word-level subtitles
 captions = []
 try:
     model = WhisperModel("base", device="cpu", compute_type="int8")
@@ -128,7 +127,6 @@ try:
 except Exception as e:
     print(f"Whisper subtitle generation notice: {e}")
 
-# Save Remotion Props
 props = {
     "audioUrl": "audio/narration.mp3",
     "captions": captions,
@@ -141,7 +139,7 @@ with open("public/props.json", "w", encoding="utf-8") as f:
 with open("public/props_shorts.json", "w", encoding="utf-8") as f:
     json.dump(props, f, indent=2, ensure_ascii=False)
 
-# YouTube Metadata
+# YouTube upload metadata
 meta = {
     "long_video_title": payload.get("long_video_title", "महाकाल का रहस्य | Divine Devotional Story"),
     "long_video_description": payload.get("long_video_description", "श्री महाकाल कथा एवं दर्शन #devotional #shiva"),
