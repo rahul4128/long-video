@@ -4,8 +4,8 @@
   "description": "Automated devotional video renderer for long-form and shorts",
   "scripts": {
     "start": "remotion preview",
-    "build": "remotion render DevotionalComposition out/final_video.mp4",
-    "build:shorts": "remotion render DevotionalShortsComposition out/final_video_shorts.mp4"
+    "build": "remotion render src/index.ts DevotionalComposition out/final_video.mp4",
+    "build:shorts": "remotion render src/index.ts DevotionalShortsComposition out/final_video_shorts.mp4"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.218",
