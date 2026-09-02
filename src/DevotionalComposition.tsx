@@ -43,7 +43,6 @@ export const DevotionalComposition: React.FC<DevotionalProps> = ({
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#000000" }}>
-      {/* Scene sequences */}
       <Series>
         {scenes.map((scene) => (
           <Series.Sequence
@@ -55,10 +54,8 @@ export const DevotionalComposition: React.FC<DevotionalProps> = ({
         ))}
       </Series>
 
-      {/* Background voiceover */}
       {audioUrl && <Audio src={staticFile(audioUrl)} />}
 
-      {/* Word-level captions */}
       {activeWord && (
         <AbsoluteFill
           style={{
@@ -117,7 +114,6 @@ const SceneRenderer: React.FC<{ scene: SceneItem }> = ({ scene }) => {
         />
       )}
 
-      {/* Devotional vignette */}
       <div
         style={{
           position: "absolute",
