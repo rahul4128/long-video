@@ -3,12 +3,12 @@ import {
   AbsoluteFill,
   Audio,
   Img,
+  OffthreadVideo,
   interpolate,
   staticFile,
   useCurrentFrame,
   Series,
 } from "remotion";
-import { OffthreadVideo } from "@remotion/media";
 
 export interface SceneItem {
   id: number;
