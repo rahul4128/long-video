@@ -6,9 +6,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ---------------------------------------------------------------
-  # JOB 1: Generate Assets (Pexels Stock + Cloudflare FLUX + Edge-TTS)
-  # ---------------------------------------------------------------
   generate-assets:
     runs-on: ubuntu-latest
     steps:
@@ -53,9 +50,6 @@ jobs:
             out/metadata.json
           retention-days: 1
 
-  # ---------------------------------------------------------------
-  # JOB 2: Render Long Video (16:9)
-  # ---------------------------------------------------------------
   render-long:
     needs: generate-assets
     runs-on: ubuntu-latest
@@ -100,9 +94,6 @@ jobs:
           path: out/final_video.mp4
           retention-days: 14
 
-  # ---------------------------------------------------------------
-  # JOB 3: Render Shorts Video (9:16)
-  # ---------------------------------------------------------------
   render-shorts:
     needs: generate-assets
     runs-on: ubuntu-latest
@@ -147,9 +138,6 @@ jobs:
           path: out/final_video_shorts.mp4
           retention-days: 14
 
-  # ---------------------------------------------------------------
-  # JOB 4: Create GitHub Release and Notify Make.com
-  # ---------------------------------------------------------------
   publish-and-notify:
     needs: [generate-assets, render-long, render-shorts]
     runs-on: ubuntu-latest
