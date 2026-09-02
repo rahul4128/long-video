@@ -1,56 +1,156 @@
 import os
 import json
-import subprocess
+import base64
+import requests
 from faster_whisper import WhisperModel
 
-payload = json.loads(os.getenv("DISPATCH_PAYLOAD", "{}"))
-release_tag = payload.get("asset_release_tag")
-
+# Ensure required directories exist up front
+os.makedirs("public/images", exist_ok=True)
 os.makedirs("public/videos", exist_ok=True)
 os.makedirs("public/audio", exist_ok=True)
 os.makedirs("out", exist_ok=True)
 
-# 1. Download video clips from Kaggle release
-if release_tag:
-    print(f"Downloading video clips from release {release_tag}...")
-    subprocess.run(
-        f"gh release download {release_tag} -D public/videos --pattern '*.mp4'",
-        shell=True,
-        check=True
-    )
+PEXELS_KEY = os.getenv("PEXELS_API_KEY", "")
+CF_ACCOUNT = os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
+CF_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "")
 
-# 2. Generate Voiceover via Edge-TTS (Local CPU)
-full_text = "भगवान शिव के रहस्य और उनकी अनंत कृपा की दिव्य कथा।"
+payload_raw = os.getenv("DISPATCH_PAYLOAD", "{}")
+payload = json.loads(payload_raw) if payload_raw else {}
+
+scenes_input = payload.get("scenes", [
+    {
+        "id": 1,
+        "mediaType": "video",
+        "videoSearchQuery": "varanasi ganga aarti diya evening",
+        "imagePrompt": "Lord Shiva meditating in snow mountain, cinematic 8k",
+        "narration": "काशी के पावन तट पर हर संध्या एक दिव्य शांति छा जाती है।"
+    },
+    {
+        "id": 2,
+        "mediaType": "ai_image",
+        "videoSearchQuery": "",
+        "imagePrompt": "Lord Shiva in deep meditation on Kailash, glowing third eye aura, hyperrealistic",
+        "narration": "भोलेनाथ अपने मौन में पूरे ब्रह्मांड का गूढ़ रहस्य समाए हुए हैं।"
+    }
+])
+
+def fetch_pexels_video(query: str, orientation: str = "landscape") -> str | None:
+    if not PEXELS_KEY or not query:
+        return None
+    headers = {"Authorization": PEXELS_KEY}
+    url = f"https://api.pexels.com/videos/search?query={query}&orientation={orientation}&per_page=3"
+    try:
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            videos = res.json().get("videos", [])
+            if videos:
+                files = videos[0].get("video_files", [])
+                hd_files = [f for f in files if f.get("width") == 1920 or f.get("height") == 1080]
+                return hd_files[0]["link"] if hd_files else files[0]["link"]
+    except Exception as e:
+        print(f"Pexels fetch notice for '{query}': {e}")
+    return None
+
+def generate_cloudflare_flux(prompt: str, out_path: str):
+    if not CF_ACCOUNT or not CF_TOKEN:
+        print("Cloudflare credentials not provided, skipping FLUX call.")
+        with open(out_path, "wb") as f:
+            f.write(b"")
+        return
+    url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT}/ai/run/@cf/black-forest-labs/flux-1-schnell"
+    headers = {"Authorization": f"Bearer {CF_TOKEN}"}
+    try:
+        res = requests.post(url, headers=headers, json={"prompt": prompt, "num_steps": 4}, timeout=35)
+        if res.status_code == 200:
+            data = res.json()
+            img_bytes = base64.b64decode(data["result"]["image"])
+            with open(out_path, "wb") as f:
+                f.write(img_bytes)
+    except Exception as e:
+        print(f"Cloudflare FLUX error: {e}")
+
+# Process Scenes
+props_scenes = []
+full_narration = []
+
+for idx, sc in enumerate(scenes_input, start=1):
+    full_narration.append(sc.get("narration", ""))
+    media_type = sc.get("mediaType", "ai_image")
+    query = sc.get("videoSearchQuery", "")
+    prompt = sc.get("imagePrompt", "")
+
+    downloaded = False
+    if media_type == "video" and query:
+        video_url = fetch_pexels_video(query, orientation="landscape")
+        if video_url:
+            v_res = requests.get(video_url, timeout=25)
+            if v_res.status_code == 200:
+                v_path = f"public/videos/scene_{idx}.mp4"
+                with open(v_path, "wb") as f:
+                    f.write(v_res.content)
+                props_scenes.append({
+                    "id": idx,
+                    "type": "video",
+                    "src": f"videos/scene_{idx}.mp4",
+                    "durationInFrames": 120
+                })
+                downloaded = True
+
+    if not downloaded:
+        img_path = f"public/images/scene_{idx}.png"
+        generate_cloudflare_flux(prompt, img_path)
+        props_scenes.append({
+            "id": idx,
+            "type": "image",
+            "src": f"images/scene_{idx}.png",
+            "durationInFrames": 120
+        })
+
+# Voiceover via Edge-TTS
+combined_script = " ".join(full_narration)
 with open("temp_script.txt", "w", encoding="utf-8") as f:
-    f.write(full_text)
+    f.write(combined_script)
 
 os.system("edge-tts --voice hi-IN-MadhurNeural --file temp_script.txt --write-media public/audio/narration.mp3")
 
-# 3. Word-level Subtitle Timestamps
-model = WhisperModel("base", device="cpu", compute_type="int8")
-segments, _ = model.transcribe("public/audio/narration.mp3", word_timestamps=True)
-
+# Word timestamps via Whisper
 captions = []
-for segment in segments:
-    for word in segment.words:
-        captions.append({
-            "text": word.word.strip(),
-            "startMs": int(word.start * 1000),
-            "endMs": int(word.end * 1000)
-        })
+try:
+    model = WhisperModel("base", device="cpu", compute_type="int8")
+    segments, _ = model.transcribe("public/audio/narration.mp3", word_timestamps=True)
+    for seg in segments:
+        for w in seg.words:
+            captions.append({
+                "text": w.word.strip(),
+                "startMs": int(w.start * 1000),
+                "endMs": int(w.end * 1000)
+            })
+except Exception as e:
+    print(f"Whisper subtitle generation notice: {e}")
 
-# 4. Map downloaded clips into props.json
-clip_files = sorted([f for f in os.listdir("public/videos") if f.endswith(".mp4")])
-scenes = [
-    {"id": i + 1, "videoUrl": f"videos/{name}", "durationInFrames": 120}
-    for i, name in enumerate(clip_files)
-]
-
+# Save Remotion Props
 props = {
     "audioUrl": "audio/narration.mp3",
     "captions": captions,
-    "scenes": scenes
+    "scenes": props_scenes
 }
 
-with open("public/props.json", "w") as f:
-    json.dump(props, f, indent=2)
+with open("public/props.json", "w", encoding="utf-8") as f:
+    json.dump(props, f, indent=2, ensure_ascii=False)
+
+with open("public/props_shorts.json", "w", encoding="utf-8") as f:
+    json.dump(props, f, indent=2, ensure_ascii=False)
+
+# YouTube Metadata
+meta = {
+    "long_video_title": payload.get("long_video_title", "महाकाल का रहस्य | Divine Devotional Story"),
+    "long_video_description": payload.get("long_video_description", "श्री महाकाल कथा एवं दर्शन #devotional #shiva"),
+    "tags": ["Mahakal", "Shiva", "Bhakti", "Devotional"],
+    "shorts_title": payload.get("shorts_title", "भोलेनाथ की असीम कृपा #shorts #shiva"),
+    "shorts_description": payload.get("shorts_description", "हर हर महादेव #shorts"),
+    "hashtags": ["#shorts", "#shiva", "#mahadev"]
+}
+with open("out/metadata.json", "w", encoding="utf-8") as f:
+    json.dump(meta, f, indent=2, ensure_ascii=False)
+
+generate_cloudflare_flux(scenes_input[0].get("imagePrompt", "Lord Shiva high quality"), "out/thumbnail.jpg")
