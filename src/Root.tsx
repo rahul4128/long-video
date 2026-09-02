@@ -22,10 +22,10 @@ export const RemotionRoot: React.FC = () => {
         width={1920}
         height={1080}
         defaultProps={defaultProps}
-        calculateMetadata={({ props }) => {
+        calculateMetadata={({ props }: { props: DevotionalProps }) => {
           const totalDuration =
             props.scenes?.reduce(
-              (acc, s) => acc + (s.durationInFrames || 120),
+              (acc: number, s) => acc + (s.durationInFrames || 120),
               0
             ) || 300;
           return {
@@ -41,10 +41,10 @@ export const RemotionRoot: React.FC = () => {
         width={1080}
         height={1920}
         defaultProps={defaultProps as DevotionalShortsProps}
-        calculateMetadata={({ props }) => {
+        calculateMetadata={({ props }: { props: DevotionalShortsProps }) => {
           const totalDuration =
             props.scenes?.reduce(
-              (acc, s) => acc + (s.durationInFrames || 120),
+              (acc: number, s) => acc + (s.durationInFrames || 120),
               0
             ) || 300;
           return {
