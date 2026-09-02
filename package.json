@@ -10,7 +10,8 @@
     "@remotion/google-fonts": "^4.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "remotion": "^4.0.0"
+    "remotion": "^4.0.0",
+    "@remotion/media": "^4.0.218"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",
