@@ -43,7 +43,6 @@ export const DevotionalShortsComposition: React.FC<DevotionalShortsProps> = ({
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#000000" }}>
-      {/* 9:16 Scenes */}
       <Series>
         {scenes.map((scene) => (
           <Series.Sequence
@@ -57,7 +56,6 @@ export const DevotionalShortsComposition: React.FC<DevotionalShortsProps> = ({
 
       {audioUrl && <Audio src={staticFile(audioUrl)} />}
 
-      {/* Safe-zone subtitles for Shorts */}
       {activeWord && (
         <AbsoluteFill
           style={{
