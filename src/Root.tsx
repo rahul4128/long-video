@@ -15,7 +15,6 @@ const defaultProps: DevotionalProps = {
 export const RemotionRoot: React.FC = () => {
   return (
     <>
-      {/* Long Video (16:9 - 1920x1080) */}
       <Composition
         id="DevotionalComposition"
         component={DevotionalComposition}
@@ -35,7 +34,6 @@ export const RemotionRoot: React.FC = () => {
         }}
       />
 
-      {/* Shorts Video (9:16 - 1080x1920) */}
       <Composition
         id="DevotionalShortsComposition"
         component={DevotionalShortsComposition}
