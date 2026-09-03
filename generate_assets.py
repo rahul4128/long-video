@@ -65,6 +65,7 @@ CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "").strip()
 PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "").strip()
 COVERR_API_KEY = os.environ.get("COVERR_API_KEY", "").strip()
+HUGGINGFACE_API_KEY = os.environ.get("HUGGINGFACE_API_KEY", "").strip()
 FREESOUND_API_KEY = os.environ.get("FREESOUND_API_KEY", "").strip()
 
 os.makedirs("public/images", exist_ok=True)
@@ -91,11 +92,17 @@ def fetch_pexels_video(query: str, dest_path: str, orientation: str = "landscape
             videos = res.json().get("videos", [])
             if videos:
                 files = videos[0].get("video_files", [])
-                target_file = files[0]
-                for f in files:
-                    if f.get("width", 0) >= 1080:
-                        target_file = f
-                        break
+                # Pick the SMALLEST file that's still >=1080p, not just the first
+                # one that clears the bar - Pexels' video_files aren't size-ordered,
+                # so the naive "first match" could just as easily grab a 4K file.
+                # A 4K clip takes ~4x longer to download AND ~4x longer for Remotion
+                # to decode frame-by-frame during render, for zero visible quality
+                # gain in a 1920x1080 output composition.
+                hd_files = sorted(
+                    (f for f in files if f.get("width", 0) >= 1080),
+                    key=lambda f: f.get("width", 0),
+                )
+                target_file = hd_files[0] if hd_files else (files[0] if files else {})
                 video_url = target_file.get("link")
                 v_res = requests.get(video_url, timeout=45)
                 if v_res.status_code == 200 and len(v_res.content) > 100000:
@@ -193,7 +200,14 @@ def fetch_wikimedia_video(query: str, dest_path: str) -> bool:
                     with open(raw_path, "wb") as f:
                         f.write(v_res.content)
                     convert = subprocess.run(
-                        ["ffmpeg", "-y", "-i", raw_path, "-c:v", "libx264",
+                        # Cap at 1920px wide (scale is a no-op if the source is
+                        # already smaller) - Commons videos can come back at very
+                        # high source resolution, and decoding that during Remotion
+                        # render costs real minutes for zero visible gain in a
+                        # 1920x1080 composition. "-2" keeps height even (required
+                        # by yuv420p) while preserving aspect ratio.
+                        ["ffmpeg", "-y", "-i", raw_path, "-vf", "scale='min(1920,iw)':-2",
+                         "-c:v", "libx264", "-preset", "veryfast",
                          "-pix_fmt", "yuv420p", "-c:a", "aac", dest_path],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     )
@@ -276,7 +290,6 @@ NICHE_TERM_REWRITES = {
     "mandir": "hindu temple",
     "puja": "temple ritual ceremony",
 }
-GENERIC_DEVOTIONAL_FALLBACK = "temple diya candle flame"
 
 def dynamic_ai_query_rewrite(primary_query: str, prompt_text: str) -> list:
     """Fully automatic, zero-setup version of the rewrite step: asks a small
@@ -327,9 +340,17 @@ def build_query_candidates(primary_query: str, prompt_text: str = "") -> list:
     automatic, works for any wording, uses your existing Cloudflare key),
     then a static-dictionary rewrite as an offline safety net if Cloudflare
     isn't configured or returned nothing, then the original with untranslated
-    niche words simply removed, then a generic devotional B-roll phrase as a
-    last resort - so the search chain almost never comes back completely
-    empty before falling back to AI image generation."""
+    niche words simply removed.
+
+    Deliberately NOT included: a generic catch-all phrase (e.g. "temple diya
+    candle flame") tried against every remaining scene. That used to be the
+    single biggest source of visibly wrong clips - once every real candidate
+    above comes up empty, forcing a totally unrelated scene (a battlefield
+    beat, say) to match on "temple diya candle flame" just because it's the
+    only thing left to try is how you get a temple video playing under a
+    battlefield line. It's better to run out of candidates and fall through
+    to a purpose-built AI image (see fetch_multi_source_video) than to show
+    footage that's confidently wrong."""
     candidates = []
     original = (primary_query or "").strip()
     if original:
@@ -354,9 +375,6 @@ def build_query_candidates(primary_query: str, prompt_text: str = "") -> list:
     generic_query = " ".join(generic_words).strip()
     if generic_query and generic_query not in candidates:
         candidates.append(generic_query)
-
-    if GENERIC_DEVOTIONAL_FALLBACK not in candidates:
-        candidates.append(GENERIC_DEVOTIONAL_FALLBACK)
 
     return candidates
 
@@ -416,6 +434,59 @@ def generate_cloudflare_flux(prompt: str, dest_path: str, aspect_ratio: str = "1
         print(f"Cloudflare error: {e}", flush=True)
     return False
 
+def generate_huggingface_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9") -> bool:
+    """2nd AI-image tier - only runs if HUGGINGFACE_API_KEY is set (harmless
+    no-op otherwise, same pattern as the other optional keys). Uses the same
+    FLUX.1-schnell model family as the Cloudflare tier above (via Hugging
+    Face's serverless Inference Providers), so this is mainly a fallback for
+    when Cloudflare is unset, rate-limited, or briefly erroring - not a
+    different visual style. Get a free token at huggingface.co/settings/tokens
+    (create one with "Make calls to Inference Providers" permission)."""
+    if not HUGGINGFACE_API_KEY or not prompt:
+        return False
+    url = "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
+    headers = {
+        "Authorization": f"Bearer {HUGGINGFACE_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    clean_text = prompt.replace("\n", " ").replace("\"", "").strip()
+    final_prompt = f"{clean_text}, Indian mythological devotional art, {aspect_ratio} composition, warm divine lighting, 8k, highly detailed"
+    width, height = (1024, 576) if aspect_ratio == "16:9" else (576, 1024)
+    try:
+        res = requests.post(
+            url, headers=headers, timeout=50,
+            json={
+                "inputs": final_prompt[:450],
+                "parameters": {"width": width, "height": height, "num_inference_steps": 4},
+            },
+        )
+        content_type = res.headers.get("content-type", "")
+        if res.status_code == 200 and content_type.startswith("image/"):
+            with open(dest_path, "wb") as f:
+                f.write(res.content)
+            return True
+        if res.status_code != 200:
+            # A cold model (503, "currently loading") or a rate limit (429) both
+            # land here - either way, don't retry-loop, just fall through to the
+            # next tier so a slow/busy HF endpoint never becomes a slow render.
+            print(f"Hugging Face notice: HTTP {res.status_code} - {res.text[:200]}", flush=True)
+    except Exception as e:
+        print(f"Hugging Face notice: {e}", flush=True)
+    return False
+
+def generate_ai_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9",
+                       pollinations_width: int = 1920, pollinations_height: int = 1080) -> None:
+    """Single entry point for the AI-image fallback chain: Cloudflare FLUX.1
+    (if configured) -> Hugging Face FLUX.1-schnell (if configured) ->
+    Pollinations (no key needed, always works). Guarantees dest_path exists
+    when it returns, same contract as resolve_sound_effect_audio()."""
+    if generate_cloudflare_flux(prompt, dest_path, aspect_ratio=aspect_ratio):
+        return
+    if generate_huggingface_image(prompt, dest_path, aspect_ratio=aspect_ratio):
+        print("  ✅ Image fetched from Hugging Face (FLUX.1-schnell)", flush=True)
+        return
+    download_pollinations_fallback(prompt, dest_path, width=pollinations_width, height=pollinations_height)
+
 def download_pollinations_fallback(prompt: str, img_dest: str, width: int = 1920, height: int = 1080) -> bool:
     clean_text = prompt.replace("\n", " ").replace("\"", "").strip()[:180]
     encoded = urllib.parse.quote(f"{clean_text}, Indian devotional art")
@@ -455,9 +526,22 @@ def get_audio_duration(file_path: str) -> float:
 
 tts_semaphore = asyncio.Semaphore(2)
 
-async def generate_clean_audio(narration: str, audio_dest: str):
+async def generate_clean_audio(narration: str, audio_dest: str) -> list:
+    """Synthesizes narration and returns word-level caption timing captured
+    from edge-tts's WordBoundary events during streaming synthesis - a list
+    of {"word", "start", "end"} in seconds, relative to the start of THIS
+    clip. This is what powers the word-by-word synced captions in
+    Subtitles.tsx (a real retention/accessibility upgrade over one static
+    sentence sitting on screen for the whole scene). Also loudness-normalizes
+    the narration to a consistent target (single-pass loudnorm, ~-16 LUFS)
+    so volume doesn't drift scene-to-scene or video-to-video.
+
+    Returns [] if word timing couldn't be captured - Subtitles.tsx falls
+    back to the old static full-sentence caption in that case, so a render
+    never breaks over it."""
     async with tts_semaphore:
         clean_text = narration.strip() if narration else "हरि ॐ तत्सत्"
+        raw_path = audio_dest + ".raw.mp3"
         for attempt in range(1, 4):
             try:
                 communicate = edge_tts.Communicate(
@@ -466,9 +550,37 @@ async def generate_clean_audio(narration: str, audio_dest: str):
                     rate="-3%",
                     pitch="-1Hz"
                 )
-                await communicate.save(audio_dest)
-                if os.path.exists(audio_dest) and os.path.getsize(audio_dest) > 0:
-                    return
+                submaker = edge_tts.SubMaker()
+                audio_bytes = bytearray()
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        audio_bytes.extend(chunk["data"])
+                    elif chunk["type"] == "WordBoundary":
+                        submaker.feed(chunk)
+
+                if audio_bytes:
+                    with open(raw_path, "wb") as f:
+                        f.write(audio_bytes)
+                    normalize = subprocess.run(
+                        ["ffmpeg", "-y", "-i", raw_path, "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+                         "-ar", "24000", "-q:a", "4", "-acodec", "libmp3lame", audio_dest],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                    if normalize.returncode != 0 or not os.path.exists(audio_dest):
+                        # Normalization failed for some reason - the raw (un-normalized)
+                        # clip is still a perfectly valid narration track, use it as-is
+                        # rather than losing the scene's audio entirely.
+                        shutil.copyfile(raw_path, audio_dest)
+                    if os.path.exists(raw_path):
+                        os.remove(raw_path)
+                    return [
+                        {
+                            "word": cue.content,
+                            "start": round(cue.start.total_seconds(), 3),
+                            "end": round(cue.end.total_seconds(), 3),
+                        }
+                        for cue in submaker.cues
+                    ]
             except Exception:
                 await asyncio.sleep(1.5)
 
@@ -476,6 +588,7 @@ async def generate_clean_audio(narration: str, audio_dest: str):
             "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
             "-t", "5", "-q:a", "9", "-acodec", "libmp3lame", audio_dest
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return []
 
 # -------------------------------------------------------------
 # 3b. DYNAMIC SOUND-EFFECT ENGINE (Freesound, CC0-only, with local fallback)
@@ -598,8 +711,7 @@ def process_long_scene_visual(scene_info):
     img_name = f"scene_{idx}.jpg"
     img_dest = f"public/images/{img_name}"
     print(f"🎨 [Long Scene {idx}] Generating FLUX.1 visual: {prompt[:40]}...", flush=True)
-    if not generate_cloudflare_flux(prompt, img_dest, aspect_ratio="16:9"):
-        download_pollinations_fallback(prompt, img_dest, width=1920, height=1080)
+    generate_ai_image(prompt, img_dest, aspect_ratio="16:9", pollinations_width=1920, pollinations_height=1080)
     return img_name
 
 # -------------------------------------------------------------
@@ -619,9 +731,41 @@ def process_shorts_scene_visual(scene_info):
     img_name = f"shorts_scene_{idx}.jpg"
     img_dest = f"public/images/{img_name}"
     print(f"🎨 [Shorts Scene {idx}] Generating 9:16 FLUX.1 visual...", flush=True)
-    if not generate_cloudflare_flux(f"{prompt}, vertical 9:16 composition", img_dest, aspect_ratio="9:16"):
-        download_pollinations_fallback(prompt, img_dest, width=1080, height=1920)
+    generate_ai_image(f"{prompt}, vertical 9:16 composition", img_dest, aspect_ratio="9:16",
+                       pollinations_width=1080, pollinations_height=1920)
     return img_name
+
+# -------------------------------------------------------------
+# 5b. AUTO-CHAPTERS (YouTube description timestamps)
+# -------------------------------------------------------------
+def format_chapter_timestamp(total_seconds: float) -> str:
+    total_seconds = max(0, int(total_seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes}:{seconds:02d}"
+
+def build_chapters_block(scenes: list) -> str:
+    """YouTube auto-detects chapters from timestamp lines in a video's
+    description, as long as: the first line is exactly 0:00, there are at
+    least 3 lines, and each chapter is at least 10 seconds. Labels are a
+    short excerpt of that scene's own narration rather than generic 'Part N'
+    text, so viewers scrubbing the chapter bar (and YouTube's own indexing)
+    get real content signal."""
+    if len(scenes) < 3:
+        return ""
+    lines = []
+    elapsed = 0.0
+    for i, scene in enumerate(scenes):
+        label = (scene.get("narration_chunk") or "").strip().replace("\n", " ")
+        if len(label) > 45:
+            label = label[:45].rsplit(" ", 1)[0] + "..."
+        if not label:
+            label = f"भाग {i + 1}"
+        lines.append(f"{format_chapter_timestamp(elapsed)} {label}")
+        elapsed += scene.get("durationInSeconds", 5)
+    return "\n".join(lines)
 
 # -------------------------------------------------------------
 # 6. MASTER EXECUTION PIPELINE
@@ -641,19 +785,27 @@ async def process():
     thumb_prompt = thumbnail_data.get("imagePrompt") or "Lord Krishna radiant divine aura with glowing Sudarshan Chakra, dramatic 8k thumbnail"
     print("🖼️ Generating High-CTR Thumbnail...", flush=True)
     thumb_dest = "public/images/thumbnail.jpg"
-    if not generate_cloudflare_flux(thumb_prompt, thumb_dest, aspect_ratio="16:9"):
-        download_pollinations_fallback(thumb_prompt, thumb_dest, width=1920, height=1080)
+    generate_ai_image(thumb_prompt, thumb_dest, aspect_ratio="16:9", pollinations_width=1920, pollinations_height=1080)
     subprocess.run(["cp", thumb_dest, "out/thumbnail.jpg"], check=False)
 
     # 3. Parallel Visuals (Pexels + Pixabay + Coverr + FLUX.1 for Long & Shorts)
     long_items = [(i + 1, s) for i, s in enumerate(long_scenes)]
     shorts_items = [(i + 1, s) for i, s in enumerate(shorts_scenes)]
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        long_visuals = list(executor.map(process_long_scene_visual, long_items))
-        shorts_visuals = list(executor.map(process_shorts_scene_visual, shorts_items))
+    # max_workers=8 (was 4): this stage is I/O-bound (HTTP calls to stock/AI
+    # APIs), not CPU-bound, so doubling it is safe and meaningfully faster.
+    # Also submit long + shorts scenes together rather than as two sequential
+    # executor.map() calls - the old code fully finished every long scene
+    # before starting a single shorts scene, even though they're completely
+    # independent work and could easily interleave.
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        long_futures = [executor.submit(process_long_scene_visual, item) for item in long_items]
+        shorts_futures = [executor.submit(process_shorts_scene_visual, item) for item in shorts_items]
+        long_visuals = [f.result() for f in long_futures]
+        shorts_visuals = [f.result() for f in shorts_futures]
 
-    # 4. Parallel Audio Generation (Long + Shorts)
+    # 4. Parallel Audio Generation (Long + Shorts) - each task also returns
+    # that scene's word-level caption timing (see generate_clean_audio).
     audio_tasks = []
     for i, scene in enumerate(long_scenes):
         idx = i + 1
@@ -665,7 +817,9 @@ async def process():
         narration = scene.get("text") or scene.get("narration_chunk", "")
         audio_tasks.append(generate_clean_audio(narration, f"public/audio/shorts_chunk_{idx}.mp3"))
 
-    await asyncio.gather(*audio_tasks)
+    audio_word_timings = await asyncio.gather(*audio_tasks)
+    long_word_timings = audio_word_timings[:len(long_scenes)]
+    shorts_word_timings = audio_word_timings[len(long_scenes):]
 
     # 4b. Sound-Effect Layer (Long video only - the shorts payload has no soundEffect field)
     for i, scene in enumerate(long_scenes):
@@ -685,7 +839,8 @@ async def process():
             "durationInSeconds": round(duration + 0.3, 2),
             "narration_chunk": scene.get("text", ""),
             "imageFileName": long_visuals[i],
-            "soundEffect": scene.get("soundEffect", "none")
+            "soundEffect": scene.get("soundEffect", "none"),
+            "words": long_word_timings[i]
         })
 
     # 6. Build Remotion Props for Shorts Video
@@ -698,7 +853,8 @@ async def process():
             "scene_number": idx,
             "durationInSeconds": round(duration + 0.2, 2),
             "narration_chunk": scene.get("text", ""),
-            "imageFileName": shorts_visuals[i]
+            "imageFileName": shorts_visuals[i],
+            "words": shorts_word_timings[i]
         })
 
     # Save props and metadata
@@ -721,8 +877,19 @@ async def process():
     with open("public/props_shorts.json", "w", encoding="utf-8") as f:
         json.dump(shorts_props, f, ensure_ascii=False, indent=2)
 
+    # out/metadata.json is what your publish/upload flow reads for the
+    # YouTube title+description - unlike props.json (which only Remotion
+    # reads), it's safe to enrich this copy with auto-generated chapters
+    # without touching anything about how the video itself renders.
+    chapters_block = build_chapters_block(enriched_long)
+    metadata_for_upload = dict(seo_metadata)
+    if chapters_block:
+        base_description = (metadata_for_upload.get("long_video_description") or "").strip()
+        metadata_for_upload["long_video_description"] = f"{base_description}\n\n{chapters_block}".strip()
+        metadata_for_upload["chapters"] = chapters_block
+
     with open("out/metadata.json", "w", encoding="utf-8") as f:
-        json.dump(seo_metadata, f, ensure_ascii=False, indent=2)
+        json.dump(metadata_for_upload, f, ensure_ascii=False, indent=2)
 
     print("🎉 All Multi-Source Assets (Pexels + Pixabay + Coverr + Wikimedia + Local Library + FLUX), Thumbnail, Sound Effects, and Metadata ready!", flush=True)
 
