@@ -65,7 +65,6 @@ CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "").strip()
 PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "").strip()
 COVERR_API_KEY = os.environ.get("COVERR_API_KEY", "").strip()
-FREEPIK_API_KEY = os.environ.get("FREEPIK_API_KEY", "").strip()
 FREESOUND_API_KEY = os.environ.get("FREESOUND_API_KEY", "").strip()
 
 os.makedirs("public/images", exist_ok=True)
@@ -154,38 +153,57 @@ def fetch_coverr_video(query: str, dest_path: str) -> bool:
         print(f"Coverr notice: {e}", flush=True)
     return False
 
-def fetch_freepik_video(query: str, dest_path: str, orientation: str = "landscape") -> bool:
-    """Optional 4th source (Freepik/Magnific Videos API). Only runs if
-    FREEPIK_API_KEY is set - harmless no-op otherwise, same as Coverr. Needs
-    a paid Freepik API plan; verify field names below against your own
-    account's docs.freepik.com response before relying on it, the public
-    docs page didn't expose a full sample payload at the time this was
-    written."""
-    if not FREEPIK_API_KEY or not query:
+def fetch_wikimedia_video(query: str, dest_path: str) -> bool:
+    """4th source: Wikimedia Commons - run by the nonprofit Wikimedia
+    Foundation (same people behind Wikipedia). Completely free forever, no
+    signup, no API key, no subscription, no rate-limit key required for
+    this kind of light, occasional use. Bonus for this niche specifically:
+    unlike Pexels/Pixabay/Coverr (generic Western stock), Commons actually
+    hosts real community-uploaded footage of Indian temples, Diwali/Holi
+    festivals, aarti ceremonies, etc. under CC-BY / CC-BY-SA / public-domain
+    licenses - often a closer topical match than generic B-roll. Files come
+    back as WebM/Ogg (open codecs), so we transcode to .mp4 with ffmpeg
+    (already a dependency of this pipeline) right after downloading."""
+    if not query:
         return False
+    raw_path = dest_path + ".raw"
     try:
-        clean_q = urllib.parse.quote(query.strip()[:60])
-        url = f"https://api.freepik.com/v1/videos?query={clean_q}&order=relevance&page=1"
-        headers = {"x-freepik-api-key": FREEPIK_API_KEY}
-        res = requests.get(url, headers=headers, timeout=15)
+        clean_q = urllib.parse.quote(f"filetype:video {query.strip()[:60]}")
+        search_url = (
+            "https://commons.wikimedia.org/w/api.php?action=query&format=json"
+            f"&generator=search&gsrsearch={clean_q}&gsrnamespace=6&gsrlimit=5"
+            "&prop=imageinfo&iiprop=url%7Cmime%7Csize"
+        )
+        # Wikimedia's API etiquette asks for a descriptive User-Agent - not
+        # a key, just identifying info in case they ever need to reach out.
+        wiki_headers = {"User-Agent": "long-video-devotional-bot/1.0 (automated free stock B-roll fetch)"}
+        res = requests.get(search_url, headers=wiki_headers, timeout=15)
         if res.status_code == 200:
-            data = res.json().get("data", [])
-            if data:
-                video_id = data[0].get("id")
-                # orientation isn't filterable server-side on this endpoint as
-                # documented publicly, so we just take the top relevance hit.
-                dl_url = f"https://api.freepik.com/v1/videos/{video_id}/download"
-                dl_res = requests.get(dl_url, headers=headers, timeout=15)
-                if dl_res.status_code == 200:
-                    file_url = dl_res.json().get("data", {}).get("url")
-                    if file_url:
-                        v_res = requests.get(file_url, timeout=45)
-                        if v_res.status_code == 200 and len(v_res.content) > 100000:
-                            with open(dest_path, "wb") as f:
-                                f.write(v_res.content)
-                            return True
+            pages = res.json().get("query", {}).get("pages", {})
+            for page in pages.values():
+                infos = page.get("imageinfo", [])
+                if not infos:
+                    continue
+                mime = infos[0].get("mime", "")
+                file_url = infos[0].get("url")
+                if not file_url or not mime.startswith("video/"):
+                    continue
+                v_res = requests.get(file_url, headers=wiki_headers, timeout=45)
+                if v_res.status_code == 200 and len(v_res.content) > 100000:
+                    with open(raw_path, "wb") as f:
+                        f.write(v_res.content)
+                    convert = subprocess.run(
+                        ["ffmpeg", "-y", "-i", raw_path, "-c:v", "libx264",
+                         "-pix_fmt", "yuv420p", "-c:a", "aac", dest_path],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                    if convert.returncode == 0 and os.path.exists(dest_path) and os.path.getsize(dest_path) > 50000:
+                        return True
     except Exception as e:
-        print(f"Freepik notice: {e}", flush=True)
+        print(f"Wikimedia Commons notice: {e}", flush=True)
+    finally:
+        if os.path.exists(raw_path):
+            os.remove(raw_path)
     return False
 
 def fetch_local_library_video(search_terms: str, dest_path: str) -> bool:
@@ -193,7 +211,7 @@ def fetch_local_library_video(search_terms: str, dest_path: str) -> bool:
     yourself under public/videos_library/<keyword>.mp4 (or
     <keyword>_1.mp4, <keyword>_2.mp4, ... for several takes of the same
     keyword - one is picked at random). This is the "guaranteed correct
-    clip" tier: Pexels/Pixabay/Coverr/Freepik are general-purpose Western
+    clip" tier: Pexels/Pixabay/Coverr/Wikimedia Commons are general-purpose Western
     stock libraries with thin-to-no coverage of devotional/mythological
     Indian terms (Krishna, shankh, aarti, Kurukshetra...), so a one-time
     manual download from a permissively-licensed free site - Mixkit
@@ -227,7 +245,7 @@ def fetch_local_library_video(search_terms: str, dest_path: str) -> bool:
 # -------------------------------------------------------------
 # 1b. NICHE QUERY TRANSLATION (devotional/mythological -> stock-catalog terms)
 # -------------------------------------------------------------
-# Pexels/Pixabay/Coverr/Freepik are general-purpose Western stock libraries.
+# Pexels/Pixabay/Coverr/Wikimedia Commons are general-purpose Western stock libraries.
 # Searching them verbatim for mythological proper nouns or Sanskrit/Hindi
 # terms ("Krishna", "shankh", "Kurukshetra", "aarti"...) returns zero hits
 # far more often than a real match, which is the root cause of "wrong clip"
@@ -356,9 +374,9 @@ def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "lan
         if fetch_coverr_video(candidate, dest_path):
             print(f"  ✅ Video fetched from Coverr ('{candidate}')", flush=True)
             return True
-        # 4. Try Freepik/Magnific (optional, only if FREEPIK_API_KEY is set)
-        if fetch_freepik_video(candidate, dest_path, orientation):
-            print(f"  ✅ Video fetched from Freepik ('{candidate}')", flush=True)
+        # 4. Try Wikimedia Commons (free forever, no key needed)
+        if fetch_wikimedia_video(candidate, dest_path):
+            print(f"  ✅ Video fetched from Wikimedia Commons ('{candidate}')", flush=True)
             return True
     # 5. Last resort before AI generation: your own curated local clips
     if fetch_local_library_video(f"{query} {prompt_text}", dest_path):
@@ -573,7 +591,7 @@ def process_long_scene_visual(scene_info):
     if should_try_video and video_query:
         video_name = f"scene_{idx}.mp4"
         video_dest = f"public/images/{video_name}"
-        print(f"🎥 [Long Scene {idx}] Searching 4K Video (Pexels + Pixabay + Coverr + Freepik + Library) for: '{video_query}'...", flush=True)
+        print(f"🎥 [Long Scene {idx}] Searching 4K Video (Pexels + Pixabay + Coverr + Wikimedia + Library) for: '{video_query}'...", flush=True)
         if fetch_multi_source_video(video_query, video_dest, orientation="landscape", prompt_text=prompt):
             return video_name
 
@@ -594,7 +612,7 @@ def process_shorts_scene_visual(scene_info):
 
     video_name = f"shorts_scene_{idx}.mp4"
     video_dest = f"public/images/{video_name}"
-    print(f"🎥 [Shorts Scene {idx}] Searching Vertical Video (Pexels + Pixabay + Coverr + Freepik + Library)...", flush=True)
+    print(f"🎥 [Shorts Scene {idx}] Searching Vertical Video (Pexels + Pixabay + Coverr + Wikimedia + Library)...", flush=True)
     if fetch_multi_source_video(video_query, video_dest, orientation="portrait", prompt_text=prompt):
         return video_name
 
@@ -706,7 +724,7 @@ async def process():
     with open("out/metadata.json", "w", encoding="utf-8") as f:
         json.dump(seo_metadata, f, ensure_ascii=False, indent=2)
 
-    print("🎉 All Multi-Source Assets (Pexels + Pixabay + Coverr + Freepik + Local Library + FLUX), Thumbnail, Sound Effects, and Metadata ready!", flush=True)
+    print("🎉 All Multi-Source Assets (Pexels + Pixabay + Coverr + Wikimedia + Local Library + FLUX), Thumbnail, Sound Effects, and Metadata ready!", flush=True)
 
 if __name__ == "__main__":
     asyncio.run(process())
