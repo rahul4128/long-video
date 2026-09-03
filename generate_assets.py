@@ -65,11 +65,13 @@ CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "").strip()
 PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "").strip()
 COVERR_API_KEY = os.environ.get("COVERR_API_KEY", "").strip()
+FREEPIK_API_KEY = os.environ.get("FREEPIK_API_KEY", "").strip()
 FREESOUND_API_KEY = os.environ.get("FREESOUND_API_KEY", "").strip()
 
 os.makedirs("public/images", exist_ok=True)
 os.makedirs("public/audio", exist_ok=True)
 os.makedirs("public/audio/effects", exist_ok=True)
+os.makedirs("public/videos_library", exist_ok=True)
 os.makedirs("out", exist_ok=True)
 
 HEADERS = {
@@ -152,18 +154,214 @@ def fetch_coverr_video(query: str, dest_path: str) -> bool:
         print(f"Coverr notice: {e}", flush=True)
     return False
 
-def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "landscape") -> bool:
-    # 1. Try Pexels 4K Video
-    if fetch_pexels_video(query, dest_path, orientation):
-        print(f"  ✅ Video fetched from Pexels 4K ('{query}')", flush=True)
-        return True
-    # 2. Try Pixabay (3D Sacred Animations & Diyas)
-    if fetch_pixabay_video(query, dest_path):
-        print(f"  ✅ Video fetched from Pixabay 3D ('{query}')", flush=True)
-        return True
-    # 3. Try Coverr (free stock B-roll, demo tier)
-    if fetch_coverr_video(query, dest_path):
-        print(f"  ✅ Video fetched from Coverr ('{query}')", flush=True)
+def fetch_freepik_video(query: str, dest_path: str, orientation: str = "landscape") -> bool:
+    """Optional 4th source (Freepik/Magnific Videos API). Only runs if
+    FREEPIK_API_KEY is set - harmless no-op otherwise, same as Coverr. Needs
+    a paid Freepik API plan; verify field names below against your own
+    account's docs.freepik.com response before relying on it, the public
+    docs page didn't expose a full sample payload at the time this was
+    written."""
+    if not FREEPIK_API_KEY or not query:
+        return False
+    try:
+        clean_q = urllib.parse.quote(query.strip()[:60])
+        url = f"https://api.freepik.com/v1/videos?query={clean_q}&order=relevance&page=1"
+        headers = {"x-freepik-api-key": FREEPIK_API_KEY}
+        res = requests.get(url, headers=headers, timeout=15)
+        if res.status_code == 200:
+            data = res.json().get("data", [])
+            if data:
+                video_id = data[0].get("id")
+                # orientation isn't filterable server-side on this endpoint as
+                # documented publicly, so we just take the top relevance hit.
+                dl_url = f"https://api.freepik.com/v1/videos/{video_id}/download"
+                dl_res = requests.get(dl_url, headers=headers, timeout=15)
+                if dl_res.status_code == 200:
+                    file_url = dl_res.json().get("data", {}).get("url")
+                    if file_url:
+                        v_res = requests.get(file_url, timeout=45)
+                        if v_res.status_code == 200 and len(v_res.content) > 100000:
+                            with open(dest_path, "wb") as f:
+                                f.write(v_res.content)
+                            return True
+    except Exception as e:
+        print(f"Freepik notice: {e}", flush=True)
+    return False
+
+def fetch_local_library_video(search_terms: str, dest_path: str) -> bool:
+    """5th and final source: a curated, hand-picked clip you've saved
+    yourself under public/videos_library/<keyword>.mp4 (or
+    <keyword>_1.mp4, <keyword>_2.mp4, ... for several takes of the same
+    keyword - one is picked at random). This is the "guaranteed correct
+    clip" tier: Pexels/Pixabay/Coverr/Freepik are general-purpose Western
+    stock libraries with thin-to-no coverage of devotional/mythological
+    Indian terms (Krishna, shankh, aarti, Kurukshetra...), so a one-time
+    manual download from a permissively-licensed free site - Mixkit
+    (no attribution required), Pixabay, Videvo, or your own Vecteezy/Videezy
+    downloads - saved under a keyword name here will always beat a fuzzy
+    keyword-search match for your recurring niche scenes, and costs
+    nothing to keep using. See public/videos_library/README.md."""
+    library_dir = "public/videos_library"
+    if not os.path.isdir(library_dir) or not search_terms:
+        return False
+    words = [w.strip(".,!?").lower() for w in search_terms.split() if len(w) > 2]
+    try:
+        available = os.listdir(library_dir)
+    except Exception:
+        return False
+    for word in words:
+        matches = [
+            f for f in available
+            if f.lower().startswith(word) and f.lower().endswith(".mp4")
+        ]
+        if matches:
+            chosen = random.choice(matches)
+            try:
+                shutil.copyfile(os.path.join(library_dir, chosen), dest_path)
+                print(f"  📚 Video used from local library ('{chosen}' matched '{word}')", flush=True)
+                return True
+            except Exception as e:
+                print(f"Local library notice: {e}", flush=True)
+    return False
+
+# -------------------------------------------------------------
+# 1b. NICHE QUERY TRANSLATION (devotional/mythological -> stock-catalog terms)
+# -------------------------------------------------------------
+# Pexels/Pixabay/Coverr/Freepik are general-purpose Western stock libraries.
+# Searching them verbatim for mythological proper nouns or Sanskrit/Hindi
+# terms ("Krishna", "shankh", "Kurukshetra", "aarti"...) returns zero hits
+# far more often than a real match, which is the root cause of "wrong clip"
+# - the code then silently falls through to an AI-generated still image
+# instead of real B-roll. NICHE_TERM_REWRITES maps each such term to a
+# broad, visually-descriptive English phrase a general stock library is
+# actually likely to have, so we try progressively more generic queries
+# before giving up on finding real footage.
+NICHE_TERM_REWRITES = {
+    "krishna": "golden deity statue temple",
+    "arjuna": "warrior silhouette battlefield",
+    "mahabharata": "ancient battlefield war dust",
+    "ramayana": "ancient indian palace temple",
+    "shankh": "conch shell",
+    "conch": "conch shell",
+    "diya": "oil lamp flame candle",
+    "aarti": "candle flame ritual ceremony",
+    "chakra": "spinning glowing energy circle",
+    "sudarshan": "golden spinning disc light",
+    "dharma": "temple pillars sunlight",
+    "karma": "temple pillars sunlight",
+    "kurukshetra": "ancient battlefield dust storm",
+    "chariot": "ancient wooden chariot",
+    "bhagavad": "ancient scripture book",
+    "gita": "ancient scripture book",
+    "himalayan": "himalaya mountains temple",
+    "vedic": "ancient temple ritual",
+    "mandir": "hindu temple",
+    "puja": "temple ritual ceremony",
+}
+GENERIC_DEVOTIONAL_FALLBACK = "temple diya candle flame"
+
+def dynamic_ai_query_rewrite(primary_query: str, prompt_text: str) -> list:
+    """Fully automatic, zero-setup version of the rewrite step: asks a small
+    text model on Cloudflare Workers AI to translate THIS scene's wording
+    into generic, visually-concrete English stock-search phrases, at
+    runtime. Reuses the CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN you
+    already have configured for the FLUX image fallback - no new signup, no
+    new secret, nothing to add. Unlike NICHE_TERM_REWRITES (a fixed list of
+    ~20 words I hand-picked), this keeps working for any future character,
+    Sanskrit term, or scene wording you write, without ever touching this
+    file again. Returns [] (silently) if Cloudflare isn't configured or the
+    call fails for any reason - callers fall back to the static dictionary
+    below, so nothing breaks either way."""
+    if not CLOUDFLARE_ACCOUNT_ID or not CLOUDFLARE_API_TOKEN:
+        return []
+    try:
+        url = f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/meta/llama-3.1-8b-instruct"
+        headers = {"Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}", "Content-Type": "application/json"}
+        system_prompt = (
+            "You turn a devotional/mythological Indian video scene description into short, "
+            "generic English stock-footage search phrases (3-5 words each) that a general "
+            "Western stock video library such as Pexels or Pixabay is likely to actually have "
+            "footage for. Never include character names, Sanskrit/Hindi words, or the words "
+            "'India'/'Indian' - describe only the visual: lighting, objects, action, mood. "
+            "Return exactly 3 phrases, one per line, ordered from most specific-but-plausible "
+            "to most generic-and-guaranteed-to-exist. No numbering, no extra text, no quotes."
+        )
+        user_prompt = f"Scene search query: {primary_query}\nScene image prompt: {prompt_text}"
+        res = requests.post(
+            url, headers=headers, timeout=20,
+            json={"messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]},
+        )
+        if res.status_code == 200:
+            text = res.json().get("result", {}).get("response", "")
+            phrases = [line.strip("-•* ").strip() for line in text.strip().split("\n")]
+            return [p for p in phrases if p][:3]
+    except Exception as e:
+        print(f"Dynamic query-rewrite notice: {e}", flush=True)
+    return []
+
+def build_query_candidates(primary_query: str, prompt_text: str = "") -> list:
+    """Turn one niche videoSearchQuery into an ordered list of queries to
+    try against every stock source: the original phrase first (it may well
+    hit), then AI-generated rewrites from dynamic_ai_query_rewrite() (fully
+    automatic, works for any wording, uses your existing Cloudflare key),
+    then a static-dictionary rewrite as an offline safety net if Cloudflare
+    isn't configured or returned nothing, then the original with untranslated
+    niche words simply removed, then a generic devotional B-roll phrase as a
+    last resort - so the search chain almost never comes back completely
+    empty before falling back to AI image generation."""
+    candidates = []
+    original = (primary_query or "").strip()
+    if original:
+        candidates.append(original)
+
+    for ai_phrase in dynamic_ai_query_rewrite(original, prompt_text):
+        if ai_phrase not in candidates:
+            candidates.append(ai_phrase)
+
+    lowered = f"{original} {prompt_text}".lower()
+    rewritten_phrases = []
+    for term, synonym in NICHE_TERM_REWRITES.items():
+        if term in lowered:
+            rewritten_phrases.extend(synonym.split())
+    if rewritten_phrases:
+        deduped_words = list(dict.fromkeys(rewritten_phrases))[:8]  # cap word count, not char count - avoids cutting a word in half
+        rewritten = " ".join(deduped_words)
+        if rewritten and rewritten not in candidates:
+            candidates.append(rewritten)
+
+    generic_words = [w for w in original.split() if w.lower() not in NICHE_TERM_REWRITES]
+    generic_query = " ".join(generic_words).strip()
+    if generic_query and generic_query not in candidates:
+        candidates.append(generic_query)
+
+    if GENERIC_DEVOTIONAL_FALLBACK not in candidates:
+        candidates.append(GENERIC_DEVOTIONAL_FALLBACK)
+
+    return candidates
+
+def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "landscape", prompt_text: str = "") -> bool:
+    for candidate in build_query_candidates(query, prompt_text):
+        # 1. Try Pexels 4K Video
+        if fetch_pexels_video(candidate, dest_path, orientation):
+            print(f"  ✅ Video fetched from Pexels 4K ('{candidate}')", flush=True)
+            return True
+        # 2. Try Pixabay (3D Sacred Animations & Diyas)
+        if fetch_pixabay_video(candidate, dest_path):
+            print(f"  ✅ Video fetched from Pixabay 3D ('{candidate}')", flush=True)
+            return True
+        # 3. Try Coverr (free stock B-roll, demo tier)
+        if fetch_coverr_video(candidate, dest_path):
+            print(f"  ✅ Video fetched from Coverr ('{candidate}')", flush=True)
+            return True
+        # 4. Try Freepik/Magnific (optional, only if FREEPIK_API_KEY is set)
+        if fetch_freepik_video(candidate, dest_path, orientation):
+            print(f"  ✅ Video fetched from Freepik ('{candidate}')", flush=True)
+            return True
+    # 5. Last resort before AI generation: your own curated local clips
+    if fetch_local_library_video(f"{query} {prompt_text}", dest_path):
         return True
     return False
 
@@ -375,8 +573,8 @@ def process_long_scene_visual(scene_info):
     if should_try_video and video_query:
         video_name = f"scene_{idx}.mp4"
         video_dest = f"public/images/{video_name}"
-        print(f"🎥 [Long Scene {idx}] Searching 4K Video (Pexels + Pixabay + Coverr) for: '{video_query}'...", flush=True)
-        if fetch_multi_source_video(video_query, video_dest, orientation="landscape"):
+        print(f"🎥 [Long Scene {idx}] Searching 4K Video (Pexels + Pixabay + Coverr + Freepik + Library) for: '{video_query}'...", flush=True)
+        if fetch_multi_source_video(video_query, video_dest, orientation="landscape", prompt_text=prompt):
             return video_name
 
     img_name = f"scene_{idx}.jpg"
@@ -396,8 +594,8 @@ def process_shorts_scene_visual(scene_info):
 
     video_name = f"shorts_scene_{idx}.mp4"
     video_dest = f"public/images/{video_name}"
-    print(f"🎥 [Shorts Scene {idx}] Searching Vertical Video (Pexels + Pixabay + Coverr)...", flush=True)
-    if fetch_multi_source_video(video_query, video_dest, orientation="portrait"):
+    print(f"🎥 [Shorts Scene {idx}] Searching Vertical Video (Pexels + Pixabay + Coverr + Freepik + Library)...", flush=True)
+    if fetch_multi_source_video(video_query, video_dest, orientation="portrait", prompt_text=prompt):
         return video_name
 
     img_name = f"shorts_scene_{idx}.jpg"
@@ -508,7 +706,7 @@ async def process():
     with open("out/metadata.json", "w", encoding="utf-8") as f:
         json.dump(seo_metadata, f, ensure_ascii=False, indent=2)
 
-    print("🎉 All Multi-Source Assets (Pexels + Pixabay + Coverr + FLUX), Thumbnail, Sound Effects, and Metadata ready!", flush=True)
+    print("🎉 All Multi-Source Assets (Pexels + Pixabay + Coverr + Freepik + Local Library + FLUX), Thumbnail, Sound Effects, and Metadata ready!", flush=True)
 
 if __name__ == "__main__":
     asyncio.run(process())
