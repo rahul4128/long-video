@@ -1,8 +1,8 @@
 # Local curated video library (5th fallback tier)
 
 This folder is the "guaranteed correct clip" tier for niche devotional /
-mythological scenes. Pexels, Pixabay, Coverr, and Freepik are all
-general-purpose **Western** stock libraries — they have thin-to-no coverage
+mythological scenes. Pexels, Pixabay, and Coverr are all general-purpose
+**Western** stock libraries — they have thin-to-no coverage
 of Sanskrit/Hindi terms or mythological proper nouns (Krishna, shankh,
 aarti, Kurukshetra, Sudarshan Chakra...). `generate_assets.py` now rewrites
 those terms into broader English phrases before searching (see
@@ -13,6 +13,11 @@ those terms into broader English phrases before searching (see
 This folder lets you pin an exact, hand-picked clip to a keyword once, for
 free, and reuse it forever — no API key, no per-run search, no risk of the
 wrong clip.
+
+(There's also now a 4th automatic search source, Wikimedia Commons —
+completely free, no key needed, and it actually hosts real Indian
+temple/festival/ritual footage. It's tried automatically before this
+folder, so you may find you don't need to add many files here at all.)
 
 ## How it works
 
