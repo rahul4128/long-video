@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import time
 import base64
@@ -79,41 +80,106 @@ HEADERS = {
 }
 
 # -------------------------------------------------------------
+# 0b. STOCK-CLIP RELEVANCE SCORING (keyword overlap against scene wording)
+# -------------------------------------------------------------
+# Every fetch_*_video() below used to just take hit #1 from its API and trust
+# it blindly - the search endpoint's own relevance ranking was the only
+# safeguard, which for this niche (Krishna/Kurukshetra/aarti searched against
+# generic Western stock catalogs) is often too loose: a query like "golden
+# deity statue temple" can just as easily return a Buddhist temple in
+# Thailand as anything a viewer reads as "this devotional Hindu story", and a
+# short/ambiguous query like "conch shell" can return a beach photo-shoot
+# clip with a shell prop instead of a ritual moment. This scores each
+# candidate hit's own descriptive text (Pixabay's tags, Coverr's title/tags,
+# Wikimedia's page title, Pexels' URL slug) against the words actually in
+# THIS scene's search query + imagePrompt, and only accepts a hit that shares
+# at least one real keyword - otherwise that source is treated as a miss for
+# this scene and the caller falls through to the next source/candidate query,
+# same philosophy as the "no generic catch-all" rule in build_query_candidates()
+# below: better to run out of real matches than show something confidently
+# wrong.
+_STOPWORDS = {
+    "the", "a", "an", "and", "or", "with", "in", "on", "of", "for", "to", "at",
+    "is", "are", "by", "from", "this", "that", "scene", "cinematic", "shot",
+    "lighting", "composition", "16:9", "9:16", "divine", "warm", "file",
+}
+
+def _extract_keywords(*texts: str) -> set:
+    words = set()
+    for text in texts:
+        if not text:
+            continue
+        for raw in re.split(r"[\s/_\-.,!?()]+", str(text).lower()):
+            if len(raw) > 2 and raw not in _STOPWORDS:
+                words.add(raw)
+    return words
+
+def _best_scoring_index(candidate_texts: list, target_keywords):
+    """Returns (best_index, best_score, any_text_available) for a list of
+    candidate descriptive strings (one per API hit, "" where a source gives
+    no usable text). any_text_available is False when every hit had no text
+    at all, so callers fall back to "just take hit #1" rather than reject a
+    source that structurally can't be scored."""
+    if not target_keywords:
+        return 0, 0, False
+    if not any(candidate_texts):
+        return 0, 0, False
+    scores = [len(_extract_keywords(t) & target_keywords) for t in candidate_texts]
+    best_index = max(range(len(scores)), key=lambda i: scores[i])
+    return best_index, scores[best_index], True
+
+# -------------------------------------------------------------
 # 1. MULTI-PLATFORM STOCK VIDEO ENGINE (Pexels + Pixabay + Coverr)
 # -------------------------------------------------------------
-def fetch_pexels_video(query: str, dest_path: str, orientation: str = "landscape") -> bool:
+def fetch_pexels_video(query: str, dest_path: str, orientation: str = "landscape", target_keywords: set = None) -> bool:
     if not PEXELS_API_KEY or not query:
         return False
     try:
         clean_q = urllib.parse.quote(query.strip()[:60])
-        url = f"https://api.pexels.com/videos/search?query={clean_q}&orientation={orientation}&per_page=4"
+        # per_page raised 4 -> 6: gives the relevance scorer below a bigger
+        # pool to pick a genuine match from, instead of only ever choosing
+        # between whichever 4 hits happened to sort first.
+        url = f"https://api.pexels.com/videos/search?query={clean_q}&orientation={orientation}&per_page=6"
         res = requests.get(url, headers={"Authorization": PEXELS_API_KEY}, timeout=15)
         if res.status_code == 200:
             videos = res.json().get("videos", [])
-            if videos:
-                files = videos[0].get("video_files", [])
-                # Pick the SMALLEST file that's still >=1080p, not just the first
-                # one that clears the bar - Pexels' video_files aren't size-ordered,
-                # so the naive "first match" could just as easily grab a 4K file.
-                # A 4K clip takes ~4x longer to download AND ~4x longer for Remotion
-                # to decode frame-by-frame during render, for zero visible quality
-                # gain in a 1920x1080 output composition.
-                hd_files = sorted(
-                    (f for f in files if f.get("width", 0) >= 1080),
-                    key=lambda f: f.get("width", 0),
-                )
-                target_file = hd_files[0] if hd_files else (files[0] if files else {})
-                video_url = target_file.get("link")
-                v_res = requests.get(video_url, timeout=45)
-                if v_res.status_code == 200 and len(v_res.content) > 100000:
-                    with open(dest_path, "wb") as f:
-                        f.write(v_res.content)
-                    return True
+            if not videos:
+                return False
+            # Pexels doesn't expose tags on video search results, but its own
+            # URL slug (".../video/a-monk-praying-at-a-temple-1571995/") is
+            # genuinely descriptive - score each hit's slug against this
+            # scene's wording and prefer the best match over hit #1.
+            best_idx, best_score, scorable = _best_scoring_index(
+                [v.get("url", "") for v in videos], target_keywords
+            )
+            if scorable and best_score == 0:
+                return False
+            chosen = videos[best_idx] if scorable else videos[0]
+            files = chosen.get("video_files", [])
+            # Pick the SMALLEST file that's still >=1080p, not just the first
+            # one that clears the bar - Pexels' video_files aren't size-ordered,
+            # so the naive "first match" could just as easily grab a 4K file.
+            # A 4K clip takes ~4x longer to download AND ~4x longer for Remotion
+            # to decode frame-by-frame during render, for zero visible quality
+            # gain in a 1920x1080 output composition.
+            hd_files = sorted(
+                (f for f in files if f.get("width", 0) >= 1080),
+                key=lambda f: f.get("width", 0),
+            )
+            target_file = hd_files[0] if hd_files else (files[0] if files else {})
+            video_url = target_file.get("link")
+            if not video_url:
+                return False
+            v_res = requests.get(video_url, timeout=45)
+            if v_res.status_code == 200 and len(v_res.content) > 100000:
+                with open(dest_path, "wb") as f:
+                    f.write(v_res.content)
+                return True
     except Exception as e:
         print(f"Pexels notice: {e}", flush=True)
     return False
 
-def fetch_pixabay_video(query: str, dest_path: str) -> bool:
+def fetch_pixabay_video(query: str, dest_path: str, target_keywords: set = None) -> bool:
     if not PIXABAY_API_KEY or not query:
         return False
     clean_q = urllib.parse.quote(query.strip()[:60])
@@ -122,45 +188,68 @@ def fetch_pixabay_video(query: str, dest_path: str) -> bool:
     # any video type if no animation-tagged result is found for this query.
     for video_type in ("animation", "all"):
         try:
-            url = f"https://pixabay.com/api/videos/?key={PIXABAY_API_KEY}&q={clean_q}&video_type={video_type}&per_page=4"
+            url = f"https://pixabay.com/api/videos/?key={PIXABAY_API_KEY}&q={clean_q}&video_type={video_type}&per_page=6"
             res = requests.get(url, timeout=15)
             if res.status_code == 200:
                 hits = res.json().get("hits", [])
-                if hits:
-                    videos_dict = hits[0].get("videos", {})
-                    target = videos_dict.get("large") or videos_dict.get("medium") or videos_dict.get("small")
-                    if target and target.get("url"):
-                        v_res = requests.get(target.get("url"), timeout=45)
-                        if v_res.status_code == 200 and len(v_res.content) > 100000:
-                            with open(dest_path, "wb") as f:
-                                f.write(v_res.content)
-                            return True
-        except Exception as e:
-            print(f"Pixabay notice ({video_type}): {e}", flush=True)
-    return False
-
-def fetch_coverr_video(query: str, dest_path: str) -> bool:
-    if not COVERR_API_KEY or not query:
-        return False
-    try:
-        clean_q = urllib.parse.quote(query.strip()[:60])
-        url = f"https://api.coverr.co/videos?query={clean_q}&urls=true&page_size=4"
-        res = requests.get(url, headers={"Authorization": f"Bearer {COVERR_API_KEY}"}, timeout=15)
-        if res.status_code == 200:
-            hits = res.json().get("hits", [])
-            if hits:
-                video_url = (hits[0].get("urls") or {}).get("mp4")
-                if video_url:
-                    v_res = requests.get(video_url, timeout=45)
+                if not hits:
+                    continue
+                # Pixabay hits carry a real, usually-thorough "tags" field -
+                # the strongest relevance signal of any source here.
+                best_idx, best_score, scorable = _best_scoring_index(
+                    [h.get("tags", "") for h in hits], target_keywords
+                )
+                if scorable and best_score == 0:
+                    continue
+                chosen = hits[best_idx] if scorable else hits[0]
+                videos_dict = chosen.get("videos", {})
+                target = videos_dict.get("large") or videos_dict.get("medium") or videos_dict.get("small")
+                if target and target.get("url"):
+                    v_res = requests.get(target.get("url"), timeout=45)
                     if v_res.status_code == 200 and len(v_res.content) > 100000:
                         with open(dest_path, "wb") as f:
                             f.write(v_res.content)
                         return True
+        except Exception as e:
+            print(f"Pixabay notice ({video_type}): {e}", flush=True)
+    return False
+
+def _coverr_tags_text(hit: dict) -> str:
+    tags = hit.get("tags") or []
+    if isinstance(tags, str):
+        return tags
+    return " ".join(str(t) for t in tags)
+
+def fetch_coverr_video(query: str, dest_path: str, target_keywords: set = None) -> bool:
+    if not COVERR_API_KEY or not query:
+        return False
+    try:
+        clean_q = urllib.parse.quote(query.strip()[:60])
+        url = f"https://api.coverr.co/videos?query={clean_q}&urls=true&page_size=6"
+        res = requests.get(url, headers={"Authorization": f"Bearer {COVERR_API_KEY}"}, timeout=15)
+        if res.status_code == 200:
+            hits = res.json().get("hits", [])
+            if not hits:
+                return False
+            best_idx, best_score, scorable = _best_scoring_index(
+                [f"{h.get('title', '')} {_coverr_tags_text(h)}" for h in hits],
+                target_keywords,
+            )
+            if scorable and best_score == 0:
+                return False
+            chosen = hits[best_idx] if scorable else hits[0]
+            video_url = (chosen.get("urls") or {}).get("mp4")
+            if video_url:
+                v_res = requests.get(video_url, timeout=45)
+                if v_res.status_code == 200 and len(v_res.content) > 100000:
+                    with open(dest_path, "wb") as f:
+                        f.write(v_res.content)
+                    return True
     except Exception as e:
         print(f"Coverr notice: {e}", flush=True)
     return False
 
-def fetch_wikimedia_video(query: str, dest_path: str) -> bool:
+def fetch_wikimedia_video(query: str, dest_path: str, target_keywords: set = None) -> bool:
     """4th source: Wikimedia Commons - run by the nonprofit Wikimedia
     Foundation (same people behind Wikipedia). Completely free forever, no
     signup, no API key, no subscription, no rate-limit key required for
@@ -176,43 +265,72 @@ def fetch_wikimedia_video(query: str, dest_path: str) -> bool:
     raw_path = dest_path + ".raw"
     try:
         clean_q = urllib.parse.quote(f"filetype:video {query.strip()[:60]}")
+        # gsrlimit raised 5 -> 8: more candidates for the relevance scorer to
+        # choose the best-titled match from.
         search_url = (
             "https://commons.wikimedia.org/w/api.php?action=query&format=json"
-            f"&generator=search&gsrsearch={clean_q}&gsrnamespace=6&gsrlimit=5"
+            f"&generator=search&gsrsearch={clean_q}&gsrnamespace=6&gsrlimit=8"
             "&prop=imageinfo&iiprop=url%7Cmime%7Csize"
         )
         # Wikimedia's API etiquette asks for a descriptive User-Agent - not
         # a key, just identifying info in case they ever need to reach out.
         wiki_headers = {"User-Agent": "long-video-devotional-bot/1.0 (automated free stock B-roll fetch)"}
         res = requests.get(search_url, headers=wiki_headers, timeout=15)
-        if res.status_code == 200:
-            pages = res.json().get("query", {}).get("pages", {})
-            for page in pages.values():
-                infos = page.get("imageinfo", [])
-                if not infos:
-                    continue
-                mime = infos[0].get("mime", "")
-                file_url = infos[0].get("url")
-                if not file_url or not mime.startswith("video/"):
-                    continue
-                v_res = requests.get(file_url, headers=wiki_headers, timeout=45)
-                if v_res.status_code == 200 and len(v_res.content) > 100000:
-                    with open(raw_path, "wb") as f:
-                        f.write(v_res.content)
-                    convert = subprocess.run(
-                        # Cap at 1920px wide (scale is a no-op if the source is
-                        # already smaller) - Commons videos can come back at very
-                        # high source resolution, and decoding that during Remotion
-                        # render costs real minutes for zero visible gain in a
-                        # 1920x1080 composition. "-2" keeps height even (required
-                        # by yuv420p) while preserving aspect ratio.
-                        ["ffmpeg", "-y", "-i", raw_path, "-vf", "scale='min(1920,iw)':-2",
-                         "-c:v", "libx264", "-preset", "veryfast",
-                         "-pix_fmt", "yuv420p", "-c:a", "aac", dest_path],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    )
-                    if convert.returncode == 0 and os.path.exists(dest_path) and os.path.getsize(dest_path) > 50000:
-                        return True
+        if res.status_code != 200:
+            return False
+        pages = res.json().get("query", {}).get("pages", {})
+        candidates = []
+        for page in pages.values():
+            infos = page.get("imageinfo", [])
+            if not infos:
+                continue
+            mime = infos[0].get("mime", "")
+            file_url = infos[0].get("url")
+            if not file_url or not mime.startswith("video/"):
+                continue
+            candidates.append((page.get("title", ""), file_url))
+        if not candidates:
+            return False
+
+        # Commons page titles are genuinely descriptive (e.g. "File:Ganesh
+        # Chaturthi immersion procession Mumbai.webm") - score them and try
+        # the best-matching candidates first, falling through to the next
+        # one if a download/transcode fails, instead of only ever trying
+        # whichever page the search API happened to rank first.
+        best_idx, best_score, scorable = _best_scoring_index(
+            [title for title, _ in candidates], target_keywords
+        )
+        if scorable and best_score == 0:
+            return False
+        ordered = candidates
+        if scorable:
+            ordered = sorted(
+                candidates,
+                key=lambda c: len(_extract_keywords(c[0]) & target_keywords),
+                reverse=True,
+            )
+
+        for _title, file_url in ordered:
+            v_res = requests.get(file_url, headers=wiki_headers, timeout=45)
+            if v_res.status_code == 200 and len(v_res.content) > 100000:
+                with open(raw_path, "wb") as f:
+                    f.write(v_res.content)
+                convert = subprocess.run(
+                    # Cap at 1920px wide (scale is a no-op if the source is
+                    # already smaller) - Commons videos can come back at very
+                    # high source resolution, and decoding that during Remotion
+                    # render costs real minutes for zero visible gain in a
+                    # 1920x1080 composition. "-2" keeps height even (required
+                    # by yuv420p) while preserving aspect ratio.
+                    ["ffmpeg", "-y", "-i", raw_path, "-vf", "scale='min(1920,iw)':-2",
+                     "-c:v", "libx264", "-preset", "veryfast",
+                     "-pix_fmt", "yuv420p", "-c:a", "aac", dest_path],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                if convert.returncode == 0 and os.path.exists(dest_path) and os.path.getsize(dest_path) > 50000:
+                    return True
+            if os.path.exists(raw_path):
+                os.remove(raw_path)
     except Exception as e:
         print(f"Wikimedia Commons notice: {e}", flush=True)
     finally:
@@ -380,20 +498,27 @@ def build_query_candidates(primary_query: str, prompt_text: str = "") -> list:
 
 def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "landscape", prompt_text: str = "") -> bool:
     for candidate in build_query_candidates(query, prompt_text):
+        # The relevance target is the candidate query itself plus the scene's
+        # own imagePrompt (already visually descriptive) - NOT the original
+        # unrewritten query, so a rewritten candidate like "candle flame
+        # ritual ceremony" is scored against exactly the words a stock hit
+        # would need to match, while still crediting extra descriptive words
+        # from the scene (e.g. "golden", "battlefield") if present.
+        target_keywords = _extract_keywords(candidate, prompt_text)
         # 1. Try Pexels 4K Video
-        if fetch_pexels_video(candidate, dest_path, orientation):
+        if fetch_pexels_video(candidate, dest_path, orientation, target_keywords):
             print(f"  ✅ Video fetched from Pexels 4K ('{candidate}')", flush=True)
             return True
         # 2. Try Pixabay (3D Sacred Animations & Diyas)
-        if fetch_pixabay_video(candidate, dest_path):
+        if fetch_pixabay_video(candidate, dest_path, target_keywords):
             print(f"  ✅ Video fetched from Pixabay 3D ('{candidate}')", flush=True)
             return True
         # 3. Try Coverr (free stock B-roll, demo tier)
-        if fetch_coverr_video(candidate, dest_path):
+        if fetch_coverr_video(candidate, dest_path, target_keywords):
             print(f"  ✅ Video fetched from Coverr ('{candidate}')", flush=True)
             return True
         # 4. Try Wikimedia Commons (free forever, no key needed)
-        if fetch_wikimedia_video(candidate, dest_path):
+        if fetch_wikimedia_video(candidate, dest_path, target_keywords):
             print(f"  ✅ Video fetched from Wikimedia Commons ('{candidate}')", flush=True)
             return True
     # 5. Last resort before AI generation: your own curated local clips
@@ -687,6 +812,60 @@ def resolve_sound_effect_audio(effect_name: str, dest_path: str) -> None:
     print(f"  ⚠️ Sound effect '{effect_name}' unavailable ({reason}, no library file, no bgm.mp3) - using silence", flush=True)
 
 # -------------------------------------------------------------
+# 3c. MULTI-SHOT AI IMAGES (visual variety for scenes that fall back to a
+#     static image instead of real video footage)
+# -------------------------------------------------------------
+# Scene duration was recently raised (10-15 minute total target) so a single
+# scene can now easily run 30-55 seconds. A scene that falls back to a
+# generated still image used to hold that ONE image on screen for the whole
+# time, under only a slow, barely-perceptible Ken Burns pan - which is
+# exactly the "feels like one image for 10 sec" complaint. Instead of
+# generating one image per image-type scene, we now generate a small number
+# of distinct AI images for the SAME subject/setting (same imagePrompt, a
+# different framing hint appended each time) and let Scene.tsx cut between
+# them with its own short cross-fade + fresh Ken Burns per sub-shot - real
+# footage still always wins when a matching stock clip is found; this only
+# affects the image fallback path.
+SUB_SHOT_FRAMING_HINTS = [
+    "wide establishing shot, full scene visible, epic scale",
+    "close-up shot, emotional facial expression, shallow depth of field",
+    "medium shot, different camera angle, side profile",
+    "dramatic low-angle shot, intense mood, rim lighting",
+]
+
+SUB_SHOT_SECONDS = 14.0  # roughly how long one still image can hold viewer interest
+
+def estimate_scene_duration_seconds(narration_text: str) -> float:
+    """Rough speaking-time estimate for Hindi narration, used only to decide
+    how many AI-image sub-shots a static-image scene deserves - the real,
+    ffprobe-measured duration isn't known yet at this point in the pipeline
+    (audio and visuals are generated in parallel for speed, see process()).
+    Deliberately a slight overestimate (fewer words/sec than natural spoken
+    Hindi) so a scene is never under-provisioned with sub-shots."""
+    words = len((narration_text or "").split())
+    return max(3.0, words / 2.5)
+
+def generate_multi_shot_ai_images(prompt: str, base_name: str, aspect_ratio: str, count: int,
+                                   pollinations_width: int, pollinations_height: int) -> list:
+    """Generates `count` distinct AI images for the SAME scene (same subject/
+    setting/character, so the scene still reads as one continuous moment) by
+    appending a different framing hint from SUB_SHOT_FRAMING_HINTS to the
+    scene's own imagePrompt each time. Returns the list of filenames (bare,
+    relative to public/images/) in shot order, for Scene.tsx's multi-shot
+    slideshow to cross-fade between."""
+    filenames = []
+    for i in range(count):
+        hint = SUB_SHOT_FRAMING_HINTS[i % len(SUB_SHOT_FRAMING_HINTS)]
+        shot_prompt = f"{prompt}, {hint}"
+        suffix = chr(ord('a') + i)
+        fname = f"{base_name}_{suffix}.jpg"
+        dest = f"public/images/{fname}"
+        generate_ai_image(shot_prompt, dest, aspect_ratio=aspect_ratio,
+                           pollinations_width=pollinations_width, pollinations_height=pollinations_height)
+        filenames.append(fname)
+    return filenames
+
+# -------------------------------------------------------------
 # 4. PROCESS LONG VIDEO SCENES (Pexels + Pixabay + Coverr + FLUX.1)
 # -------------------------------------------------------------
 def process_long_scene_visual(scene_info):
@@ -708,11 +887,15 @@ def process_long_scene_visual(scene_info):
         if fetch_multi_source_video(video_query, video_dest, orientation="landscape", prompt_text=prompt):
             return video_name
 
-    img_name = f"scene_{idx}.jpg"
-    img_dest = f"public/images/{img_name}"
-    print(f"🎨 [Long Scene {idx}] Generating FLUX.1 visual: {prompt[:40]}...", flush=True)
-    generate_ai_image(prompt, img_dest, aspect_ratio="16:9", pollinations_width=1920, pollinations_height=1080)
-    return img_name
+    narration_text = scene.get("text") or scene.get("narration_chunk", "")
+    est_duration = estimate_scene_duration_seconds(narration_text)
+    num_shots = max(1, min(4, round(est_duration / SUB_SHOT_SECONDS)))
+    print(f"🎨 [Long Scene {idx}] Generating {num_shots} FLUX.1 visual sub-shot(s): {prompt[:40]}...", flush=True)
+    filenames = generate_multi_shot_ai_images(
+        prompt, f"scene_{idx}", "16:9", num_shots,
+        pollinations_width=1920, pollinations_height=1080,
+    )
+    return filenames if num_shots > 1 else filenames[0]
 
 # -------------------------------------------------------------
 # 5. PROCESS SHORTS SCENES (9:16 Vertical)
@@ -728,12 +911,17 @@ def process_shorts_scene_visual(scene_info):
     if fetch_multi_source_video(video_query, video_dest, orientation="portrait", prompt_text=prompt):
         return video_name
 
-    img_name = f"shorts_scene_{idx}.jpg"
-    img_dest = f"public/images/{img_name}"
-    print(f"🎨 [Shorts Scene {idx}] Generating 9:16 FLUX.1 visual...", flush=True)
-    generate_ai_image(f"{prompt}, vertical 9:16 composition", img_dest, aspect_ratio="9:16",
-                       pollinations_width=1080, pollinations_height=1920)
-    return img_name
+    narration_text = scene.get("text") or scene.get("narration_chunk", "")
+    est_duration = estimate_scene_duration_seconds(narration_text)
+    # Shorts scenes are naturally briefer and vertical framing has less room
+    # for a wide/medium-shot distinction, so cap at 2 sub-shots instead of 4.
+    num_shots = max(1, min(2, round(est_duration / SUB_SHOT_SECONDS)))
+    print(f"🎨 [Shorts Scene {idx}] Generating {num_shots} 9:16 FLUX.1 visual sub-shot(s)...", flush=True)
+    filenames = generate_multi_shot_ai_images(
+        f"{prompt}, vertical 9:16 composition", f"shorts_scene_{idx}", "9:16", num_shots,
+        pollinations_width=1080, pollinations_height=1920,
+    )
+    return filenames if num_shots > 1 else filenames[0]
 
 # -------------------------------------------------------------
 # 5b. AUTO-CHAPTERS (YouTube description timestamps)
