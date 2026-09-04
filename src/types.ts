@@ -1,3 +1,9 @@
+export interface WordTiming {
+  word: string;
+  start: number;
+  end: number;
+}
+
 export interface SceneItem {
   scene_number: number;
   durationInSeconds: number;
@@ -10,6 +16,12 @@ export interface SceneItem {
   // time.
   imageFileName: string | string[];
   soundEffect?: 'temple_bell' | 'shankh' | 'om_drone' | 'flute_swell' | 'none';
+  // Word-level caption timing captured during TTS synthesis (see
+  // generate_clean_audio() in generate_assets.py) - drives the progressive,
+  // karaoke-style captions in Subtitles.tsx. Optional so older props.json
+  // files (or a TTS attempt that couldn't capture WordBoundary events)
+  // still render fine with the static full-sentence fallback.
+  words?: WordTiming[];
 }
 
 export interface SEOMetadata {
