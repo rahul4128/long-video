@@ -65,6 +65,7 @@ jobs:
             public/audio
             public/props.json
             public/props_shorts.json
+            public/thumbnail_props.json
             out/thumbnail.jpg
             out/metadata.json
           retention-days: 1
@@ -178,15 +179,75 @@ jobs:
           retention-days: 14
 
   # ---------------------------------------------------------------
-  # JOB 4: Once both renders are done, publish a GitHub Release
-  # carrying the long video, the shorts video and the thumbnail as
-  # public, no-auth-required download links, then notify the Make.com
-  # scenario (one webhook call, handles both videos) so it uploads
-  # both to YouTube with title/description/thumbnail and files each
-  # into its playlist.
+  # JOB 4: Render the final thumbnail - the plain AI background image
+  # (already produced by generate-assets) with a bold Hindi hook-text
+  # overlay, rendered through Remotion/Chromium via `npx remotion still`
+  # so Devanagari script shapes correctly (this is the same rendering
+  # pipeline that already renders Subtitles.tsx's captions correctly -
+  # a plain image-editing text overlay risks garbled conjuncts/matras).
+  # Only depends on generate-assets, so it runs in parallel with the two
+  # video render jobs above rather than adding to the critical path.
+  # ---------------------------------------------------------------
+  render-thumbnail:
+    needs: generate-assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache node modules
+        id: npm-cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'package.json') }}
+
+      - name: Install Node.js Dependencies
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        run: npm install
+
+      - name: Cache apt packages (ffmpeg + fonts)
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives/*.deb
+          key: apt-archives-${{ runner.os }}-ffmpeg-fonts-v1
+
+      - name: Install System Dependencies (ffmpeg + fonts)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-core fonts-deva
+
+      - name: Download generated assets
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-assets-${{ github.run_id }}
+
+      - name: Render Thumbnail (background image + bold Hindi hook-text overlay)
+        run: |
+          npx remotion still ThumbnailComposition out/thumbnail.jpg --props=public/thumbnail_props.json
+
+      - name: Upload Thumbnail Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: devotional-thumbnail-${{ github.run_id }}
+          path: out/thumbnail.jpg
+          retention-days: 1
+
+  # ---------------------------------------------------------------
+  # JOB 5: Once both video renders and the thumbnail render are done,
+  # publish a GitHub Release carrying the long video, the shorts video
+  # and the text-overlaid thumbnail as public, no-auth-required download
+  # links, then notify the Make.com scenario (one webhook call, handles
+  # both videos) so it uploads both to YouTube with title/description/
+  # thumbnail and files each into its playlist.
   # ---------------------------------------------------------------
   publish-and-notify:
-    needs: [generate-assets, render-long, render-shorts]
+    needs: [generate-assets, render-long, render-shorts, render-thumbnail]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -194,7 +255,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download generated assets (thumbnail + metadata)
+      - name: Download generated assets (metadata)
         uses: actions/download-artifact@v4
         with:
           name: generated-assets-${{ github.run_id }}
@@ -212,6 +273,12 @@ jobs:
           name: devotional-shorts-${{ github.run_id }}
           path: shorts
 
+      - name: Download rendered thumbnail (with hook-text overlay)
+        uses: actions/download-artifact@v4
+        with:
+          name: devotional-thumbnail-${{ github.run_id }}
+          path: thumbnail_final
+
       - name: Create GitHub Release with video + thumbnail assets
         id: release
         env:
@@ -222,7 +289,7 @@ jobs:
           gh release create "$TAG" \
             "video/final_video.mp4" \
             "shorts/final_video_shorts.mp4" \
-            "assets/out/thumbnail.jpg" \
+            "thumbnail_final/out/thumbnail.jpg" \
             --repo "${{ github.repository }}" \
             --title "Devotional upload $TAG" \
             --notes "Automated release - source assets for the Make.com YouTube upload webhook."
