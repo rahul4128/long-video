@@ -976,6 +976,30 @@ async def process():
     generate_ai_image(thumb_prompt, thumb_dest, aspect_ratio="16:9", pollinations_width=1920, pollinations_height=1080)
     subprocess.run(["cp", thumb_dest, "out/thumbnail.jpg"], check=False)
 
+    # 2b. Thumbnail hook-text props, for the Remotion ThumbnailComposition
+    # still-render in the GitHub Actions workflow (see render.yml's
+    # render-thumbnail job) that overlays bold Hindi hook text on top of the
+    # background image generated just above. Rendered through Remotion/
+    # Chromium - the same pipeline that already renders Devanagari captions
+    # correctly in Subtitles.tsx - rather than a naive image-library text
+    # overlay, which risks garbled conjuncts/matra-reordering for Hindi
+    # script. out/thumbnail.jpg above stays as the plain background image;
+    # the render-thumbnail job produces the final text-overlaid version that
+    # publish-and-notify actually releases and sends to YouTube.
+    thumbnail_hook_text = (thumbnail_data.get("thumbnailText") or "").strip()
+    if not thumbnail_hook_text:
+        # Fallback so the thumbnail still gets SOME on-image text even if the
+        # upstream Make.com prompt hasn't been updated yet to supply a
+        # dedicated thumbnailText field - a short slice of the video's own
+        # title beats no text at all.
+        fallback_title = (seo_metadata.get("long_video_title") or "").strip()
+        thumbnail_hook_text = " ".join(fallback_title.split()[:6])
+    with open("public/thumbnail_props.json", "w", encoding="utf-8") as f:
+        json.dump(
+            {"backgroundImage": "thumbnail.jpg", "hookText": thumbnail_hook_text},
+            f, ensure_ascii=False, indent=2,
+        )
+
     # 3. Parallel Visuals (Pexels + Pixabay + Coverr + FLUX.1 for Long & Shorts)
     long_items = [(i + 1, s) for i, s in enumerate(long_scenes)]
     shorts_items = [(i + 1, s) for i, s in enumerate(shorts_scenes)]
