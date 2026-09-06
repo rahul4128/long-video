@@ -13,6 +13,11 @@ jobs:
   # ---------------------------------------------------------------
   generate-assets:
     runs-on: ubuntu-latest
+    # Needed so the "Persist clip-usage history" step below can push
+    # used_clips_history.json back to the repo (see generate_assets.py's
+    # clip-usage-history section for why this file exists).
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -53,6 +58,41 @@ jobs:
           HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
         run: python generate_assets.py
+
+      # Commits used_clips_history.json (written by generate_assets.py's
+      # save_clip_history()) back to the repo, so a LATER run can see which
+      # stock clips this run used and avoid repeating them (this is what
+      # actually fixes "same clip in two videos" - the history has to
+      # survive between separate workflow runs, and each run gets a fresh
+      # ephemeral runner, so persisting it in the repo is the simplest place
+      # that's already writable via this job's GITHUB_TOKEN). Uses
+      # pull --rebase before pushing since another run could theoretically
+      # be committing at the same time; if the push still loses a race this
+      # step logs it and moves on rather than failing the whole render.
+      - name: Persist clip-usage history (avoid repeating recent clips)
+        if: always()
+        run: |
+          if [ ! -f used_clips_history.json ]; then
+            echo "No used_clips_history.json produced (no stock clips fetched this run) - nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add used_clips_history.json
+          if git diff --cached --quiet; then
+            echo "No change to used_clips_history.json - nothing to commit."
+            exit 0
+          fi
+          git commit -m "Update clip-usage history (run ${{ github.run_id }})"
+          for attempt in 1 2 3; do
+            if git pull --rebase --autostash origin "${{ github.ref_name }}" && git push origin HEAD:"${{ github.ref_name }}"; then
+              echo "Pushed clip-usage history update."
+              exit 0
+            fi
+            echo "Push attempt $attempt failed, retrying..."
+            sleep 5
+          done
+          echo "::warning::Could not push used_clips_history.json after 3 attempts (non-fatal - dedup just won't see this run's clips next time)."
 
       # Hand the generated files off to the two render jobs below. Short
       # retention since this is only needed for the rest of this one run.
