@@ -6,6 +6,8 @@ import base64
 import random
 import shutil
 import asyncio
+import datetime
+import threading
 import subprocess
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
@@ -80,6 +82,100 @@ HEADERS = {
 }
 
 # -------------------------------------------------------------
+# 0a. CROSS-RUN CLIP-USAGE HISTORY (avoid reusing the same stock clip
+#     across different days' videos)
+# -------------------------------------------------------------
+# Root cause of "I see the same clip in two videos": every fetch_*_video()
+# below scores candidates by keyword overlap and deterministically takes the
+# single best-scoring hit (see _best_scoring_index) - with no memory of what
+# was used before. Because scene wording repeats a lot day to day ("temple
+# bells incense smoke", "diya flame", "ancient battlefield dust storm"), the
+# exact same top-ranked clip keeps winning on later videos. This file
+# persists a small rolling history of (source, clip id) pairs actually used,
+# checked into the repo by the CI workflow after each render (see
+# render.yml's "Persist clip-usage history" step), so a later run can see
+# what a PREVIOUS run already used and prefer a different, still-relevant
+# clip instead.
+HISTORY_PATH = "used_clips_history.json"
+HISTORY_LOOKBACK_DAYS = 60  # entries older than this are pruned on save
+
+def _load_recent_clip_history() -> tuple:
+    """Returns (raw_records, recently_used_ids) - raw_records is the full
+    list of {"source", "id", "usedAt"} dicts loaded from disk (kept around so
+    save_clip_history() can merge rather than clobber), recently_used_ids is
+    a set of "source:id" strings for everything within HISTORY_LOOKBACK_DAYS,
+    used as the "avoid these" set while picking candidates below."""
+    if not os.path.exists(HISTORY_PATH):
+        return [], set()
+    try:
+        with open(HISTORY_PATH, encoding="utf-8") as f:
+            records = json.load(f)
+        if not isinstance(records, list):
+            return [], set()
+    except Exception as e:
+        print(f"Clip-history notice (load): {e}", flush=True)
+        return [], set()
+
+    cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=HISTORY_LOOKBACK_DAYS)
+    recent_ids = set()
+    for rec in records:
+        try:
+            used_at = datetime.datetime.strptime(rec["usedAt"], "%Y-%m-%d")
+            if used_at >= cutoff:
+                recent_ids.add(f"{rec['source']}:{rec['id']}")
+        except Exception:
+            continue
+    return records, recent_ids
+
+_HISTORY_RECORDS, RECENTLY_USED_CLIP_IDS = _load_recent_clip_history()
+if RECENTLY_USED_CLIP_IDS:
+    print(f"  📜 Loaded clip-usage history: {len(RECENTLY_USED_CLIP_IDS)} clip(s) used in the last {HISTORY_LOOKBACK_DAYS} days will be deprioritized.", flush=True)
+
+_new_usage_records = []
+_usage_lock = threading.Lock()
+
+def record_clip_usage(source: str, clip_id: str) -> None:
+    """Called right after a stock clip is actually downloaded successfully -
+    thread-safe since process_long_scene_visual/process_shorts_scene_visual
+    run inside a ThreadPoolExecutor."""
+    if not clip_id:
+        return
+    with _usage_lock:
+        _new_usage_records.append({
+            "source": source,
+            "id": str(clip_id),
+            "usedAt": datetime.datetime.utcnow().strftime("%Y-%m-%d"),
+        })
+
+def save_clip_history() -> None:
+    """Merges this run's newly-used clips into the on-disk history, prunes
+    anything older than HISTORY_LOOKBACK_DAYS, and writes it back out. The CI
+    workflow commits this file back to the repo after generate_assets.py
+    finishes, so the NEXT run's _load_recent_clip_history() call actually
+    sees it."""
+    if not _new_usage_records:
+        return
+    cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=HISTORY_LOOKBACK_DAYS)
+    merged = {}
+    for rec in _HISTORY_RECORDS + _new_usage_records:
+        try:
+            used_at = datetime.datetime.strptime(rec["usedAt"], "%Y-%m-%d")
+        except Exception:
+            continue
+        if used_at < cutoff:
+            continue
+        key = (rec["source"], rec["id"])
+        # Keep the most recent usedAt if the same clip appears twice.
+        if key not in merged or merged[key]["usedAt"] < rec["usedAt"]:
+            merged[key] = rec
+    try:
+        with open(HISTORY_PATH, "w", encoding="utf-8") as f:
+            json.dump(list(merged.values()), f, ensure_ascii=False, indent=2)
+        print(f"  📜 Saved clip-usage history: {len(merged)} clip(s) tracked (added {len(_new_usage_records)} from this run).", flush=True)
+    except Exception as e:
+        print(f"Clip-history notice (save): {e}", flush=True)
+
+# -------------------------------------------------------------
 # 0b. STOCK-CLIP RELEVANCE SCORING (keyword overlap against scene wording)
 # -------------------------------------------------------------
 # Every fetch_*_video() below used to just take hit #1 from its API and trust
@@ -114,19 +210,34 @@ def _extract_keywords(*texts: str) -> set:
                 words.add(raw)
     return words
 
-def _best_scoring_index(candidate_texts: list, target_keywords):
+def _best_scoring_index(candidate_texts: list, target_keywords, candidate_ids: list = None, source: str = None):
     """Returns (best_index, best_score, any_text_available) for a list of
     candidate descriptive strings (one per API hit, "" where a source gives
     no usable text). any_text_available is False when every hit had no text
     at all, so callers fall back to "just take hit #1" rather than reject a
-    source that structurally can't be scored."""
+    source that structurally can't be scored.
+
+    When candidate_ids + source are also given, this deprioritizes any
+    candidate whose "source:id" shows up in RECENTLY_USED_CLIP_IDS (a clip
+    used in a recent video - see the clip-usage-history section above):
+    among candidates tied for the single best keyword score, it prefers one
+    that was NOT recently used, only falling back to a recently-used one if
+    every top-scoring candidate has already been used recently. This is the
+    actual fix for "same clip in two videos" - previously max() picked
+    whichever top hit happened to sort first, every time, for a repeated
+    query."""
     if not target_keywords:
         return 0, 0, False
     if not any(candidate_texts):
         return 0, 0, False
     scores = [len(_extract_keywords(t) & target_keywords) for t in candidate_texts]
-    best_index = max(range(len(scores)), key=lambda i: scores[i])
-    return best_index, scores[best_index], True
+    best_score = max(scores)
+    tied_indices = [i for i, s in enumerate(scores) if s == best_score]
+    if candidate_ids and source:
+        fresh = [i for i in tied_indices if f"{source}:{candidate_ids[i]}" not in RECENTLY_USED_CLIP_IDS]
+        if fresh:
+            return fresh[0], best_score, True
+    return tied_indices[0], best_score, True
 
 # -------------------------------------------------------------
 # 1. MULTI-PLATFORM STOCK VIDEO ENGINE (Pexels + Pixabay + Coverr)
@@ -150,7 +261,8 @@ def fetch_pexels_video(query: str, dest_path: str, orientation: str = "landscape
             # genuinely descriptive - score each hit's slug against this
             # scene's wording and prefer the best match over hit #1.
             best_idx, best_score, scorable = _best_scoring_index(
-                [v.get("url", "") for v in videos], target_keywords
+                [v.get("url", "") for v in videos], target_keywords,
+                candidate_ids=[v.get("id") for v in videos], source="pexels",
             )
             if scorable and best_score == 0:
                 return False
@@ -174,6 +286,7 @@ def fetch_pexels_video(query: str, dest_path: str, orientation: str = "landscape
             if v_res.status_code == 200 and len(v_res.content) > 100000:
                 with open(dest_path, "wb") as f:
                     f.write(v_res.content)
+                record_clip_usage("pexels", chosen.get("id"))
                 return True
     except Exception as e:
         print(f"Pexels notice: {e}", flush=True)
@@ -197,7 +310,8 @@ def fetch_pixabay_video(query: str, dest_path: str, target_keywords: set = None)
                 # Pixabay hits carry a real, usually-thorough "tags" field -
                 # the strongest relevance signal of any source here.
                 best_idx, best_score, scorable = _best_scoring_index(
-                    [h.get("tags", "") for h in hits], target_keywords
+                    [h.get("tags", "") for h in hits], target_keywords,
+                    candidate_ids=[h.get("id") for h in hits], source="pixabay",
                 )
                 if scorable and best_score == 0:
                     continue
@@ -209,6 +323,7 @@ def fetch_pixabay_video(query: str, dest_path: str, target_keywords: set = None)
                     if v_res.status_code == 200 and len(v_res.content) > 100000:
                         with open(dest_path, "wb") as f:
                             f.write(v_res.content)
+                        record_clip_usage("pixabay", chosen.get("id"))
                         return True
         except Exception as e:
             print(f"Pixabay notice ({video_type}): {e}", flush=True)
@@ -234,6 +349,7 @@ def fetch_coverr_video(query: str, dest_path: str, target_keywords: set = None) 
             best_idx, best_score, scorable = _best_scoring_index(
                 [f"{h.get('title', '')} {_coverr_tags_text(h)}" for h in hits],
                 target_keywords,
+                candidate_ids=[h.get("id") for h in hits], source="coverr",
             )
             if scorable and best_score == 0:
                 return False
@@ -244,6 +360,7 @@ def fetch_coverr_video(query: str, dest_path: str, target_keywords: set = None) 
                 if v_res.status_code == 200 and len(v_res.content) > 100000:
                     with open(dest_path, "wb") as f:
                         f.write(v_res.content)
+                    record_clip_usage("coverr", chosen.get("id"))
                     return True
     except Exception as e:
         print(f"Coverr notice: {e}", flush=True)
@@ -304,11 +421,17 @@ def fetch_wikimedia_video(query: str, dest_path: str, target_keywords: set = Non
             return False
         ordered = candidates
         if scorable:
-            ordered = sorted(
-                candidates,
-                key=lambda c: len(_extract_keywords(c[0]) & target_keywords),
-                reverse=True,
-            )
+            # Recently-used titles (per RECENTLY_USED_CLIP_IDS) get a large
+            # penalty so a fresh, still-relevant candidate is tried first -
+            # they aren't dropped outright, just pushed to the back, so a
+            # recently-used clip is still a fallback if nothing else works.
+            def _sort_key(c):
+                title = c[0]
+                score = len(_extract_keywords(title) & target_keywords)
+                if f"wikimedia:{title}" in RECENTLY_USED_CLIP_IDS:
+                    score -= 1000
+                return score
+            ordered = sorted(candidates, key=_sort_key, reverse=True)
 
         for _title, file_url in ordered:
             v_res = requests.get(file_url, headers=wiki_headers, timeout=45)
@@ -328,6 +451,7 @@ def fetch_wikimedia_video(query: str, dest_path: str, target_keywords: set = Non
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
                 if convert.returncode == 0 and os.path.exists(dest_path) and os.path.getsize(dest_path) > 50000:
+                    record_clip_usage("wikimedia", _title)
                     return True
             if os.path.exists(raw_path):
                 os.remove(raw_path)
@@ -833,7 +957,25 @@ SUB_SHOT_FRAMING_HINTS = [
     "dramatic low-angle shot, intense mood, rim lighting",
 ]
 
+# Used ONLY for the Shorts hook (scene 1) when it falls back to an AI image
+# instead of real video. A wide establishing shot as the very first frame of
+# a Short reads as flat/static - exactly the "starting should be very
+# interactive and eye-catching" complaint - so the hook's own sub-shots lead
+# with punchier, closer, more dynamic framings instead, before this list
+# would otherwise repeat/cycle.
+HOOK_SUB_SHOT_FRAMING_HINTS = [
+    "dramatic low-angle shot, intense mood, rim lighting",
+    "extreme close-up shot, emotional facial expression, shallow depth of field",
+    "slow push-in shot, dramatic silhouette, striking backlight",
+]
+
 SUB_SHOT_SECONDS = 14.0  # roughly how long one still image can hold viewer interest
+
+# How long the Shorts hook (scene 1) is allowed to hold a single still image
+# when no video clip is found - deliberately much shorter than SUB_SHOT_SECONDS
+# so the opening always gets at least 2 quick, cross-fading sub-shots instead
+# of one static frame held for the whole hook, per the same complaint above.
+HOOK_SUB_SHOT_SECONDS = 1.8
 
 def estimate_scene_duration_seconds(narration_text: str) -> float:
     """Rough speaking-time estimate for Hindi narration, used only to decide
@@ -846,16 +988,19 @@ def estimate_scene_duration_seconds(narration_text: str) -> float:
     return max(3.0, words / 2.5)
 
 def generate_multi_shot_ai_images(prompt: str, base_name: str, aspect_ratio: str, count: int,
-                                   pollinations_width: int, pollinations_height: int) -> list:
+                                   pollinations_width: int, pollinations_height: int,
+                                   framing_hints: list = None) -> list:
     """Generates `count` distinct AI images for the SAME scene (same subject/
     setting/character, so the scene still reads as one continuous moment) by
-    appending a different framing hint from SUB_SHOT_FRAMING_HINTS to the
-    scene's own imagePrompt each time. Returns the list of filenames (bare,
-    relative to public/images/) in shot order, for Scene.tsx's multi-shot
-    slideshow to cross-fade between."""
+    appending a different framing hint from `framing_hints` (defaults to
+    SUB_SHOT_FRAMING_HINTS; pass HOOK_SUB_SHOT_FRAMING_HINTS for a Shorts
+    hook scene) to the scene's own imagePrompt each time. Returns the list of
+    filenames (bare, relative to public/images/) in shot order, for
+    Scene.tsx's multi-shot slideshow to cross-fade between."""
+    hints = framing_hints or SUB_SHOT_FRAMING_HINTS
     filenames = []
     for i in range(count):
-        hint = SUB_SHOT_FRAMING_HINTS[i % len(SUB_SHOT_FRAMING_HINTS)]
+        hint = hints[i % len(hints)]
         shot_prompt = f"{prompt}, {hint}"
         suffix = chr(ord('a') + i)
         fname = f"{base_name}_{suffix}.jpg"
@@ -913,13 +1058,32 @@ def process_shorts_scene_visual(scene_info):
 
     narration_text = scene.get("text") or scene.get("narration_chunk", "")
     est_duration = estimate_scene_duration_seconds(narration_text)
-    # Shorts scenes are naturally briefer and vertical framing has less room
-    # for a wide/medium-shot distinction, so cap at 2 sub-shots instead of 4.
-    num_shots = max(1, min(2, round(est_duration / SUB_SHOT_SECONDS)))
-    print(f"🎨 [Shorts Scene {idx}] Generating {num_shots} 9:16 FLUX.1 visual sub-shot(s)...", flush=True)
+    is_hook = idx == 1
+
+    if is_hook:
+        # The hook is the single highest-leverage moment in the Short (see
+        # module 1's Make.com prompt, which now also biases videoSearchQuery
+        # toward motion-rich phrasing so video is found here more often). If
+        # it still falls back to a still image, that image must NEVER read
+        # as one static frame: force at least 2 quick, cross-fading sub-shots
+        # (Scene.tsx already cross-fades + Ken-Burns between them) using the
+        # short HOOK_SUB_SHOT_SECONDS window, and lead with punchier framings
+        # from HOOK_SUB_SHOT_FRAMING_HINTS instead of a flat wide shot.
+        num_shots = max(2, min(3, round(est_duration / HOOK_SUB_SHOT_SECONDS)))
+        framing_hints = HOOK_SUB_SHOT_FRAMING_HINTS
+        print(f"🎨 [Shorts HOOK Scene {idx}] No video match - generating {num_shots} quick, dynamic 9:16 sub-shot(s) so the opening never feels static...", flush=True)
+    else:
+        # Shorts scenes are naturally briefer and vertical framing has less
+        # room for a wide/medium-shot distinction, so cap at 2 sub-shots
+        # instead of 4.
+        num_shots = max(1, min(2, round(est_duration / SUB_SHOT_SECONDS)))
+        framing_hints = SUB_SHOT_FRAMING_HINTS
+        print(f"🎨 [Shorts Scene {idx}] Generating {num_shots} 9:16 FLUX.1 visual sub-shot(s)...", flush=True)
+
     filenames = generate_multi_shot_ai_images(
         f"{prompt}, vertical 9:16 composition", f"shorts_scene_{idx}", "9:16", num_shots,
         pollinations_width=1080, pollinations_height=1920,
+        framing_hints=framing_hints,
     )
     return filenames if num_shots > 1 else filenames[0]
 
@@ -1102,6 +1266,13 @@ async def process():
 
     with open("out/metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata_for_upload, f, ensure_ascii=False, indent=2)
+
+    # Persist which stock clips this run actually used, so a LATER run's
+    # _load_recent_clip_history() call (top of this file) can deprioritize
+    # them - see the clip-usage-history section near the top of this file.
+    # The CI workflow commits used_clips_history.json back to the repo right
+    # after this script finishes (see render.yml).
+    save_clip_history()
 
     print("🎉 All Multi-Source Assets (Pexels + Pixabay + Coverr + Wikimedia + Local Library + FLUX), Thumbnail, Sound Effects, and Metadata ready!", flush=True)
 
