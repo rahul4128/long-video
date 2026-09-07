@@ -106,7 +106,9 @@ jobs:
             public/props.json
             public/props_shorts.json
             public/thumbnail_props.json
+            public/thumbnail_props_shorts.json
             out/thumbnail.jpg
+            out/thumbnail_shorts.jpg
             out/metadata.json
           retention-days: 1
 
@@ -279,15 +281,72 @@ jobs:
           retention-days: 1
 
   # ---------------------------------------------------------------
-  # JOB 5: Once both video renders and the thumbnail render are done,
+  # JOB 4b: Same idea as JOB 4, but for the Shorts-specific 9:16
+  # thumbnail (its own background image + hook text - see
+  # ShortsThumbnailComposition.tsx / generate_assets.py's
+  # `shorts_thumbnail` handling). Previously Shorts had no dedicated
+  # thumbnail render at all. Runs in parallel with everything else.
+  # ---------------------------------------------------------------
+  render-thumbnail-shorts:
+    needs: generate-assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache node modules
+        id: npm-cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'package.json') }}
+
+      - name: Install Node.js Dependencies
+        if: steps.npm-cache.outputs.cache-hit != 'true'
+        run: npm install
+
+      - name: Cache apt packages (ffmpeg + fonts)
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives/*.deb
+          key: apt-archives-${{ runner.os }}-ffmpeg-fonts-v1
+
+      - name: Install System Dependencies (ffmpeg + fonts)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-core fonts-deva
+
+      - name: Download generated assets
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-assets-${{ github.run_id }}
+
+      - name: Render Shorts Thumbnail (background image + bold Hindi hook-text overlay)
+        run: |
+          npx remotion still ShortsThumbnailComposition out/thumbnail_shorts_final.jpg --props=public/thumbnail_props_shorts.json
+
+      - name: Upload Shorts Thumbnail Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: devotional-thumbnail-shorts-${{ github.run_id }}
+          path: out/thumbnail_shorts_final.jpg
+          retention-days: 1
+
+  # ---------------------------------------------------------------
+  # JOB 5: Once both video renders and both thumbnail renders are done,
   # publish a GitHub Release carrying the long video, the shorts video
-  # and the text-overlaid thumbnail as public, no-auth-required download
-  # links, then notify the Make.com scenario (one webhook call, handles
-  # both videos) so it uploads both to YouTube with title/description/
-  # thumbnail and files each into its playlist.
+  # and both text-overlaid thumbnails as public, no-auth-required
+  # download links, then notify the Make.com scenario (one webhook
+  # call, handles both videos) so it uploads both to YouTube with
+  # title/description/thumbnail and files each into its playlist.
   # ---------------------------------------------------------------
   publish-and-notify:
-    needs: [generate-assets, render-long, render-shorts, render-thumbnail]
+    needs: [generate-assets, render-long, render-shorts, render-thumbnail, render-thumbnail-shorts]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -319,6 +378,12 @@ jobs:
           name: devotional-thumbnail-${{ github.run_id }}
           path: thumbnail_final
 
+      - name: Download rendered Shorts thumbnail (with hook-text overlay)
+        uses: actions/download-artifact@v4
+        with:
+          name: devotional-thumbnail-shorts-${{ github.run_id }}
+          path: thumbnail_shorts_final
+
       - name: Create GitHub Release with video + thumbnail assets
         id: release
         env:
@@ -330,6 +395,7 @@ jobs:
             "video/final_video.mp4" \
             "shorts/final_video_shorts.mp4" \
             "thumbnail_final/out/thumbnail.jpg" \
+            "thumbnail_shorts_final/out/thumbnail_shorts_final.jpg" \
             --repo "${{ github.repository }}" \
             --title "Devotional upload $TAG" \
             --notes "Automated release - source assets for the Make.com YouTube upload webhook."
@@ -346,6 +412,7 @@ jobs:
           echo "long_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="final_video.mp4") | .browser_download_url')" >> "$GITHUB_OUTPUT"
           echo "shorts_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="final_video_shorts.mp4") | .browser_download_url')" >> "$GITHUB_OUTPUT"
           echo "thumb_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="thumbnail.jpg") | .browser_download_url')" >> "$GITHUB_OUTPUT"
+          echo "shorts_thumb_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="thumbnail_shorts_final.jpg") | .browser_download_url')" >> "$GITHUB_OUTPUT"
 
       - name: Notify Make.com (uploads long video + Shorts to YouTube)
         env:
@@ -357,6 +424,7 @@ jobs:
             --arg longUrl "${{ steps.assets.outputs.long_url }}" \
             --arg shortsUrl "${{ steps.assets.outputs.shorts_url }}" \
             --arg thumbUrl "${{ steps.assets.outputs.thumb_url }}" \
+            --arg shortsThumbUrl "${{ steps.assets.outputs.shorts_thumb_url }}" \
             --slurpfile meta "assets/out/metadata.json" \
             '{
               releaseTag: $releaseTag,
@@ -370,7 +438,8 @@ jobs:
                 downloadUrl: $shortsUrl,
                 title: $meta[0].shorts_title,
                 description: $meta[0].shorts_description,
-                tags: $meta[0].hashtags
+                tags: $meta[0].hashtags,
+                thumbnailUrl: $shortsThumbUrl
               },
               thumbnail: {
                 downloadUrl: $thumbUrl
