@@ -3,16 +3,19 @@ import { Composition, Still } from 'remotion';
 import { DevotionalComposition } from './DevotionalComposition';
 import { DevotionalShortsComposition } from './DevotionalShortsComposition';
 import { ThumbnailComposition, ThumbnailProps } from './ThumbnailComposition';
+import { ShortsThumbnailComposition } from './ShortsThumbnailComposition';
 import { DevotionalVideoProps } from './types';
 import defaultPropsLong from '../public/props.json';
 import defaultPropsShorts from '../public/props_shorts.json';
 import defaultPropsThumbnail from '../public/thumbnail_props.json';
+import defaultPropsThumbnailShorts from '../public/thumbnail_props_shorts.json';
 
 export const RemotionRoot: React.FC = () => {
   const fps = 30;
   const typedPropsLong = defaultPropsLong as DevotionalVideoProps;
   const typedPropsShorts = defaultPropsShorts as DevotionalVideoProps;
   const typedPropsThumbnail = defaultPropsThumbnail as ThumbnailProps;
+  const typedPropsThumbnailShorts = defaultPropsThumbnailShorts as ThumbnailProps;
 
   // Calculate dynamic duration for Long Video
   const totalLongSeconds = typedPropsLong.scenes?.length
@@ -59,6 +62,17 @@ export const RemotionRoot: React.FC = () => {
         width={1920}
         height={1080}
         defaultProps={typedPropsThumbnail}
+      />
+
+      {/* 4. Shorts-specific 9:16 Thumbnail - its own background image + hook
+          text (see ShortsThumbnailComposition.tsx), so Shorts stop reusing
+          the long-video 16:9 thumbnail. */}
+      <Still
+        id="ShortsThumbnailComposition"
+        component={ShortsThumbnailComposition}
+        width={1080}
+        height={1920}
+        defaultProps={typedPropsThumbnailShorts}
       />
     </>
   );
