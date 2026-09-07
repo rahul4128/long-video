@@ -28,6 +28,19 @@ if raw_payload and raw_payload != "null":
 # Extract multi-format payload blocks
 seo_metadata = payload.get("seo_metadata", {})
 thumbnail_data = payload.get("thumbnail", {})
+# Shorts-specific 9:16 thumbnail (own background image + hook text) - see
+# the Make.com prompt's new `shorts_thumbnail` field and section 2c below.
+# Previously Shorts had no dedicated thumbnail field at all.
+_shorts_thumbnail_raw = payload.get("shorts_thumbnail", {})
+shorts_thumbnail_data = _shorts_thumbnail_raw if isinstance(_shorts_thumbnail_raw, dict) else {}
+# 1-based position (within long_video.scenes) of the story's climax/
+# revelation scene, used to swell the bgm volume there instead of leaving it
+# flat all video - see DevotionalComposition.tsx's bgmSwellSceneNumbers prop.
+# Optional: falls back to a simple heuristic below (section 6) if the
+# Make.com prompt hasn't been updated yet to supply it.
+_meta_raw = payload.get("_meta", {})
+meta_data = _meta_raw if isinstance(_meta_raw, dict) else {}
+climax_scene_number = meta_data.get("climax_scene_number")
 long_data = payload.get("long_video", {})
 shorts_data = payload.get("shorts", {})
 
@@ -137,7 +150,17 @@ _usage_lock = threading.Lock()
 def record_clip_usage(source: str, clip_id: str) -> None:
     """Called right after a stock clip is actually downloaded successfully -
     thread-safe since process_long_scene_visual/process_shorts_scene_visual
-    run inside a ThreadPoolExecutor."""
+    run inside a ThreadPoolExecutor.
+
+    Also immediately marks the clip as "recently used" in-memory (not just
+    on disk at the end of the run via save_clip_history()) - this is what
+    makes fetch_video_shots_for_duration()'s multiple fetches for the SAME
+    scene actually return different clips instead of the same top-ranked hit
+    every time: _best_scoring_index() already deprioritizes anything in
+    RECENTLY_USED_CLIP_IDS, so a clip used for shot #1 of a scene is treated
+    as "recently used" by the time shot #2 is fetched a moment later, same
+    run. Bonus: this also reduces duplicate clips across two DIFFERENT
+    scenes matching similar wording within the same day's video."""
     if not clip_id:
         return
     with _usage_lock:
@@ -146,6 +169,7 @@ def record_clip_usage(source: str, clip_id: str) -> None:
             "id": str(clip_id),
             "usedAt": datetime.datetime.utcnow().strftime("%Y-%m-%d"),
         })
+        RECENTLY_USED_CLIP_IDS.add(f"{source}:{clip_id}")
 
 def save_clip_history() -> None:
     """Merges this run's newly-used clips into the on-disk history, prunes
@@ -651,6 +675,63 @@ def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "lan
     return False
 
 # -------------------------------------------------------------
+# 1c. DURATION-AWARE MULTI-CLIP VIDEO ENGINE
+# -------------------------------------------------------------
+# THIS IS THE FIX for "stock clip finishes, screen freezes, voiceover keeps
+# going": generate_multi_shot_ai_images() below already solves the equivalent
+# problem for the AI-image fallback (several distinct stills instead of one
+# held for the whole scene) - real stock video never got that treatment.
+# process_long_scene_visual()/process_shorts_scene_visual() used to fetch
+# exactly ONE clip per scene and hand it straight to Scene.tsx, which played
+# it once with no loop/trim - a typical 5-15s stock clip would finish and
+# freeze on its last frame while the scene's own narration audio (which can
+# run 35-55s for a long-form scene) kept playing underneath it.
+#
+# fetch_video_shots_for_duration() instead fetches as many clips as needed -
+# a different search phrasing each time, so a second/third clip for the same
+# scene is a genuinely different shot rather than a retry of the same query -
+# until their combined REAL (ffprobe-measured) duration covers the scene, up
+# to max_shots. Any shortfall (stock sources ran dry before the target was
+# reached) is topped up by the caller with AI-image sub-shots, so a scene
+# never runs out of real screen time.
+MAX_VIDEO_SHOTS_PER_SCENE = 3
+MIN_SHOT_SECONDS = 3.0  # never split a scene's remaining time so finely a shot reads as a flash-cut
+
+def fetch_video_shots_for_duration(primary_query: str, prompt_text: str, target_seconds: float,
+                                    orientation: str, base_name: str,
+                                    max_shots: int = MAX_VIDEO_SHOTS_PER_SCENE) -> tuple:
+    """Returns (shots, covered_seconds). `shots` is a list of
+    {"type": "video", "file": <filename under public/images/>} dicts in shot
+    order. `covered_seconds` is the sum of each fetched clip's own measured
+    duration - callers compare this against target_seconds and top up any
+    remainder with AI-image sub-shots (see generate_multi_shot_ai_images)."""
+    shots = []
+    covered = 0.0
+    # Several plausible phrasings for this scene, reused round-robin across
+    # shot attempts - build_query_candidates() already exists for the
+    # single-clip case, so this just cycles through the same list instead of
+    # re-querying with the exact same phrase every time.
+    query_variants = build_query_candidates(primary_query, prompt_text) or [primary_query]
+
+    for shot_index in range(max(1, max_shots)):
+        if covered >= target_seconds:
+            break
+        query = query_variants[shot_index % len(query_variants)]
+        dest_name = f"{base_name}_v{shot_index}.mp4"
+        dest_path = f"public/images/{dest_name}"
+        if not fetch_multi_source_video(query, dest_path, orientation=orientation, prompt_text=prompt_text):
+            # Ran out of real stock footage for this scene entirely - stop
+            # here rather than trying every remaining shot slot in vain; the
+            # caller tops up the rest with AI images.
+            break
+        clip_duration = get_audio_duration(dest_path)
+        shots.append({"type": "video", "file": dest_name})
+        covered += clip_duration
+        print(f"    🎬 Shot {shot_index + 1} for '{base_name}': {clip_duration:.1f}s (covered {covered:.1f}s / {target_seconds:.1f}s target)", flush=True)
+
+    return shots, covered
+
+# -------------------------------------------------------------
 # 2. CHARACTER-ACCURATE CLOUDFLARE FLUX.1 & FALLBACKS
 # -------------------------------------------------------------
 def generate_cloudflare_flux(prompt: str, dest_path: str, aspect_ratio: str = "16:9") -> bool:
@@ -850,6 +931,11 @@ SOUND_EFFECT_QUERIES = {
     "shankh": ["conch shell horn blow", "conch shell", "conch horn", "horn blast"],
     "om_drone": ["om chanting drone", "meditation drone ambient", "singing bowl drone", "deep drone ambient"],
     "flute_swell": ["bansuri flute", "indian flute melody", "flute swell", "flute ambient"],
+    # Not a per-scene soundEffect choice - a single shared cue Scene.tsx plays
+    # at every shot-boundary cut (see the multi-shot video/image fix below)
+    # so cuts read as an intentional cinematic edit rather than a plain,
+    # silent slideshow dissolve.
+    "transition_whoosh": ["whoosh transition", "cinematic whoosh", "swoosh transition sound", "riser whoosh"],
 }
 
 def fetch_freesound_effect(effect_name: str, dest_path: str) -> bool:
@@ -1014,6 +1100,12 @@ def generate_multi_shot_ai_images(prompt: str, base_name: str, aspect_ratio: str
 # 4. PROCESS LONG VIDEO SCENES (Pexels + Pixabay + Coverr + FLUX.1)
 # -------------------------------------------------------------
 def process_long_scene_visual(scene_info):
+    """Returns an ordered list of shot dicts ({"type": "video"|"image",
+    "file": ...}) sized to cover this scene's full estimated duration - see
+    fetch_video_shots_for_duration() above. Real stock video is always tried
+    first (when the scene calls for it) and AI images only fill whatever
+    remainder real footage couldn't cover, exactly mirroring the priority the
+    old single-clip code had, just with a duration guarantee now."""
     idx, scene = scene_info
     prompt = scene.get("imagePrompt") or scene.get("image_prompt", "Indian spiritual story scene")
     media_type = scene.get("mediaType", "auto").lower()
@@ -1025,41 +1117,57 @@ def process_long_scene_visual(scene_info):
 
     should_try_video = (media_type == "video") or (media_type == "auto" and idx % 2 == 0)
 
-    if should_try_video and video_query:
-        video_name = f"scene_{idx}.mp4"
-        video_dest = f"public/images/{video_name}"
-        print(f"🎥 [Long Scene {idx}] Searching 4K Video (Pexels + Pixabay + Coverr + Wikimedia + Library) for: '{video_query}'...", flush=True)
-        if fetch_multi_source_video(video_query, video_dest, orientation="landscape", prompt_text=prompt):
-            return video_name
-
     narration_text = scene.get("text") or scene.get("narration_chunk", "")
-    est_duration = estimate_scene_duration_seconds(narration_text)
-    num_shots = max(1, min(4, round(est_duration / SUB_SHOT_SECONDS)))
-    print(f"🎨 [Long Scene {idx}] Generating {num_shots} FLUX.1 visual sub-shot(s): {prompt[:40]}...", flush=True)
-    filenames = generate_multi_shot_ai_images(
-        prompt, f"scene_{idx}", "16:9", num_shots,
-        pollinations_width=1920, pollinations_height=1080,
-    )
-    return filenames if num_shots > 1 else filenames[0]
+    target_seconds = estimate_scene_duration_seconds(narration_text)
+
+    shots = []
+    covered = 0.0
+    if should_try_video and video_query:
+        print(f"🎥 [Long Scene {idx}] Searching ~{target_seconds:.0f}s of 4K video (Pexels + Pixabay + Coverr + Wikimedia + Library) for: '{video_query}'...", flush=True)
+        shots, covered = fetch_video_shots_for_duration(
+            video_query, prompt, target_seconds, orientation="landscape", base_name=f"scene_{idx}",
+        )
+
+    remaining = target_seconds - covered
+    if not shots or remaining > MIN_SHOT_SECONDS:
+        basis = remaining if shots else target_seconds
+        num_image_shots = max(1, min(4, round(basis / SUB_SHOT_SECONDS)))
+        verb = "Topping up with" if shots else "Generating"
+        print(f"🎨 [Long Scene {idx}] {verb} {num_image_shots} FLUX.1 visual sub-shot(s): {prompt[:40]}...", flush=True)
+        filenames = generate_multi_shot_ai_images(
+            prompt, f"scene_{idx}_img", "16:9", num_image_shots,
+            pollinations_width=1920, pollinations_height=1080,
+        )
+        shots.extend({"type": "image", "file": f} for f in filenames)
+
+    return shots
 
 # -------------------------------------------------------------
 # 5. PROCESS SHORTS SCENES (9:16 Vertical)
 # -------------------------------------------------------------
 def process_shorts_scene_visual(scene_info):
+    """Shorts counterpart to process_long_scene_visual() above - same
+    duration-aware multi-clip-then-top-up-with-images approach, just with
+    portrait orientation and the existing hook-scene special-casing
+    (punchier framings, shorter per-shot window) preserved exactly."""
     idx, scene = scene_info
     prompt = scene.get("imagePrompt") or scene.get("image_prompt", "Devotional sacred 9:16")
     video_query = scene.get("videoSearchQuery") or "sacred temple diya"
-
-    video_name = f"shorts_scene_{idx}.mp4"
-    video_dest = f"public/images/{video_name}"
-    print(f"🎥 [Shorts Scene {idx}] Searching Vertical Video (Pexels + Pixabay + Coverr + Wikimedia + Library)...", flush=True)
-    if fetch_multi_source_video(video_query, video_dest, orientation="portrait", prompt_text=prompt):
-        return video_name
-
     narration_text = scene.get("text") or scene.get("narration_chunk", "")
-    est_duration = estimate_scene_duration_seconds(narration_text)
+    target_seconds = estimate_scene_duration_seconds(narration_text)
     is_hook = idx == 1
 
+    print(f"🎥 [Shorts Scene {idx}] Searching ~{target_seconds:.0f}s of vertical video (Pexels + Pixabay + Coverr + Wikimedia + Library)...", flush=True)
+    shots, covered = fetch_video_shots_for_duration(
+        video_query, prompt, target_seconds, orientation="portrait",
+        base_name=f"shorts_scene_{idx}", max_shots=3 if is_hook else 2,
+    )
+
+    remaining = target_seconds - covered
+    if shots and remaining <= MIN_SHOT_SECONDS:
+        return shots
+
+    basis = remaining if shots else target_seconds
     if is_hook:
         # The hook is the single highest-leverage moment in the Short (see
         # module 1's Make.com prompt, which now also biases videoSearchQuery
@@ -1069,23 +1177,26 @@ def process_shorts_scene_visual(scene_info):
         # (Scene.tsx already cross-fades + Ken-Burns between them) using the
         # short HOOK_SUB_SHOT_SECONDS window, and lead with punchier framings
         # from HOOK_SUB_SHOT_FRAMING_HINTS instead of a flat wide shot.
-        num_shots = max(2, min(3, round(est_duration / HOOK_SUB_SHOT_SECONDS)))
+        num_image_shots = max(2, min(3, round(basis / HOOK_SUB_SHOT_SECONDS)))
         framing_hints = HOOK_SUB_SHOT_FRAMING_HINTS
-        print(f"🎨 [Shorts HOOK Scene {idx}] No video match - generating {num_shots} quick, dynamic 9:16 sub-shot(s) so the opening never feels static...", flush=True)
+        verb = "Topping up with" if shots else "No video match - generating"
+        print(f"🎨 [Shorts HOOK Scene {idx}] {verb} {num_image_shots} quick, dynamic 9:16 sub-shot(s) so the opening never feels static...", flush=True)
     else:
         # Shorts scenes are naturally briefer and vertical framing has less
         # room for a wide/medium-shot distinction, so cap at 2 sub-shots
         # instead of 4.
-        num_shots = max(1, min(2, round(est_duration / SUB_SHOT_SECONDS)))
+        num_image_shots = max(1, min(2, round(basis / SUB_SHOT_SECONDS)))
         framing_hints = SUB_SHOT_FRAMING_HINTS
-        print(f"🎨 [Shorts Scene {idx}] Generating {num_shots} 9:16 FLUX.1 visual sub-shot(s)...", flush=True)
+        verb = "Topping up with" if shots else "Generating"
+        print(f"🎨 [Shorts Scene {idx}] {verb} {num_image_shots} 9:16 FLUX.1 visual sub-shot(s)...", flush=True)
 
     filenames = generate_multi_shot_ai_images(
-        f"{prompt}, vertical 9:16 composition", f"shorts_scene_{idx}", "9:16", num_shots,
+        f"{prompt}, vertical 9:16 composition", f"shorts_scene_{idx}_img", "9:16", num_image_shots,
         pollinations_width=1080, pollinations_height=1920,
         framing_hints=framing_hints,
     )
-    return filenames if num_shots > 1 else filenames[0]
+    shots.extend({"type": "image", "file": f} for f in filenames)
+    return shots
 
 # -------------------------------------------------------------
 # 5b. AUTO-CHAPTERS (YouTube description timestamps)
@@ -1133,6 +1244,14 @@ async def process():
             "-t", "30", "-q:a", "9", "-acodec", "libmp3lame", bgm_path
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+    # 1b. Shared transition "whoosh" - one small SFX file, reused by
+    # Scene.tsx at every shot-boundary cut in both Long and Shorts renders
+    # (see the multi-shot video/image fix). Resolved once here rather than
+    # per-scene since it's the exact same cue everywhere, not a per-scene
+    # mood choice like temple_bell/shankh/etc.
+    os.makedirs("public/audio/sfx", exist_ok=True)
+    resolve_sound_effect_audio("transition_whoosh", "public/audio/sfx/whoosh.mp3")
+
     # 2. Render High-CTR 16:9 Thumbnail Image
     thumb_prompt = thumbnail_data.get("imagePrompt") or "Lord Krishna radiant divine aura with glowing Sudarshan Chakra, dramatic 8k thumbnail"
     print("🖼️ Generating High-CTR Thumbnail...", flush=True)
@@ -1161,6 +1280,33 @@ async def process():
     with open("public/thumbnail_props.json", "w", encoding="utf-8") as f:
         json.dump(
             {"backgroundImage": "thumbnail.jpg", "hookText": thumbnail_hook_text},
+            f, ensure_ascii=False, indent=2,
+        )
+
+    # 2c. Shorts-specific 9:16 Thumbnail - its OWN background image + hook
+    # text, distinct from the long-video thumbnail above. Previously Shorts
+    # either reused the long-video 16:9 thumbnail (badly cropped for a
+    # vertical feed) or got no custom thumbnail applied at all - see
+    # ShortsThumbnailComposition.tsx (render.yml's new render-thumbnail-shorts
+    # job) and the "Integration YouTube" Make.com scenario, which now
+    # actually calls YouTube's "Set a Video Thumbnail" action for both
+    # uploads instead of never setting one.
+    shorts_thumb_prompt = shorts_thumbnail_data.get("imagePrompt") or f"{thumb_prompt}, vertical 9:16 composition"
+    print("🖼️ Generating Shorts-specific 9:16 Thumbnail...", flush=True)
+    shorts_thumb_dest = "public/images/thumbnail_shorts.jpg"
+    generate_ai_image(shorts_thumb_prompt, shorts_thumb_dest, aspect_ratio="9:16", pollinations_width=1080, pollinations_height=1920)
+    subprocess.run(["cp", shorts_thumb_dest, "out/thumbnail_shorts.jpg"], check=False)
+
+    shorts_thumbnail_hook_text = (shorts_thumbnail_data.get("thumbnailText") or "").strip()
+    if not shorts_thumbnail_hook_text:
+        # Same graceful fallback as the long-video thumbnail above: prefer a
+        # dedicated hook line, but a slice of the Shorts' own title beats no
+        # text at all if the upstream Make.com prompt hasn't been updated yet.
+        fallback_shorts_title = (seo_metadata.get("shorts_title") or "").strip()
+        shorts_thumbnail_hook_text = " ".join(fallback_shorts_title.split()[:6])
+    with open("public/thumbnail_props_shorts.json", "w", encoding="utf-8") as f:
+        json.dump(
+            {"backgroundImage": "thumbnail_shorts.jpg", "hookText": shorts_thumbnail_hook_text},
             f, ensure_ascii=False, indent=2,
         )
 
@@ -1197,24 +1343,39 @@ async def process():
     long_word_timings = audio_word_timings[:len(long_scenes)]
     shorts_word_timings = audio_word_timings[len(long_scenes):]
 
-    # 4b. Sound-Effect Layer (Long video only - the shorts payload has no soundEffect field)
+    # 4b. Sound-Effect Layer (BOTH Long video and Shorts now carry an
+    # optional soundEffect field - Shorts previously had none at all in the
+    # payload, so every Shorts render silently had zero effect layer
+    # regardless of what Scene.tsx already expected for format="shorts").
     for i, scene in enumerate(long_scenes):
         idx = i + 1
         effect_name = scene.get("soundEffect", "none")
         if effect_name and effect_name != "none":
             resolve_sound_effect_audio(effect_name, f"public/audio/effects/long_effect_{idx}.mp3")
 
+    for i, scene in enumerate(shorts_scenes):
+        idx = i + 1
+        effect_name = scene.get("soundEffect", "none")
+        if effect_name and effect_name != "none":
+            resolve_sound_effect_audio(effect_name, f"public/audio/effects/shorts_effect_{idx}.mp3")
+
     # 5. Build Remotion Props for Long Video
+    # long_visuals[i] / shorts_visuals[i] are now ordered shot LISTS (see
+    # process_long_scene_visual/process_shorts_scene_visual + Scene.tsx's
+    # `shots` field) rather than a single filename - this is what actually
+    # fixes a scene's video running out before its narration does.
     enriched_long = []
     for i, scene in enumerate(long_scenes):
         idx = i + 1
         audio_path = f"public/audio/chunk_{idx}.mp3"
         duration = get_audio_duration(audio_path)
+        shots = long_visuals[i] or []
         enriched_long.append({
             "scene_number": idx,
             "durationInSeconds": round(duration + 0.3, 2),
             "narration_chunk": scene.get("text", ""),
-            "imageFileName": long_visuals[i],
+            "shots": shots,
+            "imageFileName": shots[0]["file"] if shots else "",  # legacy/debug only, see Scene.tsx's resolveShots()
             "soundEffect": scene.get("soundEffect", "none"),
             "words": long_word_timings[i]
         })
@@ -1225,20 +1386,37 @@ async def process():
         idx = i + 1
         audio_path = f"public/audio/shorts_chunk_{idx}.mp3"
         duration = get_audio_duration(audio_path)
+        shots = shorts_visuals[i] or []
         enriched_shorts.append({
             "scene_number": idx,
             "durationInSeconds": round(duration + 0.2, 2),
             "narration_chunk": scene.get("text", ""),
-            "imageFileName": shorts_visuals[i],
+            "shots": shots,
+            "imageFileName": shots[0]["file"] if shots else "",  # legacy/debug only, see Scene.tsx's resolveShots()
+            "soundEffect": scene.get("soundEffect", "none"),
             "words": shorts_word_timings[i]
         })
+
+    # 6b. Climax scene(s) for the bgm-swell in DevotionalComposition.tsx.
+    # Prefer whatever the Make.com prompt supplied (_meta.climax_scene_number
+    # - a 1-based position in long_video.scenes); fall back to a simple
+    # heuristic (roughly 70% through the story, where the revelation/turning
+    # point usually lands per the story-structure instructions in module 1's
+    # prompt) so every render gets a swell even before that prompt is updated.
+    if isinstance(climax_scene_number, int) and 1 <= climax_scene_number <= len(enriched_long):
+        bgm_swell_scene_numbers = [climax_scene_number]
+    elif enriched_long:
+        bgm_swell_scene_numbers = [max(1, round(len(enriched_long) * 0.7))]
+    else:
+        bgm_swell_scene_numbers = []
 
     # Save props and metadata
     long_props = {
         "title": seo_metadata.get("long_video_title", "Devotional Long Video"),
         "fps": 30,
         "scenes": enriched_long,
-        "seo_metadata": seo_metadata
+        "seo_metadata": seo_metadata,
+        "bgmSwellSceneNumbers": bgm_swell_scene_numbers
     }
     shorts_props = {
         "title": seo_metadata.get("shorts_title", "Devotional Shorts"),
