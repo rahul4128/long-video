@@ -394,8 +394,8 @@ jobs:
           gh release create "$TAG" \
             "video/final_video.mp4" \
             "shorts/final_video_shorts.mp4" \
-            "thumbnail_final/out/thumbnail.jpg" \
-            "thumbnail_shorts_final/out/thumbnail_shorts_final.jpg" \
+            "thumbnail_final/thumbnail.jpg" \
+            "thumbnail_shorts_final/thumbnail_shorts_final.jpg" \
             --repo "${{ github.repository }}" \
             --title "Devotional upload $TAG" \
             --notes "Automated release - source assets for the Make.com YouTube upload webhook."
