@@ -1,10 +1,13 @@
 import os
+import re
 import json
 import time
 import base64
 import random
 import shutil
 import asyncio
+import datetime
+import threading
 import subprocess
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
@@ -25,6 +28,19 @@ if raw_payload and raw_payload != "null":
 # Extract multi-format payload blocks
 seo_metadata = payload.get("seo_metadata", {})
 thumbnail_data = payload.get("thumbnail", {})
+# Shorts-specific 9:16 thumbnail (own background image + hook text) - see
+# the Make.com prompt's new `shorts_thumbnail` field and section 2c below.
+# Previously Shorts had no dedicated thumbnail field at all.
+_shorts_thumbnail_raw = payload.get("shorts_thumbnail", {})
+shorts_thumbnail_data = _shorts_thumbnail_raw if isinstance(_shorts_thumbnail_raw, dict) else {}
+# 1-based position (within long_video.scenes) of the story's climax/
+# revelation scene, used to swell the bgm volume there instead of leaving it
+# flat all video - see DevotionalComposition.tsx's bgmSwellSceneNumbers prop.
+# Optional: falls back to a simple heuristic below (section 6) if the
+# Make.com prompt hasn't been updated yet to supply it.
+_meta_raw = payload.get("_meta", {})
+meta_data = _meta_raw if isinstance(_meta_raw, dict) else {}
+climax_scene_number = meta_data.get("climax_scene_number")
 long_data = payload.get("long_video", {})
 shorts_data = payload.get("shorts", {})
 
@@ -65,11 +81,13 @@ CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "").strip()
 PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "").strip()
 COVERR_API_KEY = os.environ.get("COVERR_API_KEY", "").strip()
+HUGGINGFACE_API_KEY = os.environ.get("HUGGINGFACE_API_KEY", "").strip()
 FREESOUND_API_KEY = os.environ.get("FREESOUND_API_KEY", "").strip()
 
 os.makedirs("public/images", exist_ok=True)
 os.makedirs("public/audio", exist_ok=True)
 os.makedirs("public/audio/effects", exist_ok=True)
+os.makedirs("public/videos_library", exist_ok=True)
 os.makedirs("out", exist_ok=True)
 
 HEADERS = {
@@ -77,35 +95,228 @@ HEADERS = {
 }
 
 # -------------------------------------------------------------
+# 0a. CROSS-RUN CLIP-USAGE HISTORY (avoid reusing the same stock clip
+#     across different days' videos)
+# -------------------------------------------------------------
+# Root cause of "I see the same clip in two videos": every fetch_*_video()
+# below scores candidates by keyword overlap and deterministically takes the
+# single best-scoring hit (see _best_scoring_index) - with no memory of what
+# was used before. Because scene wording repeats a lot day to day ("temple
+# bells incense smoke", "diya flame", "ancient battlefield dust storm"), the
+# exact same top-ranked clip keeps winning on later videos. This file
+# persists a small rolling history of (source, clip id) pairs actually used,
+# checked into the repo by the CI workflow after each render (see
+# render.yml's "Persist clip-usage history" step), so a later run can see
+# what a PREVIOUS run already used and prefer a different, still-relevant
+# clip instead.
+HISTORY_PATH = "used_clips_history.json"
+HISTORY_LOOKBACK_DAYS = 60  # entries older than this are pruned on save
+
+def _load_recent_clip_history() -> tuple:
+    """Returns (raw_records, recently_used_ids) - raw_records is the full
+    list of {"source", "id", "usedAt"} dicts loaded from disk (kept around so
+    save_clip_history() can merge rather than clobber), recently_used_ids is
+    a set of "source:id" strings for everything within HISTORY_LOOKBACK_DAYS,
+    used as the "avoid these" set while picking candidates below."""
+    if not os.path.exists(HISTORY_PATH):
+        return [], set()
+    try:
+        with open(HISTORY_PATH, encoding="utf-8") as f:
+            records = json.load(f)
+        if not isinstance(records, list):
+            return [], set()
+    except Exception as e:
+        print(f"Clip-history notice (load): {e}", flush=True)
+        return [], set()
+
+    cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=HISTORY_LOOKBACK_DAYS)
+    recent_ids = set()
+    for rec in records:
+        try:
+            used_at = datetime.datetime.strptime(rec["usedAt"], "%Y-%m-%d")
+            if used_at >= cutoff:
+                recent_ids.add(f"{rec['source']}:{rec['id']}")
+        except Exception:
+            continue
+    return records, recent_ids
+
+_HISTORY_RECORDS, RECENTLY_USED_CLIP_IDS = _load_recent_clip_history()
+if RECENTLY_USED_CLIP_IDS:
+    print(f"  📜 Loaded clip-usage history: {len(RECENTLY_USED_CLIP_IDS)} clip(s) used in the last {HISTORY_LOOKBACK_DAYS} days will be deprioritized.", flush=True)
+
+_new_usage_records = []
+_usage_lock = threading.Lock()
+
+def record_clip_usage(source: str, clip_id: str) -> None:
+    """Called right after a stock clip is actually downloaded successfully -
+    thread-safe since process_long_scene_visual/process_shorts_scene_visual
+    run inside a ThreadPoolExecutor.
+
+    Also immediately marks the clip as "recently used" in-memory (not just
+    on disk at the end of the run via save_clip_history()) - this is what
+    makes fetch_video_shots_for_duration()'s multiple fetches for the SAME
+    scene actually return different clips instead of the same top-ranked hit
+    every time: _best_scoring_index() already deprioritizes anything in
+    RECENTLY_USED_CLIP_IDS, so a clip used for shot #1 of a scene is treated
+    as "recently used" by the time shot #2 is fetched a moment later, same
+    run. Bonus: this also reduces duplicate clips across two DIFFERENT
+    scenes matching similar wording within the same day's video."""
+    if not clip_id:
+        return
+    with _usage_lock:
+        _new_usage_records.append({
+            "source": source,
+            "id": str(clip_id),
+            "usedAt": datetime.datetime.utcnow().strftime("%Y-%m-%d"),
+        })
+        RECENTLY_USED_CLIP_IDS.add(f"{source}:{clip_id}")
+
+def save_clip_history() -> None:
+    """Merges this run's newly-used clips into the on-disk history, prunes
+    anything older than HISTORY_LOOKBACK_DAYS, and writes it back out. The CI
+    workflow commits this file back to the repo after generate_assets.py
+    finishes, so the NEXT run's _load_recent_clip_history() call actually
+    sees it."""
+    if not _new_usage_records:
+        return
+    cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=HISTORY_LOOKBACK_DAYS)
+    merged = {}
+    for rec in _HISTORY_RECORDS + _new_usage_records:
+        try:
+            used_at = datetime.datetime.strptime(rec["usedAt"], "%Y-%m-%d")
+        except Exception:
+            continue
+        if used_at < cutoff:
+            continue
+        key = (rec["source"], rec["id"])
+        # Keep the most recent usedAt if the same clip appears twice.
+        if key not in merged or merged[key]["usedAt"] < rec["usedAt"]:
+            merged[key] = rec
+    try:
+        with open(HISTORY_PATH, "w", encoding="utf-8") as f:
+            json.dump(list(merged.values()), f, ensure_ascii=False, indent=2)
+        print(f"  📜 Saved clip-usage history: {len(merged)} clip(s) tracked (added {len(_new_usage_records)} from this run).", flush=True)
+    except Exception as e:
+        print(f"Clip-history notice (save): {e}", flush=True)
+
+# -------------------------------------------------------------
+# 0b. STOCK-CLIP RELEVANCE SCORING (keyword overlap against scene wording)
+# -------------------------------------------------------------
+# Every fetch_*_video() below used to just take hit #1 from its API and trust
+# it blindly - the search endpoint's own relevance ranking was the only
+# safeguard, which for this niche (Krishna/Kurukshetra/aarti searched against
+# generic Western stock catalogs) is often too loose: a query like "golden
+# deity statue temple" can just as easily return a Buddhist temple in
+# Thailand as anything a viewer reads as "this devotional Hindu story", and a
+# short/ambiguous query like "conch shell" can return a beach photo-shoot
+# clip with a shell prop instead of a ritual moment. This scores each
+# candidate hit's own descriptive text (Pixabay's tags, Coverr's title/tags,
+# Wikimedia's page title, Pexels' URL slug) against the words actually in
+# THIS scene's search query + imagePrompt, and only accepts a hit that shares
+# at least one real keyword - otherwise that source is treated as a miss for
+# this scene and the caller falls through to the next source/candidate query,
+# same philosophy as the "no generic catch-all" rule in build_query_candidates()
+# below: better to run out of real matches than show something confidently
+# wrong.
+_STOPWORDS = {
+    "the", "a", "an", "and", "or", "with", "in", "on", "of", "for", "to", "at",
+    "is", "are", "by", "from", "this", "that", "scene", "cinematic", "shot",
+    "lighting", "composition", "16:9", "9:16", "divine", "warm", "file",
+}
+
+def _extract_keywords(*texts: str) -> set:
+    words = set()
+    for text in texts:
+        if not text:
+            continue
+        for raw in re.split(r"[\s/_\-.,!?()]+", str(text).lower()):
+            if len(raw) > 2 and raw not in _STOPWORDS:
+                words.add(raw)
+    return words
+
+def _best_scoring_index(candidate_texts: list, target_keywords, candidate_ids: list = None, source: str = None):
+    """Returns (best_index, best_score, any_text_available) for a list of
+    candidate descriptive strings (one per API hit, "" where a source gives
+    no usable text). any_text_available is False when every hit had no text
+    at all, so callers fall back to "just take hit #1" rather than reject a
+    source that structurally can't be scored.
+
+    When candidate_ids + source are also given, this deprioritizes any
+    candidate whose "source:id" shows up in RECENTLY_USED_CLIP_IDS (a clip
+    used in a recent video - see the clip-usage-history section above):
+    among candidates tied for the single best keyword score, it prefers one
+    that was NOT recently used, only falling back to a recently-used one if
+    every top-scoring candidate has already been used recently. This is the
+    actual fix for "same clip in two videos" - previously max() picked
+    whichever top hit happened to sort first, every time, for a repeated
+    query."""
+    if not target_keywords:
+        return 0, 0, False
+    if not any(candidate_texts):
+        return 0, 0, False
+    scores = [len(_extract_keywords(t) & target_keywords) for t in candidate_texts]
+    best_score = max(scores)
+    tied_indices = [i for i, s in enumerate(scores) if s == best_score]
+    if candidate_ids and source:
+        fresh = [i for i in tied_indices if f"{source}:{candidate_ids[i]}" not in RECENTLY_USED_CLIP_IDS]
+        if fresh:
+            return fresh[0], best_score, True
+    return tied_indices[0], best_score, True
+
+# -------------------------------------------------------------
 # 1. MULTI-PLATFORM STOCK VIDEO ENGINE (Pexels + Pixabay + Coverr)
 # -------------------------------------------------------------
-def fetch_pexels_video(query: str, dest_path: str, orientation: str = "landscape") -> bool:
+def fetch_pexels_video(query: str, dest_path: str, orientation: str = "landscape", target_keywords: set = None) -> bool:
     if not PEXELS_API_KEY or not query:
         return False
     try:
         clean_q = urllib.parse.quote(query.strip()[:60])
-        url = f"https://api.pexels.com/videos/search?query={clean_q}&orientation={orientation}&per_page=4"
+        # per_page raised 4 -> 6: gives the relevance scorer below a bigger
+        # pool to pick a genuine match from, instead of only ever choosing
+        # between whichever 4 hits happened to sort first.
+        url = f"https://api.pexels.com/videos/search?query={clean_q}&orientation={orientation}&per_page=6"
         res = requests.get(url, headers={"Authorization": PEXELS_API_KEY}, timeout=15)
         if res.status_code == 200:
             videos = res.json().get("videos", [])
-            if videos:
-                files = videos[0].get("video_files", [])
-                target_file = files[0]
-                for f in files:
-                    if f.get("width", 0) >= 1080:
-                        target_file = f
-                        break
-                video_url = target_file.get("link")
-                v_res = requests.get(video_url, timeout=45)
-                if v_res.status_code == 200 and len(v_res.content) > 100000:
-                    with open(dest_path, "wb") as f:
-                        f.write(v_res.content)
-                    return True
+            if not videos:
+                return False
+            # Pexels doesn't expose tags on video search results, but its own
+            # URL slug (".../video/a-monk-praying-at-a-temple-1571995/") is
+            # genuinely descriptive - score each hit's slug against this
+            # scene's wording and prefer the best match over hit #1.
+            best_idx, best_score, scorable = _best_scoring_index(
+                [v.get("url", "") for v in videos], target_keywords,
+                candidate_ids=[v.get("id") for v in videos], source="pexels",
+            )
+            if scorable and best_score == 0:
+                return False
+            chosen = videos[best_idx] if scorable else videos[0]
+            files = chosen.get("video_files", [])
+            # Pick the SMALLEST file that's still >=1080p, not just the first
+            # one that clears the bar - Pexels' video_files aren't size-ordered,
+            # so the naive "first match" could just as easily grab a 4K file.
+            # A 4K clip takes ~4x longer to download AND ~4x longer for Remotion
+            # to decode frame-by-frame during render, for zero visible quality
+            # gain in a 1920x1080 output composition.
+            hd_files = sorted(
+                (f for f in files if f.get("width", 0) >= 1080),
+                key=lambda f: f.get("width", 0),
+            )
+            target_file = hd_files[0] if hd_files else (files[0] if files else {})
+            video_url = target_file.get("link")
+            if not video_url:
+                return False
+            v_res = requests.get(video_url, timeout=45)
+            if v_res.status_code == 200 and len(v_res.content) > 100000:
+                with open(dest_path, "wb") as f:
+                    f.write(v_res.content)
+                record_clip_usage("pexels", chosen.get("id"))
+                return True
     except Exception as e:
         print(f"Pexels notice: {e}", flush=True)
     return False
 
-def fetch_pixabay_video(query: str, dest_path: str) -> bool:
+def fetch_pixabay_video(query: str, dest_path: str, target_keywords: set = None) -> bool:
     if not PIXABAY_API_KEY or not query:
         return False
     clean_q = urllib.parse.quote(query.strip()[:60])
@@ -114,58 +325,411 @@ def fetch_pixabay_video(query: str, dest_path: str) -> bool:
     # any video type if no animation-tagged result is found for this query.
     for video_type in ("animation", "all"):
         try:
-            url = f"https://pixabay.com/api/videos/?key={PIXABAY_API_KEY}&q={clean_q}&video_type={video_type}&per_page=4"
+            url = f"https://pixabay.com/api/videos/?key={PIXABAY_API_KEY}&q={clean_q}&video_type={video_type}&per_page=6"
             res = requests.get(url, timeout=15)
             if res.status_code == 200:
                 hits = res.json().get("hits", [])
-                if hits:
-                    videos_dict = hits[0].get("videos", {})
-                    target = videos_dict.get("large") or videos_dict.get("medium") or videos_dict.get("small")
-                    if target and target.get("url"):
-                        v_res = requests.get(target.get("url"), timeout=45)
-                        if v_res.status_code == 200 and len(v_res.content) > 100000:
-                            with open(dest_path, "wb") as f:
-                                f.write(v_res.content)
-                            return True
+                if not hits:
+                    continue
+                # Pixabay hits carry a real, usually-thorough "tags" field -
+                # the strongest relevance signal of any source here.
+                best_idx, best_score, scorable = _best_scoring_index(
+                    [h.get("tags", "") for h in hits], target_keywords,
+                    candidate_ids=[h.get("id") for h in hits], source="pixabay",
+                )
+                if scorable and best_score == 0:
+                    continue
+                chosen = hits[best_idx] if scorable else hits[0]
+                videos_dict = chosen.get("videos", {})
+                target = videos_dict.get("large") or videos_dict.get("medium") or videos_dict.get("small")
+                if target and target.get("url"):
+                    v_res = requests.get(target.get("url"), timeout=45)
+                    if v_res.status_code == 200 and len(v_res.content) > 100000:
+                        with open(dest_path, "wb") as f:
+                            f.write(v_res.content)
+                        record_clip_usage("pixabay", chosen.get("id"))
+                        return True
         except Exception as e:
             print(f"Pixabay notice ({video_type}): {e}", flush=True)
     return False
 
-def fetch_coverr_video(query: str, dest_path: str) -> bool:
+def _coverr_tags_text(hit: dict) -> str:
+    tags = hit.get("tags") or []
+    if isinstance(tags, str):
+        return tags
+    return " ".join(str(t) for t in tags)
+
+def fetch_coverr_video(query: str, dest_path: str, target_keywords: set = None) -> bool:
     if not COVERR_API_KEY or not query:
         return False
     try:
         clean_q = urllib.parse.quote(query.strip()[:60])
-        url = f"https://api.coverr.co/videos?query={clean_q}&urls=true&page_size=4"
+        url = f"https://api.coverr.co/videos?query={clean_q}&urls=true&page_size=6"
         res = requests.get(url, headers={"Authorization": f"Bearer {COVERR_API_KEY}"}, timeout=15)
         if res.status_code == 200:
             hits = res.json().get("hits", [])
-            if hits:
-                video_url = (hits[0].get("urls") or {}).get("mp4")
-                if video_url:
-                    v_res = requests.get(video_url, timeout=45)
-                    if v_res.status_code == 200 and len(v_res.content) > 100000:
-                        with open(dest_path, "wb") as f:
-                            f.write(v_res.content)
-                        return True
+            if not hits:
+                return False
+            best_idx, best_score, scorable = _best_scoring_index(
+                [f"{h.get('title', '')} {_coverr_tags_text(h)}" for h in hits],
+                target_keywords,
+                candidate_ids=[h.get("id") for h in hits], source="coverr",
+            )
+            if scorable and best_score == 0:
+                return False
+            chosen = hits[best_idx] if scorable else hits[0]
+            video_url = (chosen.get("urls") or {}).get("mp4")
+            if video_url:
+                v_res = requests.get(video_url, timeout=45)
+                if v_res.status_code == 200 and len(v_res.content) > 100000:
+                    with open(dest_path, "wb") as f:
+                        f.write(v_res.content)
+                    record_clip_usage("coverr", chosen.get("id"))
+                    return True
     except Exception as e:
         print(f"Coverr notice: {e}", flush=True)
     return False
 
-def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "landscape") -> bool:
-    # 1. Try Pexels 4K Video
-    if fetch_pexels_video(query, dest_path, orientation):
-        print(f"  ✅ Video fetched from Pexels 4K ('{query}')", flush=True)
-        return True
-    # 2. Try Pixabay (3D Sacred Animations & Diyas)
-    if fetch_pixabay_video(query, dest_path):
-        print(f"  ✅ Video fetched from Pixabay 3D ('{query}')", flush=True)
-        return True
-    # 3. Try Coverr (free stock B-roll, demo tier)
-    if fetch_coverr_video(query, dest_path):
-        print(f"  ✅ Video fetched from Coverr ('{query}')", flush=True)
+def fetch_wikimedia_video(query: str, dest_path: str, target_keywords: set = None) -> bool:
+    """4th source: Wikimedia Commons - run by the nonprofit Wikimedia
+    Foundation (same people behind Wikipedia). Completely free forever, no
+    signup, no API key, no subscription, no rate-limit key required for
+    this kind of light, occasional use. Bonus for this niche specifically:
+    unlike Pexels/Pixabay/Coverr (generic Western stock), Commons actually
+    hosts real community-uploaded footage of Indian temples, Diwali/Holi
+    festivals, aarti ceremonies, etc. under CC-BY / CC-BY-SA / public-domain
+    licenses - often a closer topical match than generic B-roll. Files come
+    back as WebM/Ogg (open codecs), so we transcode to .mp4 with ffmpeg
+    (already a dependency of this pipeline) right after downloading."""
+    if not query:
+        return False
+    raw_path = dest_path + ".raw"
+    try:
+        clean_q = urllib.parse.quote(f"filetype:video {query.strip()[:60]}")
+        # gsrlimit raised 5 -> 8: more candidates for the relevance scorer to
+        # choose the best-titled match from.
+        search_url = (
+            "https://commons.wikimedia.org/w/api.php?action=query&format=json"
+            f"&generator=search&gsrsearch={clean_q}&gsrnamespace=6&gsrlimit=8"
+            "&prop=imageinfo&iiprop=url%7Cmime%7Csize"
+        )
+        # Wikimedia's API etiquette asks for a descriptive User-Agent - not
+        # a key, just identifying info in case they ever need to reach out.
+        wiki_headers = {"User-Agent": "long-video-devotional-bot/1.0 (automated free stock B-roll fetch)"}
+        res = requests.get(search_url, headers=wiki_headers, timeout=15)
+        if res.status_code != 200:
+            return False
+        pages = res.json().get("query", {}).get("pages", {})
+        candidates = []
+        for page in pages.values():
+            infos = page.get("imageinfo", [])
+            if not infos:
+                continue
+            mime = infos[0].get("mime", "")
+            file_url = infos[0].get("url")
+            if not file_url or not mime.startswith("video/"):
+                continue
+            candidates.append((page.get("title", ""), file_url))
+        if not candidates:
+            return False
+
+        # Commons page titles are genuinely descriptive (e.g. "File:Ganesh
+        # Chaturthi immersion procession Mumbai.webm") - score them and try
+        # the best-matching candidates first, falling through to the next
+        # one if a download/transcode fails, instead of only ever trying
+        # whichever page the search API happened to rank first.
+        best_idx, best_score, scorable = _best_scoring_index(
+            [title for title, _ in candidates], target_keywords
+        )
+        if scorable and best_score == 0:
+            return False
+        ordered = candidates
+        if scorable:
+            # Recently-used titles (per RECENTLY_USED_CLIP_IDS) get a large
+            # penalty so a fresh, still-relevant candidate is tried first -
+            # they aren't dropped outright, just pushed to the back, so a
+            # recently-used clip is still a fallback if nothing else works.
+            def _sort_key(c):
+                title = c[0]
+                score = len(_extract_keywords(title) & target_keywords)
+                if f"wikimedia:{title}" in RECENTLY_USED_CLIP_IDS:
+                    score -= 1000
+                return score
+            ordered = sorted(candidates, key=_sort_key, reverse=True)
+
+        for _title, file_url in ordered:
+            v_res = requests.get(file_url, headers=wiki_headers, timeout=45)
+            if v_res.status_code == 200 and len(v_res.content) > 100000:
+                with open(raw_path, "wb") as f:
+                    f.write(v_res.content)
+                convert = subprocess.run(
+                    # Cap at 1920px wide (scale is a no-op if the source is
+                    # already smaller) - Commons videos can come back at very
+                    # high source resolution, and decoding that during Remotion
+                    # render costs real minutes for zero visible gain in a
+                    # 1920x1080 composition. "-2" keeps height even (required
+                    # by yuv420p) while preserving aspect ratio.
+                    ["ffmpeg", "-y", "-i", raw_path, "-vf", "scale='min(1920,iw)':-2",
+                     "-c:v", "libx264", "-preset", "veryfast",
+                     "-pix_fmt", "yuv420p", "-c:a", "aac", dest_path],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                if convert.returncode == 0 and os.path.exists(dest_path) and os.path.getsize(dest_path) > 50000:
+                    record_clip_usage("wikimedia", _title)
+                    return True
+            if os.path.exists(raw_path):
+                os.remove(raw_path)
+    except Exception as e:
+        print(f"Wikimedia Commons notice: {e}", flush=True)
+    finally:
+        if os.path.exists(raw_path):
+            os.remove(raw_path)
+    return False
+
+def fetch_local_library_video(search_terms: str, dest_path: str) -> bool:
+    """5th and final source: a curated, hand-picked clip you've saved
+    yourself under public/videos_library/<keyword>.mp4 (or
+    <keyword>_1.mp4, <keyword>_2.mp4, ... for several takes of the same
+    keyword - one is picked at random). This is the "guaranteed correct
+    clip" tier: Pexels/Pixabay/Coverr/Wikimedia Commons are general-purpose Western
+    stock libraries with thin-to-no coverage of devotional/mythological
+    Indian terms (Krishna, shankh, aarti, Kurukshetra...), so a one-time
+    manual download from a permissively-licensed free site - Mixkit
+    (no attribution required), Pixabay, Videvo, or your own Vecteezy/Videezy
+    downloads - saved under a keyword name here will always beat a fuzzy
+    keyword-search match for your recurring niche scenes, and costs
+    nothing to keep using. See public/videos_library/README.md."""
+    library_dir = "public/videos_library"
+    if not os.path.isdir(library_dir) or not search_terms:
+        return False
+    words = [w.strip(".,!?").lower() for w in search_terms.split() if len(w) > 2]
+    try:
+        available = os.listdir(library_dir)
+    except Exception:
+        return False
+    for word in words:
+        matches = [
+            f for f in available
+            if f.lower().startswith(word) and f.lower().endswith(".mp4")
+        ]
+        if matches:
+            chosen = random.choice(matches)
+            try:
+                shutil.copyfile(os.path.join(library_dir, chosen), dest_path)
+                print(f"  📚 Video used from local library ('{chosen}' matched '{word}')", flush=True)
+                return True
+            except Exception as e:
+                print(f"Local library notice: {e}", flush=True)
+    return False
+
+# -------------------------------------------------------------
+# 1b. NICHE QUERY TRANSLATION (devotional/mythological -> stock-catalog terms)
+# -------------------------------------------------------------
+# Pexels/Pixabay/Coverr/Wikimedia Commons are general-purpose Western stock libraries.
+# Searching them verbatim for mythological proper nouns or Sanskrit/Hindi
+# terms ("Krishna", "shankh", "Kurukshetra", "aarti"...) returns zero hits
+# far more often than a real match, which is the root cause of "wrong clip"
+# - the code then silently falls through to an AI-generated still image
+# instead of real B-roll. NICHE_TERM_REWRITES maps each such term to a
+# broad, visually-descriptive English phrase a general stock library is
+# actually likely to have, so we try progressively more generic queries
+# before giving up on finding real footage.
+NICHE_TERM_REWRITES = {
+    "krishna": "golden deity statue temple",
+    "arjuna": "warrior silhouette battlefield",
+    "mahabharata": "ancient battlefield war dust",
+    "ramayana": "ancient indian palace temple",
+    "shankh": "conch shell",
+    "conch": "conch shell",
+    "diya": "oil lamp flame candle",
+    "aarti": "candle flame ritual ceremony",
+    "chakra": "spinning glowing energy circle",
+    "sudarshan": "golden spinning disc light",
+    "dharma": "temple pillars sunlight",
+    "karma": "temple pillars sunlight",
+    "kurukshetra": "ancient battlefield dust storm",
+    "chariot": "ancient wooden chariot",
+    "bhagavad": "ancient scripture book",
+    "gita": "ancient scripture book",
+    "himalayan": "himalaya mountains temple",
+    "vedic": "ancient temple ritual",
+    "mandir": "hindu temple",
+    "puja": "temple ritual ceremony",
+}
+
+def dynamic_ai_query_rewrite(primary_query: str, prompt_text: str) -> list:
+    """Fully automatic, zero-setup version of the rewrite step: asks a small
+    text model on Cloudflare Workers AI to translate THIS scene's wording
+    into generic, visually-concrete English stock-search phrases, at
+    runtime. Reuses the CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN you
+    already have configured for the FLUX image fallback - no new signup, no
+    new secret, nothing to add. Unlike NICHE_TERM_REWRITES (a fixed list of
+    ~20 words I hand-picked), this keeps working for any future character,
+    Sanskrit term, or scene wording you write, without ever touching this
+    file again. Returns [] (silently) if Cloudflare isn't configured or the
+    call fails for any reason - callers fall back to the static dictionary
+    below, so nothing breaks either way."""
+    if not CLOUDFLARE_ACCOUNT_ID or not CLOUDFLARE_API_TOKEN:
+        return []
+    try:
+        url = f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/meta/llama-3.1-8b-instruct"
+        headers = {"Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}", "Content-Type": "application/json"}
+        system_prompt = (
+            "You turn a devotional/mythological Indian video scene description into short, "
+            "generic English stock-footage search phrases (3-5 words each) that a general "
+            "Western stock video library such as Pexels or Pixabay is likely to actually have "
+            "footage for. Never include character names, Sanskrit/Hindi words, or the words "
+            "'India'/'Indian' - describe only the visual: lighting, objects, action, mood. "
+            "Return exactly 3 phrases, one per line, ordered from most specific-but-plausible "
+            "to most generic-and-guaranteed-to-exist. No numbering, no extra text, no quotes."
+        )
+        user_prompt = f"Scene search query: {primary_query}\nScene image prompt: {prompt_text}"
+        res = requests.post(
+            url, headers=headers, timeout=20,
+            json={"messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]},
+        )
+        if res.status_code == 200:
+            text = res.json().get("result", {}).get("response", "")
+            phrases = [line.strip("-•* ").strip() for line in text.strip().split("\n")]
+            return [p for p in phrases if p][:3]
+    except Exception as e:
+        print(f"Dynamic query-rewrite notice: {e}", flush=True)
+    return []
+
+def build_query_candidates(primary_query: str, prompt_text: str = "") -> list:
+    """Turn one niche videoSearchQuery into an ordered list of queries to
+    try against every stock source: the original phrase first (it may well
+    hit), then AI-generated rewrites from dynamic_ai_query_rewrite() (fully
+    automatic, works for any wording, uses your existing Cloudflare key),
+    then a static-dictionary rewrite as an offline safety net if Cloudflare
+    isn't configured or returned nothing, then the original with untranslated
+    niche words simply removed.
+
+    Deliberately NOT included: a generic catch-all phrase (e.g. "temple diya
+    candle flame") tried against every remaining scene. That used to be the
+    single biggest source of visibly wrong clips - once every real candidate
+    above comes up empty, forcing a totally unrelated scene (a battlefield
+    beat, say) to match on "temple diya candle flame" just because it's the
+    only thing left to try is how you get a temple video playing under a
+    battlefield line. It's better to run out of candidates and fall through
+    to a purpose-built AI image (see fetch_multi_source_video) than to show
+    footage that's confidently wrong."""
+    candidates = []
+    original = (primary_query or "").strip()
+    if original:
+        candidates.append(original)
+
+    for ai_phrase in dynamic_ai_query_rewrite(original, prompt_text):
+        if ai_phrase not in candidates:
+            candidates.append(ai_phrase)
+
+    lowered = f"{original} {prompt_text}".lower()
+    rewritten_phrases = []
+    for term, synonym in NICHE_TERM_REWRITES.items():
+        if term in lowered:
+            rewritten_phrases.extend(synonym.split())
+    if rewritten_phrases:
+        deduped_words = list(dict.fromkeys(rewritten_phrases))[:8]  # cap word count, not char count - avoids cutting a word in half
+        rewritten = " ".join(deduped_words)
+        if rewritten and rewritten not in candidates:
+            candidates.append(rewritten)
+
+    generic_words = [w for w in original.split() if w.lower() not in NICHE_TERM_REWRITES]
+    generic_query = " ".join(generic_words).strip()
+    if generic_query and generic_query not in candidates:
+        candidates.append(generic_query)
+
+    return candidates
+
+def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "landscape", prompt_text: str = "") -> bool:
+    for candidate in build_query_candidates(query, prompt_text):
+        # The relevance target is the candidate query itself plus the scene's
+        # own imagePrompt (already visually descriptive) - NOT the original
+        # unrewritten query, so a rewritten candidate like "candle flame
+        # ritual ceremony" is scored against exactly the words a stock hit
+        # would need to match, while still crediting extra descriptive words
+        # from the scene (e.g. "golden", "battlefield") if present.
+        target_keywords = _extract_keywords(candidate, prompt_text)
+        # 1. Try Pexels 4K Video
+        if fetch_pexels_video(candidate, dest_path, orientation, target_keywords):
+            print(f"  ✅ Video fetched from Pexels 4K ('{candidate}')", flush=True)
+            return True
+        # 2. Try Pixabay (3D Sacred Animations & Diyas)
+        if fetch_pixabay_video(candidate, dest_path, target_keywords):
+            print(f"  ✅ Video fetched from Pixabay 3D ('{candidate}')", flush=True)
+            return True
+        # 3. Try Coverr (free stock B-roll, demo tier)
+        if fetch_coverr_video(candidate, dest_path, target_keywords):
+            print(f"  ✅ Video fetched from Coverr ('{candidate}')", flush=True)
+            return True
+        # 4. Try Wikimedia Commons (free forever, no key needed)
+        if fetch_wikimedia_video(candidate, dest_path, target_keywords):
+            print(f"  ✅ Video fetched from Wikimedia Commons ('{candidate}')", flush=True)
+            return True
+    # 5. Last resort before AI generation: your own curated local clips
+    if fetch_local_library_video(f"{query} {prompt_text}", dest_path):
         return True
     return False
+
+# -------------------------------------------------------------
+# 1c. DURATION-AWARE MULTI-CLIP VIDEO ENGINE
+# -------------------------------------------------------------
+# THIS IS THE FIX for "stock clip finishes, screen freezes, voiceover keeps
+# going": generate_multi_shot_ai_images() below already solves the equivalent
+# problem for the AI-image fallback (several distinct stills instead of one
+# held for the whole scene) - real stock video never got that treatment.
+# process_long_scene_visual()/process_shorts_scene_visual() used to fetch
+# exactly ONE clip per scene and hand it straight to Scene.tsx, which played
+# it once with no loop/trim - a typical 5-15s stock clip would finish and
+# freeze on its last frame while the scene's own narration audio (which can
+# run 35-55s for a long-form scene) kept playing underneath it.
+#
+# fetch_video_shots_for_duration() instead fetches as many clips as needed -
+# a different search phrasing each time, so a second/third clip for the same
+# scene is a genuinely different shot rather than a retry of the same query -
+# until their combined REAL (ffprobe-measured) duration covers the scene, up
+# to max_shots. Any shortfall (stock sources ran dry before the target was
+# reached) is topped up by the caller with AI-image sub-shots, so a scene
+# never runs out of real screen time.
+MAX_VIDEO_SHOTS_PER_SCENE = 3
+MIN_SHOT_SECONDS = 3.0  # never split a scene's remaining time so finely a shot reads as a flash-cut
+
+def fetch_video_shots_for_duration(primary_query: str, prompt_text: str, target_seconds: float,
+                                    orientation: str, base_name: str,
+                                    max_shots: int = MAX_VIDEO_SHOTS_PER_SCENE) -> tuple:
+    """Returns (shots, covered_seconds). `shots` is a list of
+    {"type": "video", "file": <filename under public/images/>} dicts in shot
+    order. `covered_seconds` is the sum of each fetched clip's own measured
+    duration - callers compare this against target_seconds and top up any
+    remainder with AI-image sub-shots (see generate_multi_shot_ai_images)."""
+    shots = []
+    covered = 0.0
+    # Several plausible phrasings for this scene, reused round-robin across
+    # shot attempts - build_query_candidates() already exists for the
+    # single-clip case, so this just cycles through the same list instead of
+    # re-querying with the exact same phrase every time.
+    query_variants = build_query_candidates(primary_query, prompt_text) or [primary_query]
+
+    for shot_index in range(max(1, max_shots)):
+        if covered >= target_seconds:
+            break
+        query = query_variants[shot_index % len(query_variants)]
+        dest_name = f"{base_name}_v{shot_index}.mp4"
+        dest_path = f"public/images/{dest_name}"
+        if not fetch_multi_source_video(query, dest_path, orientation=orientation, prompt_text=prompt_text):
+            # Ran out of real stock footage for this scene entirely - stop
+            # here rather than trying every remaining shot slot in vain; the
+            # caller tops up the rest with AI images.
+            break
+        clip_duration = get_audio_duration(dest_path)
+        shots.append({"type": "video", "file": dest_name})
+        covered += clip_duration
+        print(f"    🎬 Shot {shot_index + 1} for '{base_name}': {clip_duration:.1f}s (covered {covered:.1f}s / {target_seconds:.1f}s target)", flush=True)
+
+    return shots, covered
 
 # -------------------------------------------------------------
 # 2. CHARACTER-ACCURATE CLOUDFLARE FLUX.1 & FALLBACKS
@@ -199,6 +763,59 @@ def generate_cloudflare_flux(prompt: str, dest_path: str, aspect_ratio: str = "1
     except Exception as e:
         print(f"Cloudflare error: {e}", flush=True)
     return False
+
+def generate_huggingface_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9") -> bool:
+    """2nd AI-image tier - only runs if HUGGINGFACE_API_KEY is set (harmless
+    no-op otherwise, same pattern as the other optional keys). Uses the same
+    FLUX.1-schnell model family as the Cloudflare tier above (via Hugging
+    Face's serverless Inference Providers), so this is mainly a fallback for
+    when Cloudflare is unset, rate-limited, or briefly erroring - not a
+    different visual style. Get a free token at huggingface.co/settings/tokens
+    (create one with "Make calls to Inference Providers" permission)."""
+    if not HUGGINGFACE_API_KEY or not prompt:
+        return False
+    url = "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
+    headers = {
+        "Authorization": f"Bearer {HUGGINGFACE_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    clean_text = prompt.replace("\n", " ").replace("\"", "").strip()
+    final_prompt = f"{clean_text}, Indian mythological devotional art, {aspect_ratio} composition, warm divine lighting, 8k, highly detailed"
+    width, height = (1024, 576) if aspect_ratio == "16:9" else (576, 1024)
+    try:
+        res = requests.post(
+            url, headers=headers, timeout=50,
+            json={
+                "inputs": final_prompt[:450],
+                "parameters": {"width": width, "height": height, "num_inference_steps": 4},
+            },
+        )
+        content_type = res.headers.get("content-type", "")
+        if res.status_code == 200 and content_type.startswith("image/"):
+            with open(dest_path, "wb") as f:
+                f.write(res.content)
+            return True
+        if res.status_code != 200:
+            # A cold model (503, "currently loading") or a rate limit (429) both
+            # land here - either way, don't retry-loop, just fall through to the
+            # next tier so a slow/busy HF endpoint never becomes a slow render.
+            print(f"Hugging Face notice: HTTP {res.status_code} - {res.text[:200]}", flush=True)
+    except Exception as e:
+        print(f"Hugging Face notice: {e}", flush=True)
+    return False
+
+def generate_ai_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9",
+                       pollinations_width: int = 1920, pollinations_height: int = 1080) -> None:
+    """Single entry point for the AI-image fallback chain: Cloudflare FLUX.1
+    (if configured) -> Hugging Face FLUX.1-schnell (if configured) ->
+    Pollinations (no key needed, always works). Guarantees dest_path exists
+    when it returns, same contract as resolve_sound_effect_audio()."""
+    if generate_cloudflare_flux(prompt, dest_path, aspect_ratio=aspect_ratio):
+        return
+    if generate_huggingface_image(prompt, dest_path, aspect_ratio=aspect_ratio):
+        print("  ✅ Image fetched from Hugging Face (FLUX.1-schnell)", flush=True)
+        return
+    download_pollinations_fallback(prompt, dest_path, width=pollinations_width, height=pollinations_height)
 
 def download_pollinations_fallback(prompt: str, img_dest: str, width: int = 1920, height: int = 1080) -> bool:
     clean_text = prompt.replace("\n", " ").replace("\"", "").strip()[:180]
@@ -239,9 +856,22 @@ def get_audio_duration(file_path: str) -> float:
 
 tts_semaphore = asyncio.Semaphore(2)
 
-async def generate_clean_audio(narration: str, audio_dest: str):
+async def generate_clean_audio(narration: str, audio_dest: str) -> list:
+    """Synthesizes narration and returns word-level caption timing captured
+    from edge-tts's WordBoundary events during streaming synthesis - a list
+    of {"word", "start", "end"} in seconds, relative to the start of THIS
+    clip. This is what powers the word-by-word synced captions in
+    Subtitles.tsx (a real retention/accessibility upgrade over one static
+    sentence sitting on screen for the whole scene). Also loudness-normalizes
+    the narration to a consistent target (single-pass loudnorm, ~-16 LUFS)
+    so volume doesn't drift scene-to-scene or video-to-video.
+
+    Returns [] if word timing couldn't be captured - Subtitles.tsx falls
+    back to the old static full-sentence caption in that case, so a render
+    never breaks over it."""
     async with tts_semaphore:
         clean_text = narration.strip() if narration else "हरि ॐ तत्सत्"
+        raw_path = audio_dest + ".raw.mp3"
         for attempt in range(1, 4):
             try:
                 communicate = edge_tts.Communicate(
@@ -250,9 +880,37 @@ async def generate_clean_audio(narration: str, audio_dest: str):
                     rate="-3%",
                     pitch="-1Hz"
                 )
-                await communicate.save(audio_dest)
-                if os.path.exists(audio_dest) and os.path.getsize(audio_dest) > 0:
-                    return
+                submaker = edge_tts.SubMaker()
+                audio_bytes = bytearray()
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        audio_bytes.extend(chunk["data"])
+                    elif chunk["type"] == "WordBoundary":
+                        submaker.feed(chunk)
+
+                if audio_bytes:
+                    with open(raw_path, "wb") as f:
+                        f.write(audio_bytes)
+                    normalize = subprocess.run(
+                        ["ffmpeg", "-y", "-i", raw_path, "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+                         "-ar", "24000", "-q:a", "4", "-acodec", "libmp3lame", audio_dest],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                    if normalize.returncode != 0 or not os.path.exists(audio_dest):
+                        # Normalization failed for some reason - the raw (un-normalized)
+                        # clip is still a perfectly valid narration track, use it as-is
+                        # rather than losing the scene's audio entirely.
+                        shutil.copyfile(raw_path, audio_dest)
+                    if os.path.exists(raw_path):
+                        os.remove(raw_path)
+                    return [
+                        {
+                            "word": cue.content,
+                            "start": round(cue.start.total_seconds(), 3),
+                            "end": round(cue.end.total_seconds(), 3),
+                        }
+                        for cue in submaker.cues
+                    ]
             except Exception:
                 await asyncio.sleep(1.5)
 
@@ -260,6 +918,7 @@ async def generate_clean_audio(narration: str, audio_dest: str):
             "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
             "-t", "5", "-q:a", "9", "-acodec", "libmp3lame", audio_dest
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return []
 
 # -------------------------------------------------------------
 # 3b. DYNAMIC SOUND-EFFECT ENGINE (Freesound, CC0-only, with local fallback)
@@ -272,6 +931,11 @@ SOUND_EFFECT_QUERIES = {
     "shankh": ["conch shell horn blow", "conch shell", "conch horn", "horn blast"],
     "om_drone": ["om chanting drone", "meditation drone ambient", "singing bowl drone", "deep drone ambient"],
     "flute_swell": ["bansuri flute", "indian flute melody", "flute swell", "flute ambient"],
+    # Not a per-scene soundEffect choice - a single shared cue Scene.tsx plays
+    # at every shot-boundary cut (see the multi-shot video/image fix below)
+    # so cuts read as an intentional cinematic edit rather than a plain,
+    # silent slideshow dissolve.
+    "transition_whoosh": ["whoosh transition", "cinematic whoosh", "swoosh transition sound", "riser whoosh"],
 }
 
 def fetch_freesound_effect(effect_name: str, dest_path: str) -> bool:
@@ -358,9 +1022,90 @@ def resolve_sound_effect_audio(effect_name: str, dest_path: str) -> None:
     print(f"  ⚠️ Sound effect '{effect_name}' unavailable ({reason}, no library file, no bgm.mp3) - using silence", flush=True)
 
 # -------------------------------------------------------------
+# 3c. MULTI-SHOT AI IMAGES (visual variety for scenes that fall back to a
+#     static image instead of real video footage)
+# -------------------------------------------------------------
+# Scene duration was recently raised (10-15 minute total target) so a single
+# scene can now easily run 30-55 seconds. A scene that falls back to a
+# generated still image used to hold that ONE image on screen for the whole
+# time, under only a slow, barely-perceptible Ken Burns pan - which is
+# exactly the "feels like one image for 10 sec" complaint. Instead of
+# generating one image per image-type scene, we now generate a small number
+# of distinct AI images for the SAME subject/setting (same imagePrompt, a
+# different framing hint appended each time) and let Scene.tsx cut between
+# them with its own short cross-fade + fresh Ken Burns per sub-shot - real
+# footage still always wins when a matching stock clip is found; this only
+# affects the image fallback path.
+SUB_SHOT_FRAMING_HINTS = [
+    "wide establishing shot, full scene visible, epic scale",
+    "close-up shot, emotional facial expression, shallow depth of field",
+    "medium shot, different camera angle, side profile",
+    "dramatic low-angle shot, intense mood, rim lighting",
+]
+
+# Used ONLY for the Shorts hook (scene 1) when it falls back to an AI image
+# instead of real video. A wide establishing shot as the very first frame of
+# a Short reads as flat/static - exactly the "starting should be very
+# interactive and eye-catching" complaint - so the hook's own sub-shots lead
+# with punchier, closer, more dynamic framings instead, before this list
+# would otherwise repeat/cycle.
+HOOK_SUB_SHOT_FRAMING_HINTS = [
+    "dramatic low-angle shot, intense mood, rim lighting",
+    "extreme close-up shot, emotional facial expression, shallow depth of field",
+    "slow push-in shot, dramatic silhouette, striking backlight",
+]
+
+SUB_SHOT_SECONDS = 14.0  # roughly how long one still image can hold viewer interest
+
+# How long the Shorts hook (scene 1) is allowed to hold a single still image
+# when no video clip is found - deliberately much shorter than SUB_SHOT_SECONDS
+# so the opening always gets at least 2 quick, cross-fading sub-shots instead
+# of one static frame held for the whole hook, per the same complaint above.
+HOOK_SUB_SHOT_SECONDS = 1.8
+
+def estimate_scene_duration_seconds(narration_text: str) -> float:
+    """Rough speaking-time estimate for Hindi narration, used only to decide
+    how many AI-image sub-shots a static-image scene deserves - the real,
+    ffprobe-measured duration isn't known yet at this point in the pipeline
+    (audio and visuals are generated in parallel for speed, see process()).
+    Deliberately a slight overestimate (fewer words/sec than natural spoken
+    Hindi) so a scene is never under-provisioned with sub-shots."""
+    words = len((narration_text or "").split())
+    return max(3.0, words / 2.5)
+
+def generate_multi_shot_ai_images(prompt: str, base_name: str, aspect_ratio: str, count: int,
+                                   pollinations_width: int, pollinations_height: int,
+                                   framing_hints: list = None) -> list:
+    """Generates `count` distinct AI images for the SAME scene (same subject/
+    setting/character, so the scene still reads as one continuous moment) by
+    appending a different framing hint from `framing_hints` (defaults to
+    SUB_SHOT_FRAMING_HINTS; pass HOOK_SUB_SHOT_FRAMING_HINTS for a Shorts
+    hook scene) to the scene's own imagePrompt each time. Returns the list of
+    filenames (bare, relative to public/images/) in shot order, for
+    Scene.tsx's multi-shot slideshow to cross-fade between."""
+    hints = framing_hints or SUB_SHOT_FRAMING_HINTS
+    filenames = []
+    for i in range(count):
+        hint = hints[i % len(hints)]
+        shot_prompt = f"{prompt}, {hint}"
+        suffix = chr(ord('a') + i)
+        fname = f"{base_name}_{suffix}.jpg"
+        dest = f"public/images/{fname}"
+        generate_ai_image(shot_prompt, dest, aspect_ratio=aspect_ratio,
+                           pollinations_width=pollinations_width, pollinations_height=pollinations_height)
+        filenames.append(fname)
+    return filenames
+
+# -------------------------------------------------------------
 # 4. PROCESS LONG VIDEO SCENES (Pexels + Pixabay + Coverr + FLUX.1)
 # -------------------------------------------------------------
 def process_long_scene_visual(scene_info):
+    """Returns an ordered list of shot dicts ({"type": "video"|"image",
+    "file": ...}) sized to cover this scene's full estimated duration - see
+    fetch_video_shots_for_duration() above. Real stock video is always tried
+    first (when the scene calls for it) and AI images only fill whatever
+    remainder real footage couldn't cover, exactly mirroring the priority the
+    old single-clip code had, just with a duration guarantee now."""
     idx, scene = scene_info
     prompt = scene.get("imagePrompt") or scene.get("image_prompt", "Indian spiritual story scene")
     media_type = scene.get("mediaType", "auto").lower()
@@ -372,40 +1117,118 @@ def process_long_scene_visual(scene_info):
 
     should_try_video = (media_type == "video") or (media_type == "auto" and idx % 2 == 0)
 
-    if should_try_video and video_query:
-        video_name = f"scene_{idx}.mp4"
-        video_dest = f"public/images/{video_name}"
-        print(f"🎥 [Long Scene {idx}] Searching 4K Video (Pexels + Pixabay + Coverr) for: '{video_query}'...", flush=True)
-        if fetch_multi_source_video(video_query, video_dest, orientation="landscape"):
-            return video_name
+    narration_text = scene.get("text") or scene.get("narration_chunk", "")
+    target_seconds = estimate_scene_duration_seconds(narration_text)
 
-    img_name = f"scene_{idx}.jpg"
-    img_dest = f"public/images/{img_name}"
-    print(f"🎨 [Long Scene {idx}] Generating FLUX.1 visual: {prompt[:40]}...", flush=True)
-    if not generate_cloudflare_flux(prompt, img_dest, aspect_ratio="16:9"):
-        download_pollinations_fallback(prompt, img_dest, width=1920, height=1080)
-    return img_name
+    shots = []
+    covered = 0.0
+    if should_try_video and video_query:
+        print(f"🎥 [Long Scene {idx}] Searching ~{target_seconds:.0f}s of 4K video (Pexels + Pixabay + Coverr + Wikimedia + Library) for: '{video_query}'...", flush=True)
+        shots, covered = fetch_video_shots_for_duration(
+            video_query, prompt, target_seconds, orientation="landscape", base_name=f"scene_{idx}",
+        )
+
+    remaining = target_seconds - covered
+    if not shots or remaining > MIN_SHOT_SECONDS:
+        basis = remaining if shots else target_seconds
+        num_image_shots = max(1, min(4, round(basis / SUB_SHOT_SECONDS)))
+        verb = "Topping up with" if shots else "Generating"
+        print(f"🎨 [Long Scene {idx}] {verb} {num_image_shots} FLUX.1 visual sub-shot(s): {prompt[:40]}...", flush=True)
+        filenames = generate_multi_shot_ai_images(
+            prompt, f"scene_{idx}_img", "16:9", num_image_shots,
+            pollinations_width=1920, pollinations_height=1080,
+        )
+        shots.extend({"type": "image", "file": f} for f in filenames)
+
+    return shots
 
 # -------------------------------------------------------------
 # 5. PROCESS SHORTS SCENES (9:16 Vertical)
 # -------------------------------------------------------------
 def process_shorts_scene_visual(scene_info):
+    """Shorts counterpart to process_long_scene_visual() above - same
+    duration-aware multi-clip-then-top-up-with-images approach, just with
+    portrait orientation and the existing hook-scene special-casing
+    (punchier framings, shorter per-shot window) preserved exactly."""
     idx, scene = scene_info
     prompt = scene.get("imagePrompt") or scene.get("image_prompt", "Devotional sacred 9:16")
     video_query = scene.get("videoSearchQuery") or "sacred temple diya"
+    narration_text = scene.get("text") or scene.get("narration_chunk", "")
+    target_seconds = estimate_scene_duration_seconds(narration_text)
+    is_hook = idx == 1
 
-    video_name = f"shorts_scene_{idx}.mp4"
-    video_dest = f"public/images/{video_name}"
-    print(f"🎥 [Shorts Scene {idx}] Searching Vertical Video (Pexels + Pixabay + Coverr)...", flush=True)
-    if fetch_multi_source_video(video_query, video_dest, orientation="portrait"):
-        return video_name
+    print(f"🎥 [Shorts Scene {idx}] Searching ~{target_seconds:.0f}s of vertical video (Pexels + Pixabay + Coverr + Wikimedia + Library)...", flush=True)
+    shots, covered = fetch_video_shots_for_duration(
+        video_query, prompt, target_seconds, orientation="portrait",
+        base_name=f"shorts_scene_{idx}", max_shots=3 if is_hook else 2,
+    )
 
-    img_name = f"shorts_scene_{idx}.jpg"
-    img_dest = f"public/images/{img_name}"
-    print(f"🎨 [Shorts Scene {idx}] Generating 9:16 FLUX.1 visual...", flush=True)
-    if not generate_cloudflare_flux(f"{prompt}, vertical 9:16 composition", img_dest, aspect_ratio="9:16"):
-        download_pollinations_fallback(prompt, img_dest, width=1080, height=1920)
-    return img_name
+    remaining = target_seconds - covered
+    if shots and remaining <= MIN_SHOT_SECONDS:
+        return shots
+
+    basis = remaining if shots else target_seconds
+    if is_hook:
+        # The hook is the single highest-leverage moment in the Short (see
+        # module 1's Make.com prompt, which now also biases videoSearchQuery
+        # toward motion-rich phrasing so video is found here more often). If
+        # it still falls back to a still image, that image must NEVER read
+        # as one static frame: force at least 2 quick, cross-fading sub-shots
+        # (Scene.tsx already cross-fades + Ken-Burns between them) using the
+        # short HOOK_SUB_SHOT_SECONDS window, and lead with punchier framings
+        # from HOOK_SUB_SHOT_FRAMING_HINTS instead of a flat wide shot.
+        num_image_shots = max(2, min(3, round(basis / HOOK_SUB_SHOT_SECONDS)))
+        framing_hints = HOOK_SUB_SHOT_FRAMING_HINTS
+        verb = "Topping up with" if shots else "No video match - generating"
+        print(f"🎨 [Shorts HOOK Scene {idx}] {verb} {num_image_shots} quick, dynamic 9:16 sub-shot(s) so the opening never feels static...", flush=True)
+    else:
+        # Shorts scenes are naturally briefer and vertical framing has less
+        # room for a wide/medium-shot distinction, so cap at 2 sub-shots
+        # instead of 4.
+        num_image_shots = max(1, min(2, round(basis / SUB_SHOT_SECONDS)))
+        framing_hints = SUB_SHOT_FRAMING_HINTS
+        verb = "Topping up with" if shots else "Generating"
+        print(f"🎨 [Shorts Scene {idx}] {verb} {num_image_shots} 9:16 FLUX.1 visual sub-shot(s)...", flush=True)
+
+    filenames = generate_multi_shot_ai_images(
+        f"{prompt}, vertical 9:16 composition", f"shorts_scene_{idx}_img", "9:16", num_image_shots,
+        pollinations_width=1080, pollinations_height=1920,
+        framing_hints=framing_hints,
+    )
+    shots.extend({"type": "image", "file": f} for f in filenames)
+    return shots
+
+# -------------------------------------------------------------
+# 5b. AUTO-CHAPTERS (YouTube description timestamps)
+# -------------------------------------------------------------
+def format_chapter_timestamp(total_seconds: float) -> str:
+    total_seconds = max(0, int(total_seconds))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes}:{seconds:02d}"
+
+def build_chapters_block(scenes: list) -> str:
+    """YouTube auto-detects chapters from timestamp lines in a video's
+    description, as long as: the first line is exactly 0:00, there are at
+    least 3 lines, and each chapter is at least 10 seconds. Labels are a
+    short excerpt of that scene's own narration rather than generic 'Part N'
+    text, so viewers scrubbing the chapter bar (and YouTube's own indexing)
+    get real content signal."""
+    if len(scenes) < 3:
+        return ""
+    lines = []
+    elapsed = 0.0
+    for i, scene in enumerate(scenes):
+        label = (scene.get("narration_chunk") or "").strip().replace("\n", " ")
+        if len(label) > 45:
+            label = label[:45].rsplit(" ", 1)[0] + "..."
+        if not label:
+            label = f"भाग {i + 1}"
+        lines.append(f"{format_chapter_timestamp(elapsed)} {label}")
+        elapsed += scene.get("durationInSeconds", 5)
+    return "\n".join(lines)
 
 # -------------------------------------------------------------
 # 6. MASTER EXECUTION PIPELINE
@@ -421,23 +1244,90 @@ async def process():
             "-t", "30", "-q:a", "9", "-acodec", "libmp3lame", bgm_path
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+    # 1b. Shared transition "whoosh" - one small SFX file, reused by
+    # Scene.tsx at every shot-boundary cut in both Long and Shorts renders
+    # (see the multi-shot video/image fix). Resolved once here rather than
+    # per-scene since it's the exact same cue everywhere, not a per-scene
+    # mood choice like temple_bell/shankh/etc.
+    os.makedirs("public/audio/sfx", exist_ok=True)
+    resolve_sound_effect_audio("transition_whoosh", "public/audio/sfx/whoosh.mp3")
+
     # 2. Render High-CTR 16:9 Thumbnail Image
     thumb_prompt = thumbnail_data.get("imagePrompt") or "Lord Krishna radiant divine aura with glowing Sudarshan Chakra, dramatic 8k thumbnail"
     print("🖼️ Generating High-CTR Thumbnail...", flush=True)
     thumb_dest = "public/images/thumbnail.jpg"
-    if not generate_cloudflare_flux(thumb_prompt, thumb_dest, aspect_ratio="16:9"):
-        download_pollinations_fallback(thumb_prompt, thumb_dest, width=1920, height=1080)
+    generate_ai_image(thumb_prompt, thumb_dest, aspect_ratio="16:9", pollinations_width=1920, pollinations_height=1080)
     subprocess.run(["cp", thumb_dest, "out/thumbnail.jpg"], check=False)
+
+    # 2b. Thumbnail hook-text props, for the Remotion ThumbnailComposition
+    # still-render in the GitHub Actions workflow (see render.yml's
+    # render-thumbnail job) that overlays bold Hindi hook text on top of the
+    # background image generated just above. Rendered through Remotion/
+    # Chromium - the same pipeline that already renders Devanagari captions
+    # correctly in Subtitles.tsx - rather than a naive image-library text
+    # overlay, which risks garbled conjuncts/matra-reordering for Hindi
+    # script. out/thumbnail.jpg above stays as the plain background image;
+    # the render-thumbnail job produces the final text-overlaid version that
+    # publish-and-notify actually releases and sends to YouTube.
+    thumbnail_hook_text = (thumbnail_data.get("thumbnailText") or "").strip()
+    if not thumbnail_hook_text:
+        # Fallback so the thumbnail still gets SOME on-image text even if the
+        # upstream Make.com prompt hasn't been updated yet to supply a
+        # dedicated thumbnailText field - a short slice of the video's own
+        # title beats no text at all.
+        fallback_title = (seo_metadata.get("long_video_title") or "").strip()
+        thumbnail_hook_text = " ".join(fallback_title.split()[:6])
+    with open("public/thumbnail_props.json", "w", encoding="utf-8") as f:
+        json.dump(
+            {"backgroundImage": "thumbnail.jpg", "hookText": thumbnail_hook_text},
+            f, ensure_ascii=False, indent=2,
+        )
+
+    # 2c. Shorts-specific 9:16 Thumbnail - its OWN background image + hook
+    # text, distinct from the long-video thumbnail above. Previously Shorts
+    # either reused the long-video 16:9 thumbnail (badly cropped for a
+    # vertical feed) or got no custom thumbnail applied at all - see
+    # ShortsThumbnailComposition.tsx (render.yml's new render-thumbnail-shorts
+    # job) and the "Integration YouTube" Make.com scenario, which now
+    # actually calls YouTube's "Set a Video Thumbnail" action for both
+    # uploads instead of never setting one.
+    shorts_thumb_prompt = shorts_thumbnail_data.get("imagePrompt") or f"{thumb_prompt}, vertical 9:16 composition"
+    print("🖼️ Generating Shorts-specific 9:16 Thumbnail...", flush=True)
+    shorts_thumb_dest = "public/images/thumbnail_shorts.jpg"
+    generate_ai_image(shorts_thumb_prompt, shorts_thumb_dest, aspect_ratio="9:16", pollinations_width=1080, pollinations_height=1920)
+    subprocess.run(["cp", shorts_thumb_dest, "out/thumbnail_shorts.jpg"], check=False)
+
+    shorts_thumbnail_hook_text = (shorts_thumbnail_data.get("thumbnailText") or "").strip()
+    if not shorts_thumbnail_hook_text:
+        # Same graceful fallback as the long-video thumbnail above: prefer a
+        # dedicated hook line, but a slice of the Shorts' own title beats no
+        # text at all if the upstream Make.com prompt hasn't been updated yet.
+        fallback_shorts_title = (seo_metadata.get("shorts_title") or "").strip()
+        shorts_thumbnail_hook_text = " ".join(fallback_shorts_title.split()[:6])
+    with open("public/thumbnail_props_shorts.json", "w", encoding="utf-8") as f:
+        json.dump(
+            {"backgroundImage": "thumbnail_shorts.jpg", "hookText": shorts_thumbnail_hook_text},
+            f, ensure_ascii=False, indent=2,
+        )
 
     # 3. Parallel Visuals (Pexels + Pixabay + Coverr + FLUX.1 for Long & Shorts)
     long_items = [(i + 1, s) for i, s in enumerate(long_scenes)]
     shorts_items = [(i + 1, s) for i, s in enumerate(shorts_scenes)]
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        long_visuals = list(executor.map(process_long_scene_visual, long_items))
-        shorts_visuals = list(executor.map(process_shorts_scene_visual, shorts_items))
+    # max_workers=8 (was 4): this stage is I/O-bound (HTTP calls to stock/AI
+    # APIs), not CPU-bound, so doubling it is safe and meaningfully faster.
+    # Also submit long + shorts scenes together rather than as two sequential
+    # executor.map() calls - the old code fully finished every long scene
+    # before starting a single shorts scene, even though they're completely
+    # independent work and could easily interleave.
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        long_futures = [executor.submit(process_long_scene_visual, item) for item in long_items]
+        shorts_futures = [executor.submit(process_shorts_scene_visual, item) for item in shorts_items]
+        long_visuals = [f.result() for f in long_futures]
+        shorts_visuals = [f.result() for f in shorts_futures]
 
-    # 4. Parallel Audio Generation (Long + Shorts)
+    # 4. Parallel Audio Generation (Long + Shorts) - each task also returns
+    # that scene's word-level caption timing (see generate_clean_audio).
     audio_tasks = []
     for i, scene in enumerate(long_scenes):
         idx = i + 1
@@ -449,27 +1339,45 @@ async def process():
         narration = scene.get("text") or scene.get("narration_chunk", "")
         audio_tasks.append(generate_clean_audio(narration, f"public/audio/shorts_chunk_{idx}.mp3"))
 
-    await asyncio.gather(*audio_tasks)
+    audio_word_timings = await asyncio.gather(*audio_tasks)
+    long_word_timings = audio_word_timings[:len(long_scenes)]
+    shorts_word_timings = audio_word_timings[len(long_scenes):]
 
-    # 4b. Sound-Effect Layer (Long video only - the shorts payload has no soundEffect field)
+    # 4b. Sound-Effect Layer (BOTH Long video and Shorts now carry an
+    # optional soundEffect field - Shorts previously had none at all in the
+    # payload, so every Shorts render silently had zero effect layer
+    # regardless of what Scene.tsx already expected for format="shorts").
     for i, scene in enumerate(long_scenes):
         idx = i + 1
         effect_name = scene.get("soundEffect", "none")
         if effect_name and effect_name != "none":
             resolve_sound_effect_audio(effect_name, f"public/audio/effects/long_effect_{idx}.mp3")
 
+    for i, scene in enumerate(shorts_scenes):
+        idx = i + 1
+        effect_name = scene.get("soundEffect", "none")
+        if effect_name and effect_name != "none":
+            resolve_sound_effect_audio(effect_name, f"public/audio/effects/shorts_effect_{idx}.mp3")
+
     # 5. Build Remotion Props for Long Video
+    # long_visuals[i] / shorts_visuals[i] are now ordered shot LISTS (see
+    # process_long_scene_visual/process_shorts_scene_visual + Scene.tsx's
+    # `shots` field) rather than a single filename - this is what actually
+    # fixes a scene's video running out before its narration does.
     enriched_long = []
     for i, scene in enumerate(long_scenes):
         idx = i + 1
         audio_path = f"public/audio/chunk_{idx}.mp3"
         duration = get_audio_duration(audio_path)
+        shots = long_visuals[i] or []
         enriched_long.append({
             "scene_number": idx,
             "durationInSeconds": round(duration + 0.3, 2),
             "narration_chunk": scene.get("text", ""),
-            "imageFileName": long_visuals[i],
-            "soundEffect": scene.get("soundEffect", "none")
+            "shots": shots,
+            "imageFileName": shots[0]["file"] if shots else "",  # legacy/debug only, see Scene.tsx's resolveShots()
+            "soundEffect": scene.get("soundEffect", "none"),
+            "words": long_word_timings[i]
         })
 
     # 6. Build Remotion Props for Shorts Video
@@ -478,19 +1386,37 @@ async def process():
         idx = i + 1
         audio_path = f"public/audio/shorts_chunk_{idx}.mp3"
         duration = get_audio_duration(audio_path)
+        shots = shorts_visuals[i] or []
         enriched_shorts.append({
             "scene_number": idx,
             "durationInSeconds": round(duration + 0.2, 2),
             "narration_chunk": scene.get("text", ""),
-            "imageFileName": shorts_visuals[i]
+            "shots": shots,
+            "imageFileName": shots[0]["file"] if shots else "",  # legacy/debug only, see Scene.tsx's resolveShots()
+            "soundEffect": scene.get("soundEffect", "none"),
+            "words": shorts_word_timings[i]
         })
+
+    # 6b. Climax scene(s) for the bgm-swell in DevotionalComposition.tsx.
+    # Prefer whatever the Make.com prompt supplied (_meta.climax_scene_number
+    # - a 1-based position in long_video.scenes); fall back to a simple
+    # heuristic (roughly 70% through the story, where the revelation/turning
+    # point usually lands per the story-structure instructions in module 1's
+    # prompt) so every render gets a swell even before that prompt is updated.
+    if isinstance(climax_scene_number, int) and 1 <= climax_scene_number <= len(enriched_long):
+        bgm_swell_scene_numbers = [climax_scene_number]
+    elif enriched_long:
+        bgm_swell_scene_numbers = [max(1, round(len(enriched_long) * 0.7))]
+    else:
+        bgm_swell_scene_numbers = []
 
     # Save props and metadata
     long_props = {
         "title": seo_metadata.get("long_video_title", "Devotional Long Video"),
         "fps": 30,
         "scenes": enriched_long,
-        "seo_metadata": seo_metadata
+        "seo_metadata": seo_metadata,
+        "bgmSwellSceneNumbers": bgm_swell_scene_numbers
     }
     shorts_props = {
         "title": seo_metadata.get("shorts_title", "Devotional Shorts"),
@@ -505,10 +1431,28 @@ async def process():
     with open("public/props_shorts.json", "w", encoding="utf-8") as f:
         json.dump(shorts_props, f, ensure_ascii=False, indent=2)
 
-    with open("out/metadata.json", "w", encoding="utf-8") as f:
-        json.dump(seo_metadata, f, ensure_ascii=False, indent=2)
+    # out/metadata.json is what your publish/upload flow reads for the
+    # YouTube title+description - unlike props.json (which only Remotion
+    # reads), it's safe to enrich this copy with auto-generated chapters
+    # without touching anything about how the video itself renders.
+    chapters_block = build_chapters_block(enriched_long)
+    metadata_for_upload = dict(seo_metadata)
+    if chapters_block:
+        base_description = (metadata_for_upload.get("long_video_description") or "").strip()
+        metadata_for_upload["long_video_description"] = f"{base_description}\n\n{chapters_block}".strip()
+        metadata_for_upload["chapters"] = chapters_block
 
-    print("🎉 All Multi-Source Assets (Pexels + Pixabay + Coverr + FLUX), Thumbnail, Sound Effects, and Metadata ready!", flush=True)
+    with open("out/metadata.json", "w", encoding="utf-8") as f:
+        json.dump(metadata_for_upload, f, ensure_ascii=False, indent=2)
+
+    # Persist which stock clips this run actually used, so a LATER run's
+    # _load_recent_clip_history() call (top of this file) can deprioritize
+    # them - see the clip-usage-history section near the top of this file.
+    # The CI workflow commits used_clips_history.json back to the repo right
+    # after this script finishes (see render.yml).
+    save_clip_history()
+
+    print("🎉 All Multi-Source Assets (Pexels + Pixabay + Coverr + Wikimedia + Local Library + FLUX), Thumbnail, Sound Effects, and Metadata ready!", flush=True)
 
 if __name__ == "__main__":
     asyncio.run(process())
