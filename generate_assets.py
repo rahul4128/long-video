@@ -10,6 +10,7 @@ import datetime
 import threading
 import subprocess
 import urllib.parse
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 import requests
 import edge_tts
@@ -83,6 +84,24 @@ PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "").strip()
 COVERR_API_KEY = os.environ.get("COVERR_API_KEY", "").strip()
 HUGGINGFACE_API_KEY = os.environ.get("HUGGINGFACE_API_KEY", "").strip()
 FREESOUND_API_KEY = os.environ.get("FREESOUND_API_KEY", "").strip()
+
+# Narration engine toggle - "edge" (default, today's Microsoft edge-tts
+# hi-IN-MadhurNeural voice) or "piper" (free, open-source, runs locally on
+# CPU - no API key, no per-character cost, no internet dependency at
+# synthesis time). Piper has no WordBoundary-style timing events the way
+# edge-tts does, so scenes narrated with it fall back to the static
+# full-sentence caption in Subtitles.tsx instead of the word-synced one -
+# see generate_piper_audio() below. Set via the workflow_dispatch inputs in
+# render.yml for quick A/B testing without touching this file.
+TTS_ENGINE = os.environ.get("TTS_ENGINE", "edge").strip().lower()
+PIPER_VOICE = os.environ.get("PIPER_VOICE", "hi_IN-priyamvada-medium").strip()
+# >1.0 = slower/more deliberate pacing (Piper's default 1.0 can read a touch
+# rushed for devotional narration); seconds of pause Piper inserts between
+# sentences - both tunable via env vars without a code change.
+PIPER_LENGTH_SCALE = os.environ.get("PIPER_LENGTH_SCALE", "1.05").strip()
+PIPER_SENTENCE_SILENCE = os.environ.get("PIPER_SENTENCE_SILENCE", "0.35").strip()
+PIPER_VOICES_DIR = "piper_voices"
+os.makedirs(PIPER_VOICES_DIR, exist_ok=True)
 
 os.makedirs("public/images", exist_ok=True)
 os.makedirs("public/audio", exist_ok=True)
@@ -841,8 +860,113 @@ def download_pollinations_fallback(prompt: str, img_dest: str, width: int = 1920
     return False
 
 # -------------------------------------------------------------
-# 3. AUDIO SYNTHESIS ENGINE (Edge-TTS)
+# 3. AUDIO SYNTHESIS ENGINE (Edge-TTS, with an optional free/local Piper path)
 # -------------------------------------------------------------
+def ensure_piper_voice(voice_name: str):
+    """Downloads the given Piper voice's .onnx + .onnx.json from the
+    rhasspy/piper-voices Hugging Face repo into PIPER_VOICES_DIR if they
+    aren't already there. render.yml caches this directory between workflow
+    runs, so in practice this only hits the network once, ever, per voice -
+    every later run just restores from cache. Returns the local .onnx path,
+    or None if the voice couldn't be fetched (a network hiccup, or the repo
+    layout changing), in which case the caller falls back to edge-tts for
+    that clip rather than failing the whole render over a TTS download."""
+    onnx_path = os.path.join(PIPER_VOICES_DIR, f"{voice_name}.onnx")
+    json_path = os.path.join(PIPER_VOICES_DIR, f"{voice_name}.onnx.json")
+    if os.path.exists(onnx_path) and os.path.exists(json_path) and os.path.getsize(onnx_path) > 0:
+        return onnx_path
+    try:
+        # voice_name looks like "hi_IN-priyamvada-medium": lang="hi_IN",
+        # speaker="priyamvada", quality="medium". piper-voices nests these
+        # as <lang-family>/<lang>/<speaker>/<quality>/<voice_name>.onnx[.json]
+        # - e.g. hi/hi_IN/priyamvada/medium/hi_IN-priyamvada-medium.onnx.
+        lang, speaker, quality = voice_name.split("-")
+        lang_family = lang.split("_")[0]
+        base_url = (
+            f"https://huggingface.co/rhasspy/piper-voices/resolve/main/"
+            f"{lang_family}/{lang}/{speaker}/{quality}/{voice_name}"
+        )
+        for suffix, dest in ((".onnx", onnx_path), (".onnx.json", json_path)):
+            urllib.request.urlretrieve(base_url + suffix, dest)
+        if os.path.getsize(onnx_path) > 0 and os.path.getsize(json_path) > 0:
+            return onnx_path
+    except Exception as e:
+        print(f"[piper] could not download voice '{voice_name}': {e}")
+    # Clean up any partial/zero-byte download so a later run doesn't mistake
+    # it for a valid cached voice and skip re-downloading it.
+    for p in (onnx_path, json_path):
+        if os.path.exists(p) and os.path.getsize(p) == 0:
+            os.remove(p)
+    return None
+
+def _run_piper_sync(text: str, onnx_path: str, wav_path: str) -> bool:
+    """Blocking Piper CLI call - invoked via asyncio.to_thread so it doesn't
+    stall the event loop. Runs under the same tts_semaphore as edge-tts (see
+    generate_clean_audio), which caps this at 2 concurrent synthesis jobs -
+    important here because Piper is CPU-bound local inference, and GitHub's
+    hosted runners only have 2 cores, so uncapped concurrency would just
+    make every individual synthesis slower rather than finishing faster."""
+    try:
+        result = subprocess.run(
+            [
+                "piper",
+                "--model", onnx_path,
+                "--output_file", wav_path,
+                "--length_scale", PIPER_LENGTH_SCALE,
+                "--sentence_silence", PIPER_SENTENCE_SILENCE,
+            ],
+            input=text.encode("utf-8"),
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=180,
+        )
+        return result.returncode == 0 and os.path.exists(wav_path) and os.path.getsize(wav_path) > 0
+    except Exception as e:
+        print(f"[piper] synthesis error: {e}")
+        return False
+
+async def generate_piper_audio(clean_text: str, audio_dest: str):
+    """Piper counterpart to the edge-tts path in generate_clean_audio() -
+    same on-disk contract (writes a loudness-normalized mp3 to audio_dest)
+    but always returns [] for word timings on success, since Piper has no
+    WordBoundary-style event stream the way edge-tts does. Subtitles.tsx
+    already falls back to a static full-sentence caption when `words` is
+    empty, so this is safe - Piper-narrated scenes just lose the karaoke-
+    style word highlight edge-tts scenes get.
+
+    Returns None (never []) on failure, which is the caller's signal to
+    fall back to edge-tts for this one clip instead of shipping a scene
+    with broken/missing audio."""
+    onnx_path = ensure_piper_voice(PIPER_VOICE)
+    if not onnx_path:
+        return None
+
+    raw_wav = audio_dest + ".raw.wav"
+    ok = await asyncio.to_thread(_run_piper_sync, clean_text, onnx_path, raw_wav)
+    if not ok:
+        if os.path.exists(raw_wav):
+            os.remove(raw_wav)
+        return None
+
+    normalize = subprocess.run(
+        ["ffmpeg", "-y", "-i", raw_wav, "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+         "-ar", "24000", "-q:a", "4", "-acodec", "libmp3lame", audio_dest],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    if normalize.returncode != 0 or not os.path.exists(audio_dest):
+        # Same "don't lose the clip over a normalization hiccup" fallback
+        # generate_clean_audio uses for edge-tts - plain transcode, no filter.
+        transcode = subprocess.run(
+            ["ffmpeg", "-y", "-i", raw_wav, "-ar", "24000", "-q:a", "4", "-acodec", "libmp3lame", audio_dest],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        if transcode.returncode != 0 or not os.path.exists(audio_dest):
+            if os.path.exists(raw_wav):
+                os.remove(raw_wav)
+            return None
+
+    if os.path.exists(raw_wav):
+        os.remove(raw_wav)
+    return []
+
 def get_audio_duration(file_path: str) -> float:
     cmd = [
         "ffprobe", "-v", "error", "-show_entries", "format=duration",
@@ -868,9 +992,20 @@ async def generate_clean_audio(narration: str, audio_dest: str) -> list:
 
     Returns [] if word timing couldn't be captured - Subtitles.tsx falls
     back to the old static full-sentence caption in that case, so a render
-    never breaks over it."""
+    never breaks over it.
+
+    When TTS_ENGINE=piper, tries generate_piper_audio() first and only
+    falls through to edge-tts below if that fails (missing voice, download
+    error, etc.) - so a bad Piper run never costs you the whole render."""
     async with tts_semaphore:
         clean_text = narration.strip() if narration else "हरि ॐ तत्सत्"
+
+        if TTS_ENGINE == "piper":
+            piper_result = await generate_piper_audio(clean_text, audio_dest)
+            if piper_result is not None:
+                return piper_result
+            print(f"[piper] falling back to edge-tts for {audio_dest}")
+
         raw_path = audio_dest + ".raw.mp3"
         for attempt in range(1, 4):
             try:
