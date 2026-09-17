@@ -858,7 +858,6 @@ def get_audio_duration(file_path: str) -> float:
 tts_semaphore = asyncio.Semaphore(2)
 TTS_VOICES = [
     "hi-IN-SwaraNeural",
-    "hi-IN-NeerjaNeural",
     "hi-IN-MadhurNeural",
 ]
 
