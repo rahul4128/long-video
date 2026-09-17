@@ -1,5 +1,6 @@
 import os
 import re
+import html
 import json
 import time
 import base64
@@ -855,6 +856,39 @@ def get_audio_duration(file_path: str) -> float:
         return 8.0
 
 tts_semaphore = asyncio.Semaphore(2)
+TTS_VOICES = [
+    "hi-IN-SwaraNeural",
+    "hi-IN-NeerjaNeural",
+    "hi-IN-MadhurNeural",
+]
+
+
+def _build_human_like_ssml(text: str) -> str:
+    """Creates sentence-aware SSML with small pauses to sound less robotic.
+
+    Edge TTS usually sounds more natural when we give it short sentence chunks
+    and a neutral prosody rather than one long flat block. This keeps the voice
+    human-like without sacrificing the word-timing data that Subtitles.tsx uses.
+    """
+    clean_text = re.sub(r"\s+", " ", text or "हरि ॐ तत्सत्").strip()
+    if not clean_text:
+        clean_text = "हरि ॐ तत्सत्"
+
+    parts = []
+    for sentence in re.split(r"(?<=[।!?])\s+|(?<=\n)\s*", clean_text):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        escaped = html.escape(sentence, quote=False)
+        parts.append(f"<prosody rate='0%' pitch='0Hz'>{escaped}</prosody>")
+
+    if not parts:
+        return "<speak><prosody rate='0%' pitch='0Hz'>हरि ॐ तत्सत्</prosody></speak>"
+
+    spoken = "".join(f"{part}<break time='300ms'/>" for part in parts[:-1])
+    spoken += parts[-1]
+    return f"<speak>{spoken}</speak>"
+
 
 async def generate_clean_audio(narration: str, audio_dest: str) -> list:
     """Synthesizes narration and returns word-level caption timing captured
@@ -871,48 +905,50 @@ async def generate_clean_audio(narration: str, audio_dest: str) -> list:
     never breaks over it."""
     async with tts_semaphore:
         clean_text = narration.strip() if narration else "हरि ॐ तत्सत्"
+        ssml_text = _build_human_like_ssml(clean_text)
         raw_path = audio_dest + ".raw.mp3"
-        for attempt in range(1, 4):
-            try:
-                communicate = edge_tts.Communicate(
-                    clean_text,
-                    voice="hi-IN-MadhurNeural",
-                    rate="-3%",
-                    pitch="-1Hz"
-                )
-                submaker = edge_tts.SubMaker()
-                audio_bytes = bytearray()
-                async for chunk in communicate.stream():
-                    if chunk["type"] == "audio":
-                        audio_bytes.extend(chunk["data"])
-                    elif chunk["type"] == "WordBoundary":
-                        submaker.feed(chunk)
-
-                if audio_bytes:
-                    with open(raw_path, "wb") as f:
-                        f.write(audio_bytes)
-                    normalize = subprocess.run(
-                        ["ffmpeg", "-y", "-i", raw_path, "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
-                         "-ar", "24000", "-q:a", "4", "-acodec", "libmp3lame", audio_dest],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        for voice_name in TTS_VOICES:
+            for attempt in range(1, 4):
+                try:
+                    communicate = edge_tts.Communicate(
+                        ssml_text,
+                        voice=voice_name,
+                        rate="0%",
+                        pitch="0Hz",
                     )
-                    if normalize.returncode != 0 or not os.path.exists(audio_dest):
-                        # Normalization failed for some reason - the raw (un-normalized)
-                        # clip is still a perfectly valid narration track, use it as-is
-                        # rather than losing the scene's audio entirely.
-                        shutil.copyfile(raw_path, audio_dest)
-                    if os.path.exists(raw_path):
-                        os.remove(raw_path)
-                    return [
-                        {
-                            "word": cue.content,
-                            "start": round(cue.start.total_seconds(), 3),
-                            "end": round(cue.end.total_seconds(), 3),
-                        }
-                        for cue in submaker.cues
-                    ]
-            except Exception:
-                await asyncio.sleep(1.5)
+                    submaker = edge_tts.SubMaker()
+                    audio_bytes = bytearray()
+                    async for chunk in communicate.stream():
+                        if chunk["type"] == "audio":
+                            audio_bytes.extend(chunk["data"])
+                        elif chunk["type"] == "WordBoundary":
+                            submaker.feed(chunk)
+
+                    if audio_bytes:
+                        with open(raw_path, "wb") as f:
+                            f.write(audio_bytes)
+                        normalize = subprocess.run(
+                            ["ffmpeg", "-y", "-i", raw_path, "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+                             "-ar", "24000", "-q:a", "4", "-acodec", "libmp3lame", audio_dest],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        )
+                        if normalize.returncode != 0 or not os.path.exists(audio_dest):
+                            # Normalization failed for some reason - the raw (un-normalized)
+                            # clip is still a perfectly valid narration track, use it as-is
+                            # rather than losing the scene's audio entirely.
+                            shutil.copyfile(raw_path, audio_dest)
+                        if os.path.exists(raw_path):
+                            os.remove(raw_path)
+                        return [
+                            {
+                                "word": cue.content,
+                                "start": round(cue.start.total_seconds(), 3),
+                                "end": round(cue.end.total_seconds(), 3),
+                            }
+                            for cue in submaker.cues
+                        ]
+                except Exception:
+                    await asyncio.sleep(1.5)
 
         subprocess.run([
             "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
