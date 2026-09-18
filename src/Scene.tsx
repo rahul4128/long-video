@@ -128,11 +128,18 @@ export const Scene: React.FC<SceneProps> = ({
   // a plain static crop) so real footage reads as intentionally framed
   // rather than just dropped in.
   const kenBurnsTransform = (localFrame: number, shotIndex: number): string => {
+    const planned = scene.director?.camera;
     const shotDirection: 'zoom-in' | 'pan-right' =
-      shotIndex % 2 === 0 ? direction : direction === 'zoom-in' ? 'pan-right' : 'zoom-in';
+      planned === 'pan_left'
+        ? 'pan-right'
+        : planned === 'pan_right'
+          ? 'pan-right'
+          : planned === 'slow_push'
+            ? 'zoom-in'
+            : shotIndex % 2 === 0 ? direction : direction === 'zoom-in' ? 'pan-right' : 'zoom-in';
     const scale =
       shotDirection === 'zoom-in'
-        ? interpolate(localFrame, Array.of(0, shotDurationFrames), Array.of(1.0, 1.18), {
+        ? interpolate(localFrame, Array.of(0, shotDurationFrames), Array.of(1.0, scene.director?.camera === 'slow_push' ? 1.10 : 1.18), {
             extrapolateLeft: 'clamp',
             extrapolateRight: 'clamp',
           })
@@ -142,7 +149,7 @@ export const Scene: React.FC<SceneProps> = ({
           });
     const translateX =
       shotDirection === 'pan-right'
-        ? interpolate(localFrame, Array.of(0, shotDurationFrames), Array.of(-30, 30), {
+        ? interpolate(localFrame, Array.of(0, shotDurationFrames), Array.of(scene.director?.camera === 'pan_left' ? 30 : -30, scene.director?.camera === 'pan_left' ? -30 : 30), {
             extrapolateLeft: 'clamp',
             extrapolateRight: 'clamp',
           })
