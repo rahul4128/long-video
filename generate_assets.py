@@ -87,6 +87,11 @@ if not shorts_scenes:
         }
     ]
 
+# Re-run the director after fallback scene injection so workflow_dispatch
+# test renders receive exactly the same production metadata as normal runs.
+long_scenes = enrich_scenes(long_scenes)
+shorts_scenes = enrich_scenes(shorts_scenes)
+
 CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
 CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "").strip()
@@ -875,10 +880,30 @@ tts_semaphore = asyncio.Semaphore(2)
 
 def _naturalize_text(text: str) -> str:
     """Add gentle punctuation cues so local TTS engines breathe naturally."""
-    text = re.sub(r"\\s+", " ", (text or "").strip())
-    text = re.sub(r"[,，]\\s*", ", ", text)
-    text = re.sub(r"([!?।])\\s*", r"\\1 ", text)
+    text = re.sub(r"\s+", " ", (text or "").strip())
+    text = re.sub(r"[,，]\s*", ", ", text)
+    text = re.sub(r"([!?।])\s*", r"\1 ", text)
     return text.strip()
+
+def _fallback_word_timings(text: str, audio_path: str) -> list:
+    """Approximate word timings for TTS engines without WordBoundary events."""
+    words = re.findall(r"\S+", text or "")
+    if not words:
+        return []
+    duration = max(0.1, get_audio_duration(audio_path))
+    weights = [max(1, len(w.strip(".,!?।"))) for w in words]
+    total = float(sum(weights))
+    cursor = 0.0
+    timings = []
+    for word, weight in zip(words, weights):
+        span = duration * weight / total
+        timings.append({
+            "word": word,
+            "start": round(cursor, 3),
+            "end": round(cursor + span, 3),
+        })
+        cursor += span
+    return timings
 
 async def generate_clean_audio(narration: str, audio_dest: str) -> list:
     """IndicF5 (optional) -> Kokoro -> Edge-TTS -> silence fallback."""
@@ -890,7 +915,7 @@ async def generate_clean_audio(narration: str, audio_dest: str) -> list:
             try:
                 ok = await asyncio.to_thread(generate_indicf5_audio, clean_text, audio_dest)
                 if ok and os.path.exists(audio_dest):
-                    return []
+                    return _fallback_word_timings(clean_text, audio_dest)
             except Exception as e:
                 print(f"IndicF5 notice: {e} - falling back to Kokoro/Edge-TTS.", flush=True)
 
@@ -898,7 +923,7 @@ async def generate_clean_audio(narration: str, audio_dest: str) -> list:
             try:
                 ok = await asyncio.to_thread(generate_kokoro_audio, clean_text, audio_dest)
                 if ok and os.path.exists(audio_dest):
-                    return []
+                    return _fallback_word_timings(clean_text, audio_dest)
             except Exception as e:
                 print(f"Kokoro notice: {e} - falling back to Edge-TTS.", flush=True)
         elif engine == "kokoro" and not KOKORO_AVAILABLE:
