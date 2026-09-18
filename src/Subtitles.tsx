@@ -60,7 +60,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ text, words }) => {
   // both a wall of text to read at once and completely out of sync with
   // what's actually being said at any given moment.
   const fallbackWords: WordTiming[] = !words || words.length === 0
-    ? (text.match(/[^\\s]+/g) || []).map((word, i, all) => ({
+    ? (text.match(/[^\s]+/g) || []).map((word, i, all) => ({
         word,
         start: (i / Math.max(1, all.length)) * (durationInFrames / fps),
         end: ((i + 1) / Math.max(1, all.length)) * (durationInFrames / fps),
