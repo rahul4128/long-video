@@ -22,6 +22,14 @@ export interface Shot {
   // when this isn't provided, so older props.json files still render fine.
   transition?: 'crossfade' | 'blur_cut';
 }
+export interface DirectorPlan {
+  camera?: 'slow_push' | 'pan_left' | 'pan_right' | 'zoom_in';
+  mood?: string;
+  transition?: 'crossfade' | 'blur_cut';
+  emphasis?: 'climax' | 'normal';
+  visual_priority?: string[];
+  director_version?: number;
+}
 
 export interface SceneItem {
   scene_number: number;
@@ -47,6 +55,7 @@ export interface SceneItem {
   // ALREADY fully dynamic per day's unique narration - nothing about
   // Subtitles.tsx is hardcoded text; see the comment on `words` usage there.
   words?: WordTiming[];
+  director?: DirectorPlan;
 }
 
 export interface SEOMetadata {
