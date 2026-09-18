@@ -16,6 +16,14 @@ def check(path, kind):
     duration = float(p.get("format", {}).get("duration", 0) or 0)
     p["duration"] = duration
 
+    # The current production target is a compact 3-minute long-form episode.
+    # Keep a little tolerance around the 2:30–3:30 content target so a bad
+    # timing/render regression cannot silently ship a padded 5–10 minute file.
+    if kind == "video" and path.endswith("final_video.mp4"):
+        p["durationTargetOk"] = 150 <= duration <= 210
+        if not p["durationTargetOk"]:
+            p["durationTargetError"] = "long video outside 150–210 second target"
+
     has_kind = any(s.get("codec_type") == kind for s in streams)
     # Still images (thumbnails) legitimately have no media duration in
     # ffprobe. Validate that an image has dimensions instead of requiring
@@ -30,6 +38,8 @@ def check(path, kind):
         p["ok"] = p["ok"] and has_dimensions
     else:
         p["ok"] = p["ok"] and duration > 0 and has_kind
+        if kind == "video" and path.endswith("final_video.mp4"):
+            p["ok"] = p["ok"] and p.get("durationTargetOk", True)
 
     return p
 
