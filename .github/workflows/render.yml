@@ -37,12 +37,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /var/cache/apt/archives/*.deb
-          key: apt-archives-${{ runner.os }}-ffmpeg-v1
+          key: apt-archives-${{ runner.os }}-ffmpeg-espeak-v2
 
       - name: Install System Dependencies (ffmpeg)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg
+          sudo apt-get install -y --no-install-recommends ffmpeg espeak-ng
 
       - name: Install Python Dependencies
         run: pip install -r requirements.txt
