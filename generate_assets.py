@@ -841,8 +841,14 @@ def download_pollinations_fallback(prompt: str, img_dest: str, width: int = 1920
     return False
 
 # -------------------------------------------------------------
-# 3. AUDIO SYNTHESIS ENGINE (Edge-TTS)
+# 3. AUDIO SYNTHESIS ENGINE
 # -------------------------------------------------------------
+# Primary: local Kokoro Hindi TTS (free/open weights, no API key).
+# Fallback: the existing Edge-TTS path. Set AUDIO_TTS_ENGINE=edge to force
+# the legacy engine, or kokoro to require Kokoro.
+# -------------------------------------------------------------
+from audio_engine import generate_kokoro_audio, KOKORO_AVAILABLE
+
 def get_audio_duration(file_path: str) -> float:
     cmd = [
         "ffprobe", "-v", "error", "-show_entries", "format=duration",
@@ -857,28 +863,39 @@ def get_audio_duration(file_path: str) -> float:
 tts_semaphore = asyncio.Semaphore(2)
 
 async def generate_clean_audio(narration: str, audio_dest: str) -> list:
-    """Synthesizes narration and returns word-level caption timing captured
-    from edge-tts's WordBoundary events during streaming synthesis - a list
-    of {"word", "start", "end"} in seconds, relative to the start of THIS
-    clip. This is what powers the word-by-word synced captions in
-    Subtitles.tsx (a real retention/accessibility upgrade over one static
-    sentence sitting on screen for the whole scene). Also loudness-normalizes
-    the narration to a consistent target (single-pass loudnorm, ~-16 LUFS)
-    so volume doesn't drift scene-to-scene or video-to-video.
+    """Generate narration with Kokoro first and Edge-TTS as a safe fallback.
 
-    Returns [] if word timing couldn't be captured - Subtitles.tsx falls
-    back to the old static full-sentence caption in that case, so a render
-    never breaks over it."""
+    Kokoro does not currently provide the same WordBoundary stream used by
+    Edge-TTS, so Kokoro returns [] and Remotion keeps its sentence-level
+    caption fallback. Edge-TTS still returns word-level timing when used.
+    """
     async with tts_semaphore:
         clean_text = narration.strip() if narration else "हरि ॐ तत्सत्"
+        engine = os.getenv("AUDIO_TTS_ENGINE", "kokoro").strip().lower()
+
+        if engine in ("kokoro", "auto") and KOKORO_AVAILABLE:
+            try:
+                ok = await asyncio.to_thread(
+                    generate_kokoro_audio,
+                    clean_text,
+                    audio_dest,
+                )
+                if ok and os.path.exists(audio_dest):
+                    return []
+                print("Kokoro produced no audio; falling back to Edge-TTS.", flush=True)
+            except Exception as e:
+                print(f"Kokoro notice: {e} - falling back to Edge-TTS.", flush=True)
+        elif engine == "kokoro" and not KOKORO_AVAILABLE:
+            print("Kokoro is unavailable; falling back to Edge-TTS.", flush=True)
+
         raw_path = audio_dest + ".raw.mp3"
         for attempt in range(1, 4):
             try:
                 communicate = edge_tts.Communicate(
                     clean_text,
-                    voice="hi-IN-MadhurNeural",
-                    rate="-3%",
-                    pitch="-1Hz"
+                    voice=os.getenv("EDGE_TTS_VOICE", "hi-IN-MadhurNeural"),
+                    rate=os.getenv("EDGE_TTS_RATE", "-3%"),
+                    pitch=os.getenv("EDGE_TTS_PITCH", "-1Hz")
                 )
                 submaker = edge_tts.SubMaker()
                 audio_bytes = bytearray()
@@ -892,14 +909,16 @@ async def generate_clean_audio(narration: str, audio_dest: str) -> list:
                     with open(raw_path, "wb") as f:
                         f.write(audio_bytes)
                     normalize = subprocess.run(
-                        ["ffmpeg", "-y", "-i", raw_path, "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
-                         "-ar", "24000", "-q:a", "4", "-acodec", "libmp3lame", audio_dest],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        [
+                            "ffmpeg", "-y", "-i", raw_path,
+                            "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+                            "-ar", "24000", "-q:a", "4",
+                            "-acodec", "libmp3lame", audio_dest
+                        ],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
                     )
                     if normalize.returncode != 0 or not os.path.exists(audio_dest):
-                        # Normalization failed for some reason - the raw (un-normalized)
-                        # clip is still a perfectly valid narration track, use it as-is
-                        # rather than losing the scene's audio entirely.
                         shutil.copyfile(raw_path, audio_dest)
                     if os.path.exists(raw_path):
                         os.remove(raw_path)
@@ -911,191 +930,21 @@ async def generate_clean_audio(narration: str, audio_dest: str) -> list:
                         }
                         for cue in submaker.cues
                     ]
-            except Exception:
+            except Exception as e:
+                print(f"Edge-TTS attempt {attempt} failed: {e}", flush=True)
                 await asyncio.sleep(1.5)
 
-        subprocess.run([
-            "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
-            "-t", "5", "-q:a", "9", "-acodec", "libmp3lame", audio_dest
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-f", "lavfi",
+                "-i", "anullsrc=r=24000:cl=mono",
+                "-t", "5", "-q:a", "9",
+                "-acodec", "libmp3lame", audio_dest
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         return []
-
-# -------------------------------------------------------------
-# 3b. DYNAMIC SOUND-EFFECT ENGINE (Freesound, CC0-only, with local fallback)
-# -------------------------------------------------------------
-# Several phrasings per soundEffect label, tried in order - CC0-only results are scarce
-# for some of these, so one narrow phrase can easily come back empty even though CC0
-# clips exist under a slightly different search term.
-SOUND_EFFECT_QUERIES = {
-    "temple_bell": ["temple bell ring", "temple bell", "bell ring", "bell chime"],
-    "shankh": ["conch shell horn blow", "conch shell", "conch horn", "horn blast"],
-    "om_drone": ["om chanting drone", "meditation drone ambient", "singing bowl drone", "deep drone ambient"],
-    "flute_swell": ["bansuri flute", "indian flute melody", "flute swell", "flute ambient"],
-    # Not a per-scene soundEffect choice - a single shared cue Scene.tsx plays
-    # at every shot-boundary cut (see the multi-shot video/image fix below)
-    # so cuts read as an intentional cinematic edit rather than a plain,
-    # silent slideshow dissolve.
-    "transition_whoosh": ["whoosh transition", "cinematic whoosh", "swoosh transition sound", "riser whoosh"],
-}
-
-def fetch_freesound_effect(effect_name: str, dest_path: str) -> bool:
-    if not FREESOUND_API_KEY:
-        return False
-    queries = SOUND_EFFECT_QUERIES.get(effect_name)
-    if not queries:
-        return False
-    for query in queries:
-        try:
-            clean_q = urllib.parse.quote(query)
-            # CC0 ("Creative Commons 0") only - no attribution required, safe for a
-            # monetized channel.
-            url = (
-                f"https://freesound.org/apiv2/search/text/?query={clean_q}"
-                f"&filter=license:\"Creative Commons 0\"&fields=id,previews"
-                f"&token={FREESOUND_API_KEY}"
-            )
-            res = requests.get(url, timeout=15)
-            if res.status_code == 200:
-                results = res.json().get("results", [])
-                if results:
-                    previews = results[0].get("previews", {})
-                    preview_url = previews.get("preview-hq-mp3") or previews.get("preview-lq-mp3")
-                    if preview_url:
-                        v_res = requests.get(preview_url, timeout=30)
-                        if v_res.status_code == 200 and len(v_res.content) > 1000:
-                            with open(dest_path, "wb") as f:
-                                f.write(v_res.content)
-                            return True
-        except Exception as e:
-            print(f"Freesound notice ({effect_name}, '{query}'): {e}", flush=True)
-    return False
-
-def extract_bgm_clip(dest_path: str, clip_seconds: float = 3.0) -> bool:
-    """Fallback tier: cut a short, faded clip from the existing background
-    music track (public/audio/bgm.mp3) to use as a generic ambient effect
-    layer when Freesound has no CC0 match and no local library file exists
-    either. This only produces something audible if bgm.mp3 is itself a real
-    music track (i.e. you've checked one in) rather than the silent
-    placeholder generated when it's missing - either way it's safe to call."""
-    bgm_path = "public/audio/bgm.mp3"
-    if not os.path.exists(bgm_path):
-        return False
-    try:
-        bgm_duration = get_audio_duration(bgm_path)
-        max_start = max(0.0, bgm_duration - clip_seconds - 0.5)
-        start = random.uniform(0.0, max_start) if max_start > 0 else 0.0
-        fade_out_start = max(0.0, clip_seconds - 0.5)
-        subprocess.run([
-            "ffmpeg", "-y", "-ss", f"{start:.2f}", "-t", f"{clip_seconds:.2f}",
-            "-i", bgm_path,
-            "-af", f"afade=t=in:st=0:d=0.5,afade=t=out:st={fade_out_start:.2f}:d=0.5",
-            "-q:a", "9", "-acodec", "libmp3lame", dest_path
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-        return os.path.exists(dest_path) and os.path.getsize(dest_path) > 1000
-    except Exception as e:
-        print(f"BGM-clip fallback notice: {e}", flush=True)
-        return False
-
-def resolve_sound_effect_audio(effect_name: str, dest_path: str) -> None:
-    """Guarantees dest_path exists for a scene's sound-effect layer, trying
-    four tiers in order: (1) a fresh CC0 clip from Freesound (across several
-    query phrasings), (2) a checked-in generic clip under
-    public/audio/effects_library/<effect_name>.mp3, (3) a short clip lifted
-    from the existing bgm.mp3 track, and (4) silence as the last resort, so a
-    render never breaks over a missing effect."""
-    if fetch_freesound_effect(effect_name, dest_path):
-        print(f"  ✅ Sound effect '{effect_name}' fetched from Freesound (CC0)", flush=True)
-        return
-    library_path = f"public/audio/effects_library/{effect_name}.mp3"
-    if os.path.exists(library_path):
-        shutil.copyfile(library_path, dest_path)
-        print(f"  ℹ️ Sound effect '{effect_name}' used from local library fallback", flush=True)
-        return
-    if extract_bgm_clip(dest_path):
-        print(f"  🎵 Sound effect '{effect_name}' had no Freesound/library match - used a clip from bgm.mp3 instead", flush=True)
-        return
-    reason = "no FREESOUND_API_KEY set" if not FREESOUND_API_KEY else "no CC0 match found on Freesound"
-    subprocess.run([
-        "ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono",
-        "-t", "1", "-q:a", "9", "-acodec", "libmp3lame", dest_path
-    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    print(f"  ⚠️ Sound effect '{effect_name}' unavailable ({reason}, no library file, no bgm.mp3) - using silence", flush=True)
-
-# -------------------------------------------------------------
-# 3c. MULTI-SHOT AI IMAGES (visual variety for scenes that fall back to a
-#     static image instead of real video footage)
-# -------------------------------------------------------------
-# Scene duration was recently raised (10-15 minute total target) so a single
-# scene can now easily run 30-55 seconds. A scene that falls back to a
-# generated still image used to hold that ONE image on screen for the whole
-# time, under only a slow, barely-perceptible Ken Burns pan - which is
-# exactly the "feels like one image for 10 sec" complaint. Instead of
-# generating one image per image-type scene, we now generate a small number
-# of distinct AI images for the SAME subject/setting (same imagePrompt, a
-# different framing hint appended each time) and let Scene.tsx cut between
-# them with its own short cross-fade + fresh Ken Burns per sub-shot - real
-# footage still always wins when a matching stock clip is found; this only
-# affects the image fallback path.
-SUB_SHOT_FRAMING_HINTS = [
-    "wide establishing shot, full scene visible, epic scale",
-    "close-up shot, emotional facial expression, shallow depth of field",
-    "medium shot, different camera angle, side profile",
-    "dramatic low-angle shot, intense mood, rim lighting",
-]
-
-# Used ONLY for the Shorts hook (scene 1) when it falls back to an AI image
-# instead of real video. A wide establishing shot as the very first frame of
-# a Short reads as flat/static - exactly the "starting should be very
-# interactive and eye-catching" complaint - so the hook's own sub-shots lead
-# with punchier, closer, more dynamic framings instead, before this list
-# would otherwise repeat/cycle.
-HOOK_SUB_SHOT_FRAMING_HINTS = [
-    "dramatic low-angle shot, intense mood, rim lighting",
-    "extreme close-up shot, emotional facial expression, shallow depth of field",
-    "slow push-in shot, dramatic silhouette, striking backlight",
-]
-
-SUB_SHOT_SECONDS = 14.0  # roughly how long one still image can hold viewer interest
-
-# How long the Shorts hook (scene 1) is allowed to hold a single still image
-# when no video clip is found - deliberately much shorter than SUB_SHOT_SECONDS
-# so the opening always gets at least 2 quick, cross-fading sub-shots instead
-# of one static frame held for the whole hook, per the same complaint above.
-HOOK_SUB_SHOT_SECONDS = 1.8
-
-def estimate_scene_duration_seconds(narration_text: str) -> float:
-    """Rough speaking-time estimate for Hindi narration, used only to decide
-    how many AI-image sub-shots a static-image scene deserves - the real,
-    ffprobe-measured duration isn't known yet at this point in the pipeline
-    (audio and visuals are generated in parallel for speed, see process()).
-    Deliberately a slight overestimate (fewer words/sec than natural spoken
-    Hindi) so a scene is never under-provisioned with sub-shots."""
-    words = len((narration_text or "").split())
-    return max(3.0, words / 2.5)
-
-def generate_multi_shot_ai_images(prompt: str, base_name: str, aspect_ratio: str, count: int,
-                                   pollinations_width: int, pollinations_height: int,
-                                   framing_hints: list = None) -> list:
-    """Generates `count` distinct AI images for the SAME scene (same subject/
-    setting/character, so the scene still reads as one continuous moment) by
-    appending a different framing hint from `framing_hints` (defaults to
-    SUB_SHOT_FRAMING_HINTS; pass HOOK_SUB_SHOT_FRAMING_HINTS for a Shorts
-    hook scene) to the scene's own imagePrompt each time. Returns the list of
-    filenames (bare, relative to public/images/) in shot order, for
-    Scene.tsx's multi-shot slideshow to cross-fade between."""
-    hints = framing_hints or SUB_SHOT_FRAMING_HINTS
-    filenames = []
-    for i in range(count):
-        hint = hints[i % len(hints)]
-        shot_prompt = f"{prompt}, {hint}"
-        suffix = chr(ord('a') + i)
-        fname = f"{base_name}_{suffix}.jpg"
-        dest = f"public/images/{fname}"
-        generate_ai_image(shot_prompt, dest, aspect_ratio=aspect_ratio,
-                           pollinations_width=pollinations_width, pollinations_height=pollinations_height)
-        filenames.append(fname)
-    return filenames
-
 # -------------------------------------------------------------
 # 4. PROCESS LONG VIDEO SCENES (Pexels + Pixabay + Coverr + FLUX.1)
 # -------------------------------------------------------------
