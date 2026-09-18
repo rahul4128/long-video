@@ -35,7 +35,11 @@ def check(path, kind):
 
 def main():
     targets=[("out/final_video.mp4","video"),("out/final_video_shorts.mp4","video"),("out/thumbnail.jpg","image"),("out/thumbnail_shorts_final.jpg","image")]
-    results=[check(*x) for x in targets if os.path.exists(x)]
+    # Always check every required output. The previous implementation passed
+    # tuples to os.path.exists(), causing a TypeError before QC could run.
+    # Keeping missing targets in the report also prevents a partial artifact
+    # set from accidentally passing the publish gate.
+    results=[check(path, kind) for path, kind in targets]
     audio_files=[]
     if os.path.isdir("public/audio"):
         for root, _, files in os.walk("public/audio"):
