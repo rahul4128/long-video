@@ -1,2 +1,6 @@
 edge-tts
 requests
+kokoro>=0.9.4
+soundfile>=0.12
+numpy>=1.26,<3
+misaki>=0.9.4
