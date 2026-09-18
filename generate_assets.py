@@ -16,6 +16,7 @@ import edge_tts
 from director import enrich_scenes
 from sfx_engine import resolve_sound_effect_audio
 from visual_matcher import extract_visual_requirements, candidate_is_accurate
+from content_qc import validate_payload
 try:
     from indicf5_engine import generate_indicf5_audio
 except Exception:
@@ -1435,6 +1436,12 @@ def build_chapters_block(scenes: list) -> str:
 # 6. MASTER EXECUTION PIPELINE
 # -------------------------------------------------------------
 async def process():
+    content_report = validate_payload(payload)
+    with open("out/content_qc_report.json", "w", encoding="utf-8") as f:
+        json.dump(content_report, f, ensure_ascii=False, indent=2)
+    print(f"🧪 Content QC: {len(content_report['issues'])} blocking issue(s), {len(content_report['warnings'])} warning(s).", flush=True)
+    if not content_report["ok"]:
+        raise RuntimeError("Content QC failed: " + "; ".join(content_report["issues"]))
     print(f"🚀 Starting Multi-Source Production: Long Video ({len(long_scenes)} scenes) + Shorts ({len(shorts_scenes)} scenes)...", flush=True)
 
     # 1. Background Music fallback
