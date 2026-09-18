@@ -342,7 +342,7 @@ jobs:
   # generated narration/effect file with ffprobe before publishing.
   # ---------------------------------------------------------------
   media-qc:
-    needs: [generate-assets, render-long, render-shorts, render-thumbnail, render-thumbnail-shorts, media-qc]
+    needs: [generate-assets, render-long, render-shorts, render-thumbnail, render-thumbnail-shorts]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
