@@ -713,6 +713,17 @@ def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "lan
 MAX_VIDEO_SHOTS_PER_SCENE = 3
 MIN_SHOT_SECONDS = 3.0  # never split a scene's remaining time so finely a shot reads as a flash-cut
 SUB_SHOT_SECONDS = 5.0  # target visual coverage per generated AI-image sub-shot
+HOOK_SUB_SHOT_SECONDS = 2.5  # faster visual rhythm for the opening Shorts hook
+SUB_SHOT_FRAMING_HINTS = [
+    "cinematic medium shot",
+    "close-up detail",
+    "dramatic low angle",
+]
+HOOK_SUB_SHOT_FRAMING_HINTS = [
+    "extreme close-up",
+    "dynamic low angle",
+    "dramatic push-in composition",
+]
 
 def fetch_video_shots_for_duration(primary_query: str, prompt_text: str, target_seconds: float,
                                     orientation: str, base_name: str,
