@@ -1273,6 +1273,16 @@ def process_long_scene_visual(scene_info):
     idx, scene = scene_info
     prompt = scene.get("imagePrompt") or scene.get("image_prompt", "Indian spiritual story scene")
     media_type = scene.get("mediaType", "auto").lower()
+    visual_entities = scene.get("visualEntities") or scene.get("visual_entities") or []
+    visual_attributes = scene.get("visualAttributes") or scene.get("visual_attributes") or []
+    visual_strict = bool(scene.get("visualStrict") or scene.get("visual_strict") or visual_entities)
+    if visual_strict and visual_entities:
+        visual_contract = (
+            f" REQUIRED VISUAL ENTITY: {', '.join(map(str, visual_entities))}."
+            f" REQUIRED ATTRIBUTES: {', '.join(map(str, visual_attributes))}."
+            " Do not substitute a generic person, child, animal, statue, or unrelated deity."
+        )
+        prompt = f"{prompt}{visual_contract}"
 
     video_query = scene.get("videoSearchQuery")
     if not video_query:
@@ -1333,6 +1343,16 @@ def process_shorts_scene_visual(scene_info):
     (punchier framings, shorter per-shot window) preserved exactly."""
     idx, scene = scene_info
     prompt = scene.get("imagePrompt") or scene.get("image_prompt", "Devotional sacred 9:16")
+    visual_entities = scene.get("visualEntities") or scene.get("visual_entities") or []
+    visual_attributes = scene.get("visualAttributes") or scene.get("visual_attributes") or []
+    visual_strict = bool(scene.get("visualStrict") or scene.get("visual_strict") or visual_entities)
+    if visual_strict and visual_entities:
+        visual_contract = (
+            f" REQUIRED VISUAL ENTITY: {', '.join(map(str, visual_entities))}."
+            f" REQUIRED ATTRIBUTES: {', '.join(map(str, visual_attributes))}."
+            " Do not substitute a generic person, child, animal, statue, or unrelated deity."
+        )
+        prompt = f"{prompt}{visual_contract}"
     video_query = scene.get("videoSearchQuery") or "sacred temple diya"
     narration_text = scene.get("text") or scene.get("narration_chunk", "")
     target_seconds = estimate_scene_duration_seconds(narration_text)
