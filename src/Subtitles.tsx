@@ -42,7 +42,7 @@ function groupWordsIntoChunks(words: WordTiming[]): WordTiming[][] {
 
 export const Subtitles: React.FC<SubtitlesProps> = ({ text, words }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, durationInFrames } = useVideoConfig();
   const currentTime = frame / fps;
 
   if (!text) return null;
@@ -59,7 +59,15 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ text, words }) => {
   // ENTIRE scene's narration as one static paragraph for that whole time is
   // both a wall of text to read at once and completely out of sync with
   // what's actually being said at any given moment.
-  const chunks = words && words.length > 0 ? groupWordsIntoChunks(words) : [];
+  const fallbackWords: WordTiming[] = !words || words.length === 0
+    ? (text.match(/[^\\s]+/g) || []).map((word, i, all) => ({
+        word,
+        start: (i / Math.max(1, all.length)) * (durationInFrames / fps),
+        end: ((i + 1) / Math.max(1, all.length)) * (durationInFrames / fps),
+      }))
+    : [];
+  const effectiveWords = words && words.length > 0 ? words : fallbackWords;
+  const chunks = effectiveWords.length > 0 ? groupWordsIntoChunks(effectiveWords) : [];
 
   let activeChunk: WordTiming[] | null = null;
   if (chunks.length > 0) {
