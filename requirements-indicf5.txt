@@ -1,0 +1,6 @@
+# Optional higher-quality IndicF5 backend.
+# Install only when AUDIO_TTS_ENGINE=indicf5 is desired.
+git+https://github.com/ai4bharat/IndicF5.git
+transformers==4.50.0
+torch
+torchcodec
