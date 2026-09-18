@@ -42,7 +42,13 @@ def generate_kokoro_audio(text: str, output_path: str) -> bool:
     pieces = []
 
     for result in pipeline(text, voice=voice, speed=speed):
-        audio = getattr(result, "audio", None)
+        # Kokoro's current iterator yields (graphemes, phonemes, audio).
+        # Keep a small compatibility fallback for wrappers that expose an
+        # object with an .audio attribute.
+        if isinstance(result, tuple) and len(result) >= 3:
+            audio = result[2]
+        else:
+            audio = getattr(result, "audio", None)
         if audio is not None:
             pieces.append(audio)
 
