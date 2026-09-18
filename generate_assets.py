@@ -979,6 +979,23 @@ def process_long_scene_visual(scene_info):
 
     return shots
 
+def recover_shots(shots, scene_idx, aspect="16:9") -> list:
+    """Drop missing assets and create a deterministic visual placeholder only
+    when every provider failed. This prevents a broken path from reaching
+    Remotion and turning into a black/frozen scene."""
+    valid = []
+    for shot in shots or []:
+        path = os.path.join("public/images", shot.get("file",""))
+        if shot.get("file") and os.path.exists(path) and os.path.getsize(path) > 1024:
+            valid.append(shot)
+    if valid:
+        return valid
+    name = f"recovery_{scene_idx}.png"
+    dest = os.path.join("public/images", name)
+    size = "1080x1920" if aspect == "9:16" else "1920x1080"
+    subprocess.run(["ffmpeg","-y","-f","lavfi","-i",f"color=c=black:s={size}:d=1","-frames:v","1",dest],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    return [{"type":"image","file":name}] if os.path.exists(dest) else []
+
 # -------------------------------------------------------------
 # 5. PROCESS SHORTS SCENES (9:16 Vertical)
 # -------------------------------------------------------------
@@ -1160,8 +1177,8 @@ async def process():
     with ThreadPoolExecutor(max_workers=8) as executor:
         long_futures = [executor.submit(process_long_scene_visual, item) for item in long_items]
         shorts_futures = [executor.submit(process_shorts_scene_visual, item) for item in shorts_items]
-        long_visuals = [f.result() for f in long_futures]
-        shorts_visuals = [f.result() for f in shorts_futures]
+        long_visuals = [recover_shots(f.result(), i + 1, "16:9") for i, f in enumerate(long_futures)]
+        shorts_visuals = [recover_shots(f.result(), i + 1, "9:16") for i, f in enumerate(shorts_futures)]
 
     # 4. Parallel Audio Generation (Long + Shorts) - each task also returns
     # that scene's word-level caption timing (see generate_clean_audio).
