@@ -51,6 +51,15 @@ jobs:
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
         run: python generate_assets.py
 
+      - name: Upload content QC report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: content-qc-${{ github.run_id }}
+          path: out/content_qc_report.json
+          if-no-files-found: ignore
+          retention-days: 7
+
       # Commits used_clips_history.json (written by generate_assets.py's
       # save_clip_history()) back to the repo, so a LATER run can see which
       # stock clips this run used and avoid repeating them (this is what
