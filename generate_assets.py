@@ -1224,6 +1224,8 @@ async def process():
         audio_path = f"public/audio/chunk_{idx}.mp3"
         duration = get_audio_duration(audio_path)
         shots = long_visuals[i] or []
+        director = scene.get("director", {})
+        shots = [dict(s, transition=director.get("transition", s.get("transition", "crossfade"))) for s in shots]
         enriched_long.append({
             "scene_number": idx,
             "durationInSeconds": round(duration + 0.3, 2),
@@ -1242,6 +1244,8 @@ async def process():
         audio_path = f"public/audio/shorts_chunk_{idx}.mp3"
         duration = get_audio_duration(audio_path)
         shots = shorts_visuals[i] or []
+        director = scene.get("director", {})
+        shots = [dict(s, transition=director.get("transition", s.get("transition", "crossfade"))) for s in shots]
         enriched_shorts.append({
             "scene_number": idx,
             "durationInSeconds": round(duration + 0.2, 2),
