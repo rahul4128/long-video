@@ -935,6 +935,34 @@ async def generate_clean_audio(narration: str, audio_dest: str) -> list:
         return []
 
 # -------------------------------------------------------------
+# 3b. SCENE DURATION ESTIMATION
+# -------------------------------------------------------------
+def estimate_scene_duration_seconds(narration_text: str) -> float:
+    """Estimate spoken duration before TTS so visual shot coverage matches narration.
+
+    Hindi narration typically runs around 2.2-2.6 spoken words/second depending
+    on punctuation and delivery. We deliberately use a conservative 2.35 words/s
+    target and add small pause allowances for sentence punctuation. The final
+    Remotion duration is still taken from the actual generated audio, so this
+    estimate only controls how much visual material we fetch/generate.
+    """
+    text = re.sub(r"\s+", " ", (narration_text or "").strip())
+    if not text:
+        return 5.0
+
+    words = re.findall(r"\S+", text)
+    base_seconds = len(words) / 2.35
+
+    # Natural pause allowance for punctuation. Keep it modest because actual
+    # TTS duration is authoritative later.
+    pause_seconds = (
+        len(re.findall(r"[।!?]", text)) * 0.28
+        + len(re.findall(r"[,;:]", text)) * 0.08
+    )
+    estimated = base_seconds + pause_seconds
+    return round(max(5.0, min(120.0, estimated)), 2)
+
+# -------------------------------------------------------------
 # 4. PROCESS LONG VIDEO SCENES (Pexels + Pixabay + Coverr + FLUX.1)
 # -------------------------------------------------------------
 def process_long_scene_visual(scene_info):
