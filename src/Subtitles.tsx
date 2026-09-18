@@ -47,31 +47,22 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ text, words }) => {
 
   if (!text) return null;
 
-  // Progressive, word-timed captions (with a karaoke-style highlight on the
-  // word currently being spoken) when word-level timing was captured during
-  // TTS synthesis - see generate_clean_audio() in generate_assets.py, which
-  // has captured this timing all along but it was never wired up on the
-  // frontend. Falls back to the old static full-sentence caption when
-  // `words` wasn't provided (an older props.json, or a TTS attempt that
-  // couldn't capture WordBoundary events) so nothing ever breaks over it.
-  // The reason this matters more now than it used to: scenes commonly run
-  // 35-55 seconds after the 10-15 minute duration change, and showing the
-  // ENTIRE scene's narration as one static paragraph for that whole time is
-  // both a wall of text to read at once and completely out of sync with
-  // what's actually being said at any given moment.
+  // Show one short narration phrase at a time. The active phrase is fully
+  // readable instead of revealing individual words, which keeps the long-form
+  // video cinematic and avoids a karaoke/full-paragraph look.
   const fallbackWords: WordTiming[] = !words || words.length === 0
-    ? (text.match(/[^\s]+/g) || []).map((word, i, all) => ({
+    ? (text.match(/[^\\s]+/g) || []).map((word, i, all) => ({
         word,
         start: (i / Math.max(1, all.length)) * (durationInFrames / fps),
         end: ((i + 1) / Math.max(1, all.length)) * (durationInFrames / fps),
       }))
     : [];
+
   const effectiveWords = words && words.length > 0 ? words : fallbackWords;
   const chunks = effectiveWords.length > 0 ? groupWordsIntoChunks(effectiveWords) : [];
 
   let activeChunk: WordTiming[] | null = null;
   if (chunks.length > 0) {
-    activeChunk = chunks[0];
     for (const chunk of chunks) {
       if (chunk[0].start <= currentTime) {
         activeChunk = chunk;
@@ -80,6 +71,11 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ text, words }) => {
       }
     }
   }
+
+  const captionText = activeChunk
+    ? activeChunk.map((w) => w.word).join(' ')
+    : text;
+
 
   return (
     <AbsoluteFill
@@ -113,34 +109,16 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ text, words }) => {
             lineHeight: 1.45,
           }}
         >
-          {activeChunk
-            ? activeChunk.map((w, i) => {
-                const spoken = w.start <= currentTime;
-                return (
-                  <span
-                    key={i}
-                    style={{
-                      color: spoken ? '#FFEAA7' : 'rgba(255, 234, 167, 0.45)',
-                      textShadow: spoken
-                        ? '0 2px 8px rgba(0,0,0,0.9), 0 0 15px rgba(255,180,0,0.3)'
-                        : '0 2px 8px rgba(0,0,0,0.9)',
-                    }}
-                  >
-                    {w.word}
-                    {i < activeChunk!.length - 1 ? ' ' : ''}
-                  </span>
-                );
-              })
-            : (
-                <span
-                  style={{
-                    color: '#FFEAA7',
-                    textShadow: '0 2px 8px rgba(0,0,0,0.9), 0 0 15px rgba(255,180,0,0.3)',
-                  }}
-                >
-                  {text}
-                </span>
-              )}
+          <span
+            style={{
+              color: '#FFEAA7',
+              textShadow: '0 2px 8px rgba(0,0,0,0.9), 0 0 15px rgba(255,180,0,0.3)',
+              display: 'inline-block',
+              opacity: activeChunk ? 1 : 0.9,
+            }}
+          >
+            {captionText}
+          </span>
         </p>
       </div>
     </AbsoluteFill>
