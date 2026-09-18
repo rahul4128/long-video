@@ -47,6 +47,12 @@ export interface SceneItem {
   // present.
   imageFileName?: string | string[];
   soundEffect?: 'temple_bell' | 'shankh' | 'om_drone' | 'flute_swell' | 'none';
+  // Hard visual requirements emitted by the story director. The Python asset
+  // pipeline uses these to reject semantically wrong stock footage before
+  // downloading it (e.g. Bal Krishna must not become a generic child).
+  visualEntities?: string[];
+  visualAttributes?: string[];
+  visualStrict?: boolean;
   // Word-level caption timing captured during TTS synthesis (see
   // generate_clean_audio() in generate_assets.py) - drives the progressive,
   // karaoke-style captions in Subtitles.tsx. Optional so older props.json
