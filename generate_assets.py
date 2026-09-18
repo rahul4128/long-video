@@ -869,6 +869,64 @@ def download_pollinations_fallback(prompt: str, img_dest: str, width: int = 1920
     return False
 
 # -------------------------------------------------------------
+# 2b. MULTI-SHOT AI IMAGE FALLBACK
+# -------------------------------------------------------------
+def generate_multi_shot_ai_images(
+    prompt: str,
+    base_name: str,
+    aspect_ratio: str = "16:9",
+    num_shots: int = 2,
+    pollinations_width: int = 1920,
+    pollinations_height: int = 1080,
+    framing_hints: list = None,
+) -> list:
+    """Generate several visually distinct AI-image shots for one narration scene.
+
+    Each shot gets a different camera/framing instruction while preserving the
+    same core scene prompt. This keeps long narration from looking like one
+    frozen still and gives Scene.tsx multiple frames to animate/cross-fade.
+    """
+    hints = framing_hints or [
+        "cinematic medium shot",
+        "close-up detail",
+        "dramatic low angle",
+        "wide establishing shot",
+    ]
+    count = max(1, int(num_shots or 1))
+    filenames = []
+
+    for shot_index in range(count):
+        framing = hints[shot_index % len(hints)]
+        shot_prompt = (
+            f"{prompt}, {framing}, shot {shot_index + 1} of {count}, "
+            "distinct composition from the previous shot, cinematic visual storytelling"
+        )
+        filename = f"{base_name}_{shot_index + 1}.jpg"
+        dest = os.path.join("public/images", filename)
+        try:
+            generate_ai_image(
+                shot_prompt,
+                dest,
+                aspect_ratio=aspect_ratio,
+                pollinations_width=pollinations_width,
+                pollinations_height=pollinations_height,
+            )
+            if os.path.exists(dest) and os.path.getsize(dest) > 1024:
+                filenames.append(filename)
+                print(
+                    f"    🎨 AI sub-shot {shot_index + 1}/{count}: {filename}",
+                    flush=True,
+                )
+        except Exception as e:
+            print(
+                f"AI sub-shot {shot_index + 1} notice: {e}",
+                flush=True,
+            )
+
+    return filenames
+
+
+# -------------------------------------------------------------
 # 3. AUDIO SYNTHESIS ENGINE
 # -------------------------------------------------------------
 # Primary: local Kokoro Hindi TTS (free/open weights, no API key).
