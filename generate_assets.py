@@ -15,6 +15,7 @@ import requests
 import edge_tts
 from director import enrich_scenes
 from sfx_engine import resolve_sound_effect_audio
+from visual_matcher import extract_visual_requirements, candidate_is_accurate
 try:
     from indicf5_engine import generate_indicf5_audio
 except Exception:
@@ -240,7 +241,13 @@ _STOPWORDS = {
     "lighting", "composition", "16:9", "9:16", "divine", "warm", "file",
 }
 
-def _extract_keywords(*texts: str) -> set:
+class VisualKeywordSet(set):
+    """A normal set carrying scene-level strict visual requirements."""
+    def __init__(self, values=(), requirements=None):
+        super().__init__(values)
+        self.requirements = requirements or {}
+
+def _extract_keywords(*texts: str) -> VisualKeywordSet:
     words = set()
     for text in texts:
         if not text:
@@ -248,7 +255,7 @@ def _extract_keywords(*texts: str) -> set:
         for raw in re.split(r"[\s/_\-.,!?()]+", str(text).lower()):
             if len(raw) > 2 and raw not in _STOPWORDS:
                 words.add(raw)
-    return words
+    return VisualKeywordSet(words)
 
 def _best_scoring_index(candidate_texts: list, target_keywords, candidate_ids: list = None, source: str = None):
     """Returns (best_index, best_score, any_text_available) for a list of
@@ -270,8 +277,18 @@ def _best_scoring_index(candidate_texts: list, target_keywords, candidate_ids: l
         return 0, 0, False
     if not any(candidate_texts):
         return 0, 0, False
-    scores = [len(_extract_keywords(t) & target_keywords) for t in candidate_texts]
+    requirements = getattr(target_keywords, "requirements", {}) or {}
+    scores = []
+    for candidate_text in candidate_texts:
+        if requirements.get("strict"):
+            accepted, _reason = candidate_is_accurate(candidate_text, requirements)
+            if not accepted:
+                scores.append(-10000)
+                continue
+        scores.append(len(_extract_keywords(candidate_text) & target_keywords))
     best_score = max(scores)
+    if best_score < 0:
+        return 0, -1, True
     tied_indices = [i for i, s in enumerate(scores) if s == best_score]
     if candidate_ids and source:
         fresh = [i for i in tied_indices if f"{source}:{candidate_ids[i]}" not in RECENTLY_USED_CLIP_IDS]
@@ -661,32 +678,45 @@ def build_query_candidates(primary_query: str, prompt_text: str = "") -> list:
     return candidates
 
 def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "landscape", prompt_text: str = "") -> bool:
-    for candidate in build_query_candidates(query, prompt_text):
-        # The relevance target is the candidate query itself plus the scene's
-        # own imagePrompt (already visually descriptive) - NOT the original
-        # unrewritten query, so a rewritten candidate like "candle flame
-        # ritual ceremony" is scored against exactly the words a stock hit
-        # would need to match, while still crediting extra descriptive words
-        # from the scene (e.g. "golden", "battlefield") if present.
+    requirements = extract_visual_requirements(query, prompt_text)
+    strict = bool(requirements.get("strict"))
+    if strict:
+        print(
+            f"  🔒 Strict visual gate: entities={requirements.get('entities')} "
+            f"attributes={requirements.get('attributes')} - generic stock is not allowed.",
+            flush=True,
+        )
+
+    # Strict mythological scenes intentionally bypass generic niche rewrites.
+    # "Krishna" must not become "golden deity statue"; "Bal Krishna" must not
+    # become "generic child". If the stock catalog cannot prove the entity from
+    # metadata, the caller falls through to AI generation instead.
+    candidates = [query.strip()] if strict and query.strip() else build_query_candidates(query, prompt_text)
+    if strict and prompt_text and prompt_text.strip() not in candidates:
+        candidates.append(prompt_text.strip())
+
+    for candidate in candidates:
         target_keywords = _extract_keywords(candidate, prompt_text)
-        # 1. Try Pexels 4K Video
+        target_keywords.requirements = requirements
+        # 1. Try Pexels only when its URL metadata can prove the strict entity.
         if fetch_pexels_video(candidate, dest_path, orientation, target_keywords):
-            print(f"  ✅ Video fetched from Pexels 4K ('{candidate}')", flush=True)
+            print(f"  ✅ Accurate video fetched from Pexels ('{candidate}')", flush=True)
             return True
-        # 2. Try Pixabay (3D Sacred Animations & Diyas)
+        # 2. Pixabay has the strongest stock tags for strict metadata matching.
         if fetch_pixabay_video(candidate, dest_path, target_keywords):
-            print(f"  ✅ Video fetched from Pixabay 3D ('{candidate}')", flush=True)
+            print(f"  ✅ Accurate video fetched from Pixabay ('{candidate}')", flush=True)
             return True
-        # 3. Try Coverr (free stock B-roll, demo tier)
+        # 3. Coverr title/tags, still subject to the same hard gate.
         if fetch_coverr_video(candidate, dest_path, target_keywords):
-            print(f"  ✅ Video fetched from Coverr ('{candidate}')", flush=True)
+            print(f"  ✅ Accurate video fetched from Coverr ('{candidate}')", flush=True)
             return True
-        # 4. Try Wikimedia Commons (free forever, no key needed)
+        # 4. Wikimedia Commons is useful for real devotional/historical footage.
         if fetch_wikimedia_video(candidate, dest_path, target_keywords):
-            print(f"  ✅ Video fetched from Wikimedia Commons ('{candidate}')", flush=True)
+            print(f"  ✅ Accurate video fetched from Wikimedia Commons ('{candidate}')", flush=True)
             return True
-    # 5. Last resort before AI generation: your own curated local clips
-    if fetch_local_library_video(f"{query} {prompt_text}", dest_path):
+
+    # Never use fuzzy local matching for strict entity scenes either.
+    if not strict and fetch_local_library_video(f"{query} {prompt_text}", dest_path):
         return True
     return False
 
@@ -834,16 +864,37 @@ def generate_huggingface_image(prompt: str, dest_path: str, aspect_ratio: str = 
 
 def generate_ai_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9",
                        pollinations_width: int = 1920, pollinations_height: int = 1080) -> None:
-    """Single entry point for the AI-image fallback chain: Cloudflare FLUX.1
-    (if configured) -> Hugging Face FLUX.1-schnell (if configured) ->
-    Pollinations (no key needed, always works). Guarantees dest_path exists
-    when it returns, same contract as resolve_sound_effect_audio()."""
+    """Single entry point for AI visuals with an in-run deterministic cache.
+
+    The cache avoids regenerating the same prompt multiple times inside one
+    production run (especially thumbnails/Shorts variants) while keeping heavy
+    media out of Make.com and out of Git history.
+    """
+    import hashlib
+    cache_key = hashlib.sha256(
+        f"{prompt.strip()}|{aspect_ratio}|{pollinations_width}x{pollinations_height}".encode("utf-8")
+    ).hexdigest()[:24]
+    cache_dir = os.path.join("out", "visual_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+    ext = ".png"
+    cache_path = os.path.join(cache_dir, cache_key + ext)
+    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 1024:
+        shutil.copyfile(cache_path, dest_path)
+        print(f"  ♻️ AI visual cache hit: {cache_key}", flush=True)
+        return
+
     if generate_cloudflare_flux(prompt, dest_path, aspect_ratio=aspect_ratio):
-        return
-    if generate_huggingface_image(prompt, dest_path, aspect_ratio=aspect_ratio):
+        pass
+    elif generate_huggingface_image(prompt, dest_path, aspect_ratio=aspect_ratio):
         print("  ✅ Image fetched from Hugging Face (FLUX.1-schnell)", flush=True)
-        return
-    download_pollinations_fallback(prompt, dest_path, width=pollinations_width, height=pollinations_height)
+    else:
+        download_pollinations_fallback(prompt, dest_path, width=pollinations_width, height=pollinations_height)
+
+    if os.path.exists(dest_path) and os.path.getsize(dest_path) > 1024:
+        try:
+            shutil.copyfile(dest_path, cache_path)
+        except Exception:
+            pass
 
 def download_pollinations_fallback(prompt: str, img_dest: str, width: int = 1920, height: int = 1080) -> bool:
     clean_text = prompt.replace("\n", " ").replace("\"", "").strip()[:180]
