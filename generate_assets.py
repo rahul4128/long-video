@@ -1084,19 +1084,36 @@ async def _generate_edge_chunked_audio(clean_text: str, audio_dest: str) -> list
 
 
 async def generate_clean_audio(narration: str, audio_dest: str) -> list:
-    """Edge Hindi neural TTS -> Kokoro -> silence fallback.
+    """Kokoro Hindi TTS -> cinematic pause handling -> Edge fallback.
 
-    Edge is the default because its Hindi neural voices currently give the
-    most conversational delivery in this free/no-key pipeline. Kokoro remains
-    available as a local/offline fallback.
+    Kokoro is the default local Hindi voice. Edge-TTS remains the automatic
+    fallback so a temporary Kokoro/model/runtime failure does not stop a run.
     """
     async with tts_semaphore:
         clean_text = _naturalize_text(narration) or "हरि ॐ तत्सत्"
-        engine = os.getenv("AUDIO_TTS_ENGINE", "edge").strip().lower()
+        engine = os.getenv("AUDIO_TTS_ENGINE", "kokoro").strip().lower()
 
-        # Free Microsoft Edge Hindi neural TTS, sentence-chunked for natural
-        # pauses and less robotic paragraph delivery.
-        if engine in ("edge", "auto"):
+        # Kokoro is primary. audio_engine.py adds real silence after cinematic
+        # punctuation such as …, —, । and !/? while preserving Kokoro prosody.
+        if engine in ("kokoro", "auto"):
+            if KOKORO_AVAILABLE:
+                try:
+                    ok = await asyncio.to_thread(
+                        generate_kokoro_audio, clean_text, audio_dest
+                    )
+                    if ok and os.path.exists(audio_dest):
+                        return _fallback_word_timings(clean_text, audio_dest)
+                except Exception as e:
+                    print(
+                        f"Kokoro notice: {e} - falling back to Edge-TTS.",
+                        flush=True,
+                    )
+            else:
+                print("Kokoro notice: package unavailable - falling back to Edge-TTS.", flush=True)
+
+        # Edge remains available as an explicit engine and as the automatic
+        # fallback when Kokoro fails.
+        if engine in ("edge", "auto", "kokoro"):
             for attempt in range(1, 4):
                 try:
                     timings = await _generate_edge_chunked_audio(clean_text, audio_dest)
@@ -1108,19 +1125,6 @@ async def generate_clean_audio(narration: str, audio_dest: str) -> list:
                         flush=True,
                     )
                     await asyncio.sleep(1.5)
-
-        if engine in ("kokoro", "auto", "edge") and KOKORO_AVAILABLE:
-            try:
-                ok = await asyncio.to_thread(
-                    generate_kokoro_audio, clean_text, audio_dest
-                )
-                if ok and os.path.exists(audio_dest):
-                    return _fallback_word_timings(clean_text, audio_dest)
-            except Exception as e:
-                print(
-                    f"Kokoro notice: {e} - falling back to legacy Edge-TTS.",
-                    flush=True,
-                )
 
         # Legacy single-pass Edge-TTS fallback.
         raw_path = audio_dest + ".raw.mp3"
