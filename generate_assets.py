@@ -13,6 +13,11 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 import requests
 import edge_tts
+from director import enrich_scenes
+try:
+    from indicf5_engine import generate_indicf5_audio
+except Exception:
+    generate_indicf5_audio = None
 
 # Read payload safely
 raw_payload = os.environ.get("DISPATCH_PAYLOAD", "").strip()
@@ -46,6 +51,11 @@ shorts_data = payload.get("shorts", {})
 
 long_scenes = long_data.get("scenes", []) if isinstance(long_data, dict) else []
 shorts_scenes = shorts_data.get("scenes", []) if isinstance(shorts_data, dict) else []
+
+# AI-Director planning is deterministic and works even when the upstream
+# payload has no director fields.
+long_scenes = enrich_scenes(long_scenes)
+shorts_scenes = enrich_scenes(shorts_scenes)
 
 # Fallback test scenes for direct workflow_dispatch testing
 if not long_scenes:
@@ -862,27 +872,32 @@ def get_audio_duration(file_path: str) -> float:
 
 tts_semaphore = asyncio.Semaphore(2)
 
-async def generate_clean_audio(narration: str, audio_dest: str) -> list:
-    """Generate narration with Kokoro first and Edge-TTS as a safe fallback.
+def _naturalize_text(text: str) -> str:
+    """Add gentle punctuation cues so local TTS engines breathe naturally."""
+    text = re.sub(r"\\s+", " ", (text or "").strip())
+    text = re.sub(r"[,，]\\s*", ", ", text)
+    text = re.sub(r"([!?।])\\s*", r"\\1 ", text)
+    return text.strip()
 
-    Kokoro does not currently provide the same WordBoundary stream used by
-    Edge-TTS, so Kokoro returns [] and Remotion keeps its sentence-level
-    caption fallback. Edge-TTS still returns word-level timing when used.
-    """
+async def generate_clean_audio(narration: str, audio_dest: str) -> list:
+    """IndicF5 (optional) -> Kokoro -> Edge-TTS -> silence fallback."""
     async with tts_semaphore:
-        clean_text = narration.strip() if narration else "हरि ॐ तत्सत्"
+        clean_text = _naturalize_text(narration) or "हरि ॐ तत्सत्"
         engine = os.getenv("AUDIO_TTS_ENGINE", "kokoro").strip().lower()
 
-        if engine in ("kokoro", "auto") and KOKORO_AVAILABLE:
+        if engine == "indicf5" and generate_indicf5_audio:
             try:
-                ok = await asyncio.to_thread(
-                    generate_kokoro_audio,
-                    clean_text,
-                    audio_dest,
-                )
+                ok = await asyncio.to_thread(generate_indicf5_audio, clean_text, audio_dest)
                 if ok and os.path.exists(audio_dest):
                     return []
-                print("Kokoro produced no audio; falling back to Edge-TTS.", flush=True)
+            except Exception as e:
+                print(f"IndicF5 notice: {e} - falling back to Kokoro/Edge-TTS.", flush=True)
+
+        if engine in ("kokoro", "auto", "indicf5") and KOKORO_AVAILABLE:
+            try:
+                ok = await asyncio.to_thread(generate_kokoro_audio, clean_text, audio_dest)
+                if ok and os.path.exists(audio_dest):
+                    return []
             except Exception as e:
                 print(f"Kokoro notice: {e} - falling back to Edge-TTS.", flush=True)
         elif engine == "kokoro" and not KOKORO_AVAILABLE:
@@ -904,47 +919,20 @@ async def generate_clean_audio(narration: str, audio_dest: str) -> list:
                         audio_bytes.extend(chunk["data"])
                     elif chunk["type"] == "WordBoundary":
                         submaker.feed(chunk)
-
                 if audio_bytes:
                     with open(raw_path, "wb") as f:
                         f.write(audio_bytes)
-                    normalize = subprocess.run(
-                        [
-                            "ffmpeg", "-y", "-i", raw_path,
-                            "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
-                            "-ar", "24000", "-q:a", "4",
-                            "-acodec", "libmp3lame", audio_dest
-                        ],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
+                    normalize = subprocess.run(["ffmpeg","-y","-i",raw_path,"-af","loudnorm=I=-16:TP=-1.5:LRA=11","-ar","24000","-q:a","4","-acodec","libmp3lame",audio_dest], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     if normalize.returncode != 0 or not os.path.exists(audio_dest):
                         shutil.copyfile(raw_path, audio_dest)
-                    if os.path.exists(raw_path):
-                        os.remove(raw_path)
-                    return [
-                        {
-                            "word": cue.content,
-                            "start": round(cue.start.total_seconds(), 3),
-                            "end": round(cue.end.total_seconds(), 3),
-                        }
-                        for cue in submaker.cues
-                    ]
+                    if os.path.exists(raw_path): os.remove(raw_path)
+                    return [{"word": cue.content, "start": round(cue.start.total_seconds(),3), "end": round(cue.end.total_seconds(),3)} for cue in submaker.cues]
             except Exception as e:
                 print(f"Edge-TTS attempt {attempt} failed: {e}", flush=True)
                 await asyncio.sleep(1.5)
-
-        subprocess.run(
-            [
-                "ffmpeg", "-y", "-f", "lavfi",
-                "-i", "anullsrc=r=24000:cl=mono",
-                "-t", "5", "-q:a", "9",
-                "-acodec", "libmp3lame", audio_dest
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        subprocess.run(["ffmpeg","-y","-f","lavfi","-i","anullsrc=r=24000:cl=mono","-t","5","-q:a","9","-acodec","libmp3lame",audio_dest], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return []
+
 # -------------------------------------------------------------
 # 4. PROCESS LONG VIDEO SCENES (Pexels + Pixabay + Coverr + FLUX.1)
 # -------------------------------------------------------------
@@ -1224,6 +1212,7 @@ async def process():
             "durationInSeconds": round(duration + 0.3, 2),
             "narration_chunk": scene.get("text", ""),
             "shots": shots,
+            "director": scene.get("director", {}),
             "imageFileName": shots[0]["file"] if shots else "",  # legacy/debug only, see Scene.tsx's resolveShots()
             "soundEffect": scene.get("soundEffect", "none"),
             "words": long_word_timings[i]
