@@ -86,13 +86,23 @@ HUGGINGFACE_API_KEY = os.environ.get("HUGGINGFACE_API_KEY", "").strip()
 FREESOUND_API_KEY = os.environ.get("FREESOUND_API_KEY", "").strip()
 
 # Narration engine toggle - "edge" (default, today's Microsoft edge-tts
-# hi-IN-MadhurNeural voice) or "piper" (free, open-source, runs locally on
+# hi-IN-MadhurNeural voice), "piper" (free, open-source, runs locally on
 # CPU - no API key, no per-character cost, no internet dependency at
-# synthesis time). Piper has no WordBoundary-style timing events the way
-# edge-tts does, so scenes narrated with it fall back to the static
+# synthesis time), or "mms" (Meta's MMS-TTS Hindi model via Hugging Face
+# transformers - also free/local, trained on native Hindi speech data
+# rather than a generic multilingual model).
+#
+# IMPORTANT LICENSE NOTE on "mms": facebook/mms-tts-hin's weights are
+# CC-BY-NC 4.0 - non-commercial use only. Fine to use while this channel
+# isn't monetized, but switch TTS_ENGINE back to "piper" or "edge" before
+# turning on monetization - this checkpoint's license wouldn't cover that.
+#
+# Neither "piper" nor "mms" produce WordBoundary-style timing events the
+# way edge-tts does, so scenes narrated with either fall back to the static
 # full-sentence caption in Subtitles.tsx instead of the word-synced one -
-# see generate_piper_audio() below. Set via the workflow_dispatch inputs in
-# render.yml for quick A/B testing without touching this file.
+# see generate_piper_audio() / generate_mms_audio() below. Set via the
+# workflow_dispatch inputs in render.yml for quick A/B testing without
+# touching this file.
 TTS_ENGINE = os.environ.get("TTS_ENGINE", "edge").strip().lower()
 PIPER_VOICE = os.environ.get("PIPER_VOICE", "hi_IN-priyamvada-medium").strip()
 # >1.0 = slower/more deliberate pacing (Piper's default 1.0 can read a touch
@@ -102,6 +112,15 @@ PIPER_LENGTH_SCALE = os.environ.get("PIPER_LENGTH_SCALE", "1.05").strip()
 PIPER_SENTENCE_SILENCE = os.environ.get("PIPER_SENTENCE_SILENCE", "0.35").strip()
 PIPER_VOICES_DIR = "piper_voices"
 os.makedirs(PIPER_VOICES_DIR, exist_ok=True)
+
+# Hugging Face model id for the "mms" engine - only the official Hindi
+# checkpoint is wired up as the default, but this is overridable in case
+# you want to try a community fine-tune later (e.g. a female-voice variant).
+MMS_MODEL_ID = os.environ.get("MMS_MODEL_ID", "facebook/mms-tts-hin").strip()
+# Seconds of silence stitched between sentences - a raw MMS/VITS forward
+# pass has no equivalent to Piper's --sentence_silence, so without this,
+# multi-sentence narration runs sentences together with no breath at all.
+MMS_SENTENCE_SILENCE = float(os.environ.get("MMS_SENTENCE_SILENCE", "0.35").strip())
 
 os.makedirs("public/images", exist_ok=True)
 os.makedirs("public/audio", exist_ok=True)
@@ -899,6 +918,32 @@ def ensure_piper_voice(voice_name: str):
             os.remove(p)
     return None
 
+def _finalize_wav_to_mp3(raw_wav: str, audio_dest: str) -> bool:
+    """Shared last step for both local engines (Piper and MMS): loudness-
+    normalize the raw wav they produced into the same ~-16 LUFS mp3 target
+    edge-tts's path uses, so volume doesn't drift depending on which engine
+    narrated a given scene. Falls back to a plain transcode (no filter) if
+    normalization itself fails, same "don't lose the clip" philosophy as
+    the edge-tts path below. Cleans up the raw wav either way. Returns
+    False if audio_dest still doesn't exist afterwards."""
+    normalize = subprocess.run(
+        ["ffmpeg", "-y", "-i", raw_wav, "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+         "-ar", "24000", "-q:a", "4", "-acodec", "libmp3lame", audio_dest],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    if normalize.returncode != 0 or not os.path.exists(audio_dest):
+        transcode = subprocess.run(
+            ["ffmpeg", "-y", "-i", raw_wav, "-ar", "24000", "-q:a", "4", "-acodec", "libmp3lame", audio_dest],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        if transcode.returncode != 0 or not os.path.exists(audio_dest):
+            if os.path.exists(raw_wav):
+                os.remove(raw_wav)
+            return False
+    if os.path.exists(raw_wav):
+        os.remove(raw_wav)
+    return True
+
 def _run_piper_sync(text: str, onnx_path: str, wav_path: str) -> bool:
     """Blocking Piper CLI call - invoked via asyncio.to_thread so it doesn't
     stall the event loop. Runs under the same tts_semaphore as edge-tts (see
@@ -946,25 +991,73 @@ async def generate_piper_audio(clean_text: str, audio_dest: str):
             os.remove(raw_wav)
         return None
 
-    normalize = subprocess.run(
-        ["ffmpeg", "-y", "-i", raw_wav, "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
-         "-ar", "24000", "-q:a", "4", "-acodec", "libmp3lame", audio_dest],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
-    if normalize.returncode != 0 or not os.path.exists(audio_dest):
-        # Same "don't lose the clip over a normalization hiccup" fallback
-        # generate_clean_audio uses for edge-tts - plain transcode, no filter.
-        transcode = subprocess.run(
-            ["ffmpeg", "-y", "-i", raw_wav, "-ar", "24000", "-q:a", "4", "-acodec", "libmp3lame", audio_dest],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        if transcode.returncode != 0 or not os.path.exists(audio_dest):
-            if os.path.exists(raw_wav):
-                os.remove(raw_wav)
-            return None
+    if not _finalize_wav_to_mp3(raw_wav, audio_dest):
+        return None
+    return []
 
-    if os.path.exists(raw_wav):
-        os.remove(raw_wav)
+_mms_model = None
+_mms_tokenizer = None
+
+def _run_mms_sync(text: str, wav_path: str) -> bool:
+    """Blocking MMS-TTS (Meta's Massively Multilingual Speech) synthesis via
+    Hugging Face transformers. Loads the model/tokenizer once per process
+    (module-level cache) rather than per scene - the checkpoint is ~145MB,
+    reloading it for every single narration line would be needlessly slow.
+
+    Unlike Piper's CLI, a raw VITS forward pass has no built-in sentence-
+    pause control, so long narration synthesized in one shot tends to run
+    sentences together. This splits on Hindi/Latin sentence punctuation
+    (।/./!/?) and synthesizes each piece separately, stitching them back
+    together with MMS_SENTENCE_SILENCE of silence in between, to keep
+    pacing closer to how Piper and edge-tts already handle it."""
+    global _mms_model, _mms_tokenizer
+    try:
+        import torch
+        import numpy as np
+        from scipy.io import wavfile
+        from transformers import VitsModel, AutoTokenizer
+
+        if _mms_model is None:
+            _mms_model = VitsModel.from_pretrained(MMS_MODEL_ID)
+            _mms_tokenizer = AutoTokenizer.from_pretrained(MMS_MODEL_ID)
+        model, tokenizer = _mms_model, _mms_tokenizer
+        sample_rate = model.config.sampling_rate
+
+        sentences = [s.strip() for s in re.split(r"(?<=[।!?.])\s+", text) if s.strip()]
+        if not sentences:
+            sentences = [text]
+
+        silence_gap = np.zeros(int(sample_rate * MMS_SENTENCE_SILENCE), dtype=np.float32)
+        pieces = []
+        for i, sentence in enumerate(sentences):
+            inputs = tokenizer(sentence, return_tensors="pt")
+            with torch.no_grad():
+                waveform = model(**inputs).waveform
+            pieces.append(waveform.squeeze().cpu().numpy().astype(np.float32))
+            if i < len(sentences) - 1:
+                pieces.append(silence_gap)
+
+        full_audio = np.concatenate(pieces) if pieces else silence_gap
+        wavfile.write(wav_path, sample_rate, full_audio)
+        return os.path.exists(wav_path) and os.path.getsize(wav_path) > 0
+    except Exception as e:
+        print(f"[mms] synthesis error: {e}")
+        return False
+
+async def generate_mms_audio(clean_text: str, audio_dest: str):
+    """MMS-TTS counterpart to generate_piper_audio() above - same on-disk
+    contract and the same [] (success, no word timing) vs None (failure,
+    caller falls back to edge-tts) convention. See the TTS_ENGINE comment
+    near the top of this file for this model's non-commercial license."""
+    raw_wav = audio_dest + ".raw.wav"
+    ok = await asyncio.to_thread(_run_mms_sync, clean_text, raw_wav)
+    if not ok:
+        if os.path.exists(raw_wav):
+            os.remove(raw_wav)
+        return None
+
+    if not _finalize_wav_to_mp3(raw_wav, audio_dest):
+        return None
     return []
 
 def get_audio_duration(file_path: str) -> float:
@@ -994,17 +1087,22 @@ async def generate_clean_audio(narration: str, audio_dest: str) -> list:
     back to the old static full-sentence caption in that case, so a render
     never breaks over it.
 
-    When TTS_ENGINE=piper, tries generate_piper_audio() first and only
-    falls through to edge-tts below if that fails (missing voice, download
-    error, etc.) - so a bad Piper run never costs you the whole render."""
+    When TTS_ENGINE is "piper" or "mms", tries that engine first and only
+    falls through to edge-tts below if it fails (missing voice/model,
+    download error, etc.) - so a bad local-engine run never costs you the
+    whole render."""
     async with tts_semaphore:
         clean_text = narration.strip() if narration else "हरि ॐ तत्सत्"
 
-        if TTS_ENGINE == "piper":
-            piper_result = await generate_piper_audio(clean_text, audio_dest)
-            if piper_result is not None:
-                return piper_result
-            print(f"[piper] falling back to edge-tts for {audio_dest}")
+        if TTS_ENGINE in ("piper", "mms"):
+            local_result = (
+                await generate_piper_audio(clean_text, audio_dest)
+                if TTS_ENGINE == "piper"
+                else await generate_mms_audio(clean_text, audio_dest)
+            )
+            if local_result is not None:
+                return local_result
+            print(f"[{TTS_ENGINE}] falling back to edge-tts for {audio_dest}")
 
         raw_path = audio_dest + ".raw.mp3"
         for attempt in range(1, 4):
