@@ -1581,6 +1581,9 @@ async def process():
             "director": scene.get("director", {}),
             "imageFileName": shots[0]["file"] if shots else "",  # legacy/debug only, see Scene.tsx's resolveShots()
             "soundEffect": scene.get("soundEffect", "none"),
+            "visualEntities": scene.get("visualEntities", scene.get("visual_entities", [])),
+            "visualAttributes": scene.get("visualAttributes", scene.get("visual_attributes", [])),
+            "visualStrict": bool(scene.get("visualStrict") or scene.get("visual_strict")),
             "words": long_word_timings[i]
         })
 
@@ -1600,6 +1603,9 @@ async def process():
             "shots": shots,
             "imageFileName": shots[0]["file"] if shots else "",  # legacy/debug only, see Scene.tsx's resolveShots()
             "soundEffect": scene.get("soundEffect", "none"),
+            "visualEntities": scene.get("visualEntities", scene.get("visual_entities", [])),
+            "visualAttributes": scene.get("visualAttributes", scene.get("visual_attributes", [])),
+            "visualStrict": bool(scene.get("visualStrict") or scene.get("visual_strict")),
             "words": shorts_word_timings[i]
         })
 
