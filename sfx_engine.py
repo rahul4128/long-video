@@ -29,11 +29,12 @@ def _download_freesound(effect_name: str, output_path: str) -> bool:
     query = _EFFECT_QUERIES.get(effect_name, effect_name.replace("_", " "))
     try:
         r = requests.get(
-            "https://freesound.org/apiv2/search/text/",
+            "https://freesound.org/apiv2/search/",
             params={
                 "query": query,
                 "token": FREESOUND_API_KEY,
-                "fields": "id,name,previews,duration",
+                "fields": "id,name,previews,duration,license",
+                "filter": "license:\"Creative Commons 0\"",
                 "page_size": 10,
             },
             timeout=15,
@@ -42,6 +43,12 @@ def _download_freesound(effect_name: str, output_path: str) -> bool:
             return False
         results = r.json().get("results", [])
         for item in results:
+            # Only use CC0 sounds automatically. Freesound also hosts
+            # Attribution/NonCommercial sounds; silently downloading those
+            # into an automated YouTube pipeline would create avoidable
+            # licensing/attribution problems.
+            if item.get("license") != "Creative Commons 0":
+                continue
             preview = (item.get("previews") or {}).get("preview-hq-mp3") or (item.get("previews") or {}).get("preview-lq-mp3")
             if not preview:
                 continue
