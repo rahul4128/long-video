@@ -975,38 +975,162 @@ def _fallback_word_timings(text: str, audio_path: str) -> list:
         cursor += span
     return timings
 
+async def _generate_edge_chunked_audio(clean_text: str, audio_dest: str) -> list:
+    """Generate narration sentence-by-sentence for more human pacing.
+
+    Edge's Hindi neural voices are free to use through edge-tts and provide
+    natural prosody. Generating shorter sentence chunks lets punctuation create
+    real pauses instead of forcing one long paragraph through a single prosodic
+    pass. WordBoundary timings are preserved with cumulative offsets.
+    """
+    voice = os.getenv("EDGE_TTS_VOICE", "hi-IN-MadhurNeural")
+    rate = os.getenv("EDGE_TTS_RATE", "-4%")
+    pitch = os.getenv("EDGE_TTS_PITCH", "0Hz")
+    pause_ms = max(0, int(os.getenv("EDGE_TTS_SENTENCE_PAUSE_MS", "140")))
+
+    chunks = [
+        part.strip()
+        for part in re.split(r"(?<=[।!?])\s+|(?<=[.!?])\s+", clean_text)
+        if part.strip()
+    ]
+    if not chunks:
+        chunks = [clean_text]
+
+    work_dir = audio_dest + ".chunks"
+    os.makedirs(work_dir, exist_ok=True)
+    chunk_paths = []
+    all_timings = []
+    cursor = 0.0
+
+    try:
+        for index, chunk in enumerate(chunks):
+            path = os.path.join(work_dir, f"{index:04d}.mp3")
+            communicate = edge_tts.Communicate(
+                chunk,
+                voice=voice,
+                rate=rate,
+                pitch=pitch,
+            )
+            submaker = edge_tts.SubMaker()
+            audio_bytes = bytearray()
+
+            async for item in communicate.stream():
+                if item["type"] == "audio":
+                    audio_bytes.extend(item["data"])
+                elif item["type"] == "WordBoundary":
+                    submaker.feed(item)
+
+            if not audio_bytes:
+                raise RuntimeError(f"Edge-TTS returned no audio for sentence {index + 1}")
+
+            with open(path, "wb") as f:
+                f.write(audio_bytes)
+
+            duration = max(0.05, get_audio_duration(path))
+            for cue in submaker.cues:
+                all_timings.append({
+                    "word": cue.content,
+                    "start": round(cursor + cue.start.total_seconds(), 3),
+                    "end": round(cursor + cue.end.total_seconds(), 3),
+                })
+
+            chunk_paths.append(path)
+            cursor += duration
+
+            if index < len(chunks) - 1:
+                cursor += pause_ms / 1000.0
+
+        # Build a tiny MP3 silence segment and concatenate:
+        # sentence -> pause -> sentence -> pause -> ...
+        silence = os.path.join(work_dir, "silence.mp3")
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-f", "lavfi",
+                "-i", "anullsrc=r=24000:cl=mono",
+                "-t", str(pause_ms / 1000.0),
+                "-c:a", "libmp3lame", "-q:a", "5", silence,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+
+        concat_list = os.path.join(work_dir, "concat.txt")
+        with open(concat_list, "w", encoding="utf-8") as f:
+            for index, path in enumerate(chunk_paths):
+                f.write(f"file '{os.path.abspath(path)}'\\n")
+                if index < len(chunk_paths) - 1:
+                    f.write(f"file '{os.path.abspath(silence)}'\\n")
+
+        normalize = subprocess.run(
+            [
+                "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                "-i", concat_list,
+                "-af",
+                "loudnorm=I=-16:TP=-1.5:LRA=11,highpass=f=70,lowpass=f=12000",
+                "-ar", "24000", "-ac", "1",
+                "-c:a", "libmp3lame", "-q:a", "3",
+                audio_dest,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if normalize.returncode != 0 or not os.path.exists(audio_dest):
+            raise RuntimeError("FFmpeg failed while assembling chunked narration")
+
+        return all_timings
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
 async def generate_clean_audio(narration: str, audio_dest: str) -> list:
-    """IndicF5 (optional) -> Kokoro -> Edge-TTS -> silence fallback."""
+    """Edge Hindi neural TTS -> Kokoro -> silence fallback.
+
+    Edge is the default because its Hindi neural voices currently give the
+    most conversational delivery in this free/no-key pipeline. Kokoro remains
+    available as a local/offline fallback.
+    """
     async with tts_semaphore:
         clean_text = _naturalize_text(narration) or "हरि ॐ तत्सत्"
-        engine = os.getenv("AUDIO_TTS_ENGINE", "kokoro").strip().lower()
+        engine = os.getenv("AUDIO_TTS_ENGINE", "edge").strip().lower()
 
-        if engine == "indicf5" and generate_indicf5_audio:
+        # Free Microsoft Edge Hindi neural TTS, sentence-chunked for natural
+        # pauses and less robotic paragraph delivery.
+        if engine in ("edge", "auto"):
+            for attempt in range(1, 4):
+                try:
+                    timings = await _generate_edge_chunked_audio(clean_text, audio_dest)
+                    if os.path.exists(audio_dest):
+                        return timings
+                except Exception as e:
+                    print(
+                        f"Edge-TTS chunked attempt {attempt} failed: {e}",
+                        flush=True,
+                    )
+                    await asyncio.sleep(1.5)
+
+        if engine in ("kokoro", "auto", "edge") and KOKORO_AVAILABLE:
             try:
-                ok = await asyncio.to_thread(generate_indicf5_audio, clean_text, audio_dest)
+                ok = await asyncio.to_thread(
+                    generate_kokoro_audio, clean_text, audio_dest
+                )
                 if ok and os.path.exists(audio_dest):
                     return _fallback_word_timings(clean_text, audio_dest)
             except Exception as e:
-                print(f"IndicF5 notice: {e} - falling back to Kokoro/Edge-TTS.", flush=True)
+                print(
+                    f"Kokoro notice: {e} - falling back to legacy Edge-TTS.",
+                    flush=True,
+                )
 
-        if engine in ("kokoro", "auto", "indicf5") and KOKORO_AVAILABLE:
-            try:
-                ok = await asyncio.to_thread(generate_kokoro_audio, clean_text, audio_dest)
-                if ok and os.path.exists(audio_dest):
-                    return _fallback_word_timings(clean_text, audio_dest)
-            except Exception as e:
-                print(f"Kokoro notice: {e} - falling back to Edge-TTS.", flush=True)
-        elif engine == "kokoro" and not KOKORO_AVAILABLE:
-            print("Kokoro is unavailable; falling back to Edge-TTS.", flush=True)
-
+        # Legacy single-pass Edge-TTS fallback.
         raw_path = audio_dest + ".raw.mp3"
         for attempt in range(1, 4):
             try:
                 communicate = edge_tts.Communicate(
                     clean_text,
                     voice=os.getenv("EDGE_TTS_VOICE", "hi-IN-MadhurNeural"),
-                    rate=os.getenv("EDGE_TTS_RATE", "-3%"),
-                    pitch=os.getenv("EDGE_TTS_PITCH", "-1Hz")
+                    rate=os.getenv("EDGE_TTS_RATE", "-4%"),
+                    pitch=os.getenv("EDGE_TTS_PITCH", "0Hz"),
                 )
                 submaker = edge_tts.SubMaker()
                 audio_bytes = bytearray()
@@ -1018,20 +1142,44 @@ async def generate_clean_audio(narration: str, audio_dest: str) -> list:
                 if audio_bytes:
                     with open(raw_path, "wb") as f:
                         f.write(audio_bytes)
-                    normalize = subprocess.run(["ffmpeg","-y","-i",raw_path,"-af","loudnorm=I=-16:TP=-1.5:LRA=11","-ar","24000","-q:a","4","-acodec","libmp3lame",audio_dest], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    normalize = subprocess.run(
+                        [
+                            "ffmpeg", "-y", "-i", raw_path,
+                            "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+                            "-ar", "24000", "-q:a", "4",
+                            "-acodec", "libmp3lame", audio_dest,
+                        ],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
                     if normalize.returncode != 0 or not os.path.exists(audio_dest):
                         shutil.copyfile(raw_path, audio_dest)
-                    if os.path.exists(raw_path): os.remove(raw_path)
-                    return [{"word": cue.content, "start": round(cue.start.total_seconds(),3), "end": round(cue.end.total_seconds(),3)} for cue in submaker.cues]
+                    if os.path.exists(raw_path):
+                        os.remove(raw_path)
+                    return [
+                        {
+                            "word": cue.content,
+                            "start": round(cue.start.total_seconds(), 3),
+                            "end": round(cue.end.total_seconds(), 3),
+                        }
+                        for cue in submaker.cues
+                    ]
             except Exception as e:
                 print(f"Edge-TTS attempt {attempt} failed: {e}", flush=True)
                 await asyncio.sleep(1.5)
-        subprocess.run(["ffmpeg","-y","-f","lavfi","-i","anullsrc=r=24000:cl=mono","-t","5","-q:a","9","-acodec","libmp3lame",audio_dest], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        subprocess.run(
+            [
+                "ffmpeg", "-y", "-f", "lavfi",
+                "-i", "anullsrc=r=24000:cl=mono",
+                "-t", "5", "-c:a", "libmp3lame", "-q:a", "8", audio_dest,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         return []
 
-# -------------------------------------------------------------
-# 3b. SCENE DURATION ESTIMATION
-# -------------------------------------------------------------
+
 def estimate_scene_duration_seconds(narration_text: str) -> float:
     """Estimate spoken duration before TTS so visual shot coverage matches narration.
 
