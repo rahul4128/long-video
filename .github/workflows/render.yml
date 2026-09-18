@@ -20,25 +20,17 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
-          cache: 'pip'
-          cache-dependency-path: requirements.txt
 
       # Caches the downloaded .deb files, keyed on the package list below.
       # Only re-downloads from the network if you change the package list
       # (i.e. edit the "key" or the packages themselves) - otherwise this
       # step restores from cache and apt-get skips the network fetch.
-      - name: Cache apt packages (ffmpeg)
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt/archives/*.deb
-          key: apt-archives-${{ runner.os }}-ffmpeg-espeak-v2
-
       - name: Install System Dependencies (ffmpeg)
         run: |
           sudo apt-get update
@@ -97,7 +89,7 @@ jobs:
       # Hand the generated files off to the two render jobs below. Short
       # retention since this is only needed for the rest of this one run.
       - name: Upload generated assets
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: generated-assets-${{ github.run_id }}
           path: |
@@ -123,31 +115,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
 
       # Skips "npm install" completely on a cache hit - only reinstalls
       # when package.json / package-lock.json actually change.
-      - name: Cache node modules
-        id: npm-cache
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'package.json') }}
-
       - name: Install Node.js Dependencies
-        if: steps.npm-cache.outputs.cache-hit != 'true'
         run: npm install
-
-      - name: Cache apt packages (ffmpeg + fonts)
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt/archives/*.deb
-          key: apt-archives-${{ runner.os }}-ffmpeg-fonts-v1
 
       - name: Install System Dependencies (ffmpeg + fonts)
         run: |
@@ -155,7 +133,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-core fonts-deva
 
       - name: Download generated assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: generated-assets-${{ github.run_id }}
 
@@ -164,7 +142,7 @@ jobs:
           npx remotion render DevotionalComposition out/final_video.mp4 --props=public/props.json --concurrency=$(nproc)
 
       - name: Upload Video Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: devotional-video-${{ github.run_id }}
           path: out/final_video.mp4
@@ -175,29 +153,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
-
-      - name: Cache node modules
-        id: npm-cache
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'package.json') }}
+          node-version: '24'
 
       - name: Install Node.js Dependencies
-        if: steps.npm-cache.outputs.cache-hit != 'true'
         run: npm install
-
-      - name: Cache apt packages (ffmpeg + fonts)
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt/archives/*.deb
-          key: apt-archives-${{ runner.os }}-ffmpeg-fonts-v1
 
       - name: Install System Dependencies (ffmpeg + fonts)
         run: |
@@ -205,7 +169,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-core fonts-deva
 
       - name: Download generated assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: generated-assets-${{ github.run_id }}
 
@@ -214,7 +178,7 @@ jobs:
           npx remotion render DevotionalShortsComposition out/final_video_shorts.mp4 --props=public/props_shorts.json --concurrency=$(nproc)
 
       - name: Upload Shorts Video Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: devotional-shorts-${{ github.run_id }}
           path: out/final_video_shorts.mp4
@@ -235,29 +199,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
-
-      - name: Cache node modules
-        id: npm-cache
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'package.json') }}
+          node-version: '24'
 
       - name: Install Node.js Dependencies
-        if: steps.npm-cache.outputs.cache-hit != 'true'
         run: npm install
-
-      - name: Cache apt packages (ffmpeg + fonts)
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt/archives/*.deb
-          key: apt-archives-${{ runner.os }}-ffmpeg-fonts-v1
 
       - name: Install System Dependencies (ffmpeg + fonts)
         run: |
@@ -265,7 +215,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-core fonts-deva
 
       - name: Download generated assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: generated-assets-${{ github.run_id }}
 
@@ -274,7 +224,7 @@ jobs:
           npx remotion still ThumbnailComposition out/thumbnail.jpg --props=public/thumbnail_props.json
 
       - name: Upload Thumbnail Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: devotional-thumbnail-${{ github.run_id }}
           path: out/thumbnail.jpg
@@ -292,29 +242,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
-
-      - name: Cache node modules
-        id: npm-cache
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node-${{ hashFiles('package-lock.json', 'package.json') }}
+          node-version: '24'
 
       - name: Install Node.js Dependencies
-        if: steps.npm-cache.outputs.cache-hit != 'true'
         run: npm install
-
-      - name: Cache apt packages (ffmpeg + fonts)
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt/archives/*.deb
-          key: apt-archives-${{ runner.os }}-ffmpeg-fonts-v1
 
       - name: Install System Dependencies (ffmpeg + fonts)
         run: |
@@ -322,7 +258,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-core fonts-deva
 
       - name: Download generated assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: generated-assets-${{ github.run_id }}
 
@@ -331,7 +267,7 @@ jobs:
           npx remotion still ShortsThumbnailComposition out/thumbnail_shorts_final.jpg --props=public/thumbnail_props_shorts.json
 
       - name: Upload Shorts Thumbnail Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: devotional-thumbnail-shorts-${{ github.run_id }}
           path: out/thumbnail_shorts_final.jpg
@@ -346,39 +282,39 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install ffmpeg
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Download generated assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: generated-assets-${{ github.run_id }}
       - name: Download long video
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: devotional-video-${{ github.run_id }}
           path: out
       - name: Download shorts video
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: devotional-shorts-${{ github.run_id }}
           path: out
       - name: Download long thumbnail
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: devotional-thumbnail-${{ github.run_id }}
           path: out
       - name: Download shorts thumbnail
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: devotional-thumbnail-shorts-${{ github.run_id }}
           path: out
       - name: Run automated media QC
         run: python qc.py
       - name: Upload QC report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: media-qc-${{ github.run_id }}
           path: out/qc_report.json
@@ -399,34 +335,34 @@ jobs:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download generated assets (metadata)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: generated-assets-${{ github.run_id }}
           path: assets
 
       - name: Download long video
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: devotional-video-${{ github.run_id }}
           path: video
 
       - name: Download shorts video
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: devotional-shorts-${{ github.run_id }}
           path: shorts
 
       - name: Download rendered thumbnail (with hook-text overlay)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: devotional-thumbnail-${{ github.run_id }}
           path: thumbnail_final
 
       - name: Download rendered Shorts thumbnail (with hook-text overlay)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: devotional-thumbnail-shorts-${{ github.run_id }}
           path: thumbnail_shorts_final
