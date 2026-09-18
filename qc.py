@@ -8,16 +8,33 @@ def probe(path):
     except Exception as e: return {"ok":False,"error":str(e)}
 
 def check(path, kind):
-    if not os.path.exists(path): return {"path":path,"ok":False,"error":"missing"}
-    p=probe(path); p["path"]=path
-    streams=p.get("streams",[])
-    duration=float(p.get("format",{}).get("duration",0) or 0)
-    p["duration"]=duration
-    p["ok"]=p["ok"] and duration>0 and any(s.get("codec_type")==kind for s in streams)
+    if not os.path.exists(path):
+        return {"path": path, "ok": False, "error": "missing"}
+    p = probe(path)
+    p["path"] = path
+    streams = p.get("streams", [])
+    duration = float(p.get("format", {}).get("duration", 0) or 0)
+    p["duration"] = duration
+
+    has_kind = any(s.get("codec_type") == kind for s in streams)
+    # Still images (thumbnails) legitimately have no media duration in
+    # ffprobe. Validate that an image has dimensions instead of requiring
+    # duration > 0; audio/video must have a positive duration.
+    if kind == "image":
+        has_dimensions = any(
+            s.get("codec_type") == "video"
+            and int(s.get("width", 0) or 0) > 0
+            and int(s.get("height", 0) or 0) > 0
+            for s in streams
+        )
+        p["ok"] = p["ok"] and has_dimensions
+    else:
+        p["ok"] = p["ok"] and duration > 0 and has_kind
+
     return p
 
 def main():
-    targets=[("out/final_video.mp4","video"),("out/final_video_shorts.mp4","video"),("out/thumbnail.jpg","video"),("out/thumbnail_shorts_final.jpg","video")]
+    targets=[("out/final_video.mp4","video"),("out/final_video_shorts.mp4","video"),("out/thumbnail.jpg","image"),("out/thumbnail_shorts_final.jpg","image")]
     results=[check(*x) for x in targets if os.path.exists(x)]
     audio_files=[]
     if os.path.isdir("public/audio"):
