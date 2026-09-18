@@ -393,7 +393,7 @@ jobs:
   # title/description/thumbnail and files each into its playlist.
   # ---------------------------------------------------------------
   publish-and-notify:
-    needs: [generate-assets, render-long, render-shorts, render-thumbnail, render-thumbnail-shorts]
+    needs: [generate-assets, render-long, render-shorts, render-thumbnail, render-thumbnail-shorts, media-qc]
     runs-on: ubuntu-latest
     permissions:
       contents: write
