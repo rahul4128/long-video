@@ -33,7 +33,7 @@ ENTITY_ALIASES: Dict[str, Set[str]] = {
 }
 
 ATTRIBUTE_ALIASES = {
-    "child": {"child", "kid", "boy", "girl", "baby", "infant", "young", "toddler", "बाल", "बच्चा", "बालक", "किशोर", "कन्हैया"},
+    "child": {"child", "kid", "boy", "bal", "बाल कृष्ण", "girl", "baby", "infant", "young", "toddler", "बाल", "बच्चा", "बालक", "किशोर", "कन्हैया"},
     "adult": {"adult", "man", "woman", "grown", "elder", "पुरुष", "महिला", "वयस्क"},
     "female": {"female", "woman", "girl", "mother", "स्त्री", "महिला", "नारी", "कन्या"},
     "male": {"male", "man", "boy", "पुरुष", "बालक"},
@@ -61,7 +61,7 @@ def extract_visual_requirements(*texts: str) -> Dict[str, object]:
 
     # "Bal Krishna / बाल कृष्ण / child Krishna" is a special strict compound.
     if "krishna" in entities and (
-        any(x in joined for x in ("bal krishna", "बाल कृष्ण", "child krishna", "baby krishna", "infant krishna", "kanhaiya", "कन्हैया"))
+        any(x in joined for x in ("bal krishna", "बाल कृष्ण", "child krishna", "baby krishna", "infant krishna", "bal krishna", "कन्हैया", "बाल कृष्ण"))
         or "child" in attributes
     ):
         attributes.append("child")
