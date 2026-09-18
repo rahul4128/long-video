@@ -338,6 +338,53 @@ jobs:
           retention-days: 1
 
   # ---------------------------------------------------------------
+  # JOB 4c: Automated media QC. Verifies final videos, thumbnails and every
+  # generated narration/effect file with ffprobe before publishing.
+  # ---------------------------------------------------------------
+  media-qc:
+    needs: [generate-assets, render-long, render-shorts, render-thumbnail, render-thumbnail-shorts, media-qc]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Download generated assets
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-assets-${{ github.run_id }}
+      - name: Download long video
+        uses: actions/download-artifact@v4
+        with:
+          name: devotional-video-${{ github.run_id }}
+          path: out
+      - name: Download shorts video
+        uses: actions/download-artifact@v4
+        with:
+          name: devotional-shorts-${{ github.run_id }}
+          path: out
+      - name: Download long thumbnail
+        uses: actions/download-artifact@v4
+        with:
+          name: devotional-thumbnail-${{ github.run_id }}
+          path: out
+      - name: Download shorts thumbnail
+        uses: actions/download-artifact@v4
+        with:
+          name: devotional-thumbnail-shorts-${{ github.run_id }}
+          path: out
+      - name: Run automated media QC
+        run: python qc.py
+      - name: Upload QC report
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-qc-${{ github.run_id }}
+          path: out/qc_report.json
+          retention-days: 14
+
+  # ---------------------------------------------------------------
   # JOB 5: Once both video renders and both thumbnail renders are done,
   # publish a GitHub Release carrying the long video, the shorts video
   # and both text-overlaid thumbnails as public, no-auth-required
