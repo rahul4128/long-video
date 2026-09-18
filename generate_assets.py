@@ -712,6 +712,7 @@ def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "lan
 # never runs out of real screen time.
 MAX_VIDEO_SHOTS_PER_SCENE = 3
 MIN_SHOT_SECONDS = 3.0  # never split a scene's remaining time so finely a shot reads as a flash-cut
+SUB_SHOT_SECONDS = 5.0  # target visual coverage per generated AI-image sub-shot
 
 def fetch_video_shots_for_duration(primary_query: str, prompt_text: str, target_seconds: float,
                                     orientation: str, base_name: str,
