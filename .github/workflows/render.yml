@@ -102,6 +102,7 @@ jobs:
             out/thumbnail.jpg
             out/thumbnail_shorts.jpg
             out/metadata.json
+            out/content_qc_report.json
           retention-days: 1
 
   # ---------------------------------------------------------------
