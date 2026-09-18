@@ -38,8 +38,13 @@ def main():
     results=[check(*x) for x in targets if os.path.exists(x)]
     audio_files=[]
     if os.path.isdir("public/audio"):
-        audio_files=[os.path.join("public/audio",x) for x in os.listdir("public/audio") if x.endswith(".mp3")]
-    results += [check(x,"audio") for x in audio_files[:200]]
+        for root, _, files in os.walk("public/audio"):
+            audio_files.extend(
+                os.path.join(root, name)
+                for name in files
+                if name.lower().endswith(".mp3")
+            )
+    results += [check(x, "audio") for x in audio_files[:500]]
     failed=[r for r in results if not r["ok"]]
     report={"ok":not failed,"checked":len(results),"failed":failed,"results":results}
     os.makedirs("out",exist_ok=True)
