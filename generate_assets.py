@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 import edge_tts
 from director import enrich_scenes
+from sfx_engine import resolve_sound_effect_audio
 try:
     from indicf5_engine import generate_indicf5_audio
 except Exception:
