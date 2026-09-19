@@ -46,7 +46,6 @@ def get_github_public_key(repo, headers):
     except Exception as exc:
         raise RuntimeError("GitHub public key is not valid base64.") from exc
 
-    # GitHub Actions uses a 32-byte Curve25519 public key encoded as base64.
     if len(raw_key) != 32:
         raise RuntimeError(
             f"GitHub public key decoded to {len(raw_key)} bytes; expected exactly 32."
@@ -57,12 +56,10 @@ def get_github_public_key(repo, headers):
 
 def save_refresh_token(repo, github_token, new_refresh):
     headers = github_headers(github_token)
-
-    # The Canva refresh token is single-use. Once Canva returns a new token,
-    # keep it in memory and retry the GitHub secret update if GitHub is transiently
-    # unavailable. Never ask Canva for another refresh token during these retries.
     last_error = None
 
+    # The Canva refresh token is single-use. Once Canva returns a new token,
+    # never call Canva again while retrying the GitHub secret update.
     for attempt in range(1, 4):
         try:
             raw_key, key_id = get_github_public_key(repo, headers)
@@ -102,21 +99,42 @@ def main():
     github_token = req("REPO_SECRETS_TOKEN")
     repo = req("GITHUB_REPOSITORY")
 
-    # Validate GitHub secret-encryption prerequisites BEFORE consuming the
-    # single-use Canva refresh token.
+    # Validate GitHub encryption BEFORE consuming Canva's single-use refresh token.
     github_headers_value = github_headers(github_token)
     get_github_public_key(repo, github_headers_value)
 
     response = requests.post(
         "https://api.canva.com/rest/v1/oauth/token",
         auth=(client_id, client_secret),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
         data={
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
         },
         timeout=60,
     )
+
     if not response.ok:
+        # invalid_grant is not retryable. It means Canva rejected the stored
+        # refresh token (invalid/revoked/expired or associated with different
+        # client credentials). Retrying would not repair it.
+        if response.status_code == 400:
+            try:
+                error = response.json()
+            except ValueError:
+                error = {}
+
+            if error.get("error") == "invalid_grant":
+                description = error.get("error_description", "Invalid refresh token")
+                raise RuntimeError(
+                    "Canva rejected CANVA_REFRESH_TOKEN with invalid_grant: "
+                    f"{description}. "
+                    "Generate a NEW token with scripts/canva_oauth.js using the "
+                    "same CANVA_CLIENT_ID and CANVA_CLIENT_SECRET currently stored "
+                    "in GitHub Actions, then replace CANVA_REFRESH_TOKEN. "
+                    "Do not reuse an older refresh token."
+                )
+
         raise RuntimeError(
             f"Canva refresh failed ({response.status_code}): "
             f"{response.text[:1000]}"
@@ -126,14 +144,12 @@ def main():
     access = data.get("access_token")
     new_refresh = data.get("refresh_token")
     if not access or not new_refresh:
-        raise RuntimeError(
-            "Canva did not return both access_token and refresh_token."
-        )
+        raise RuntimeError("Canva did not return both access_token and refresh_token.")
 
-    # Mask the short-lived access token before exposing it to later workflow
-    # steps through GITHUB_ENV.
     print(f"::add-mask::{access}")
 
+    # Save the newly rotated token immediately. Retries happen only against
+    # GitHub; Canva is never called twice for the same refresh token.
     save_refresh_token(repo, github_token, new_refresh)
 
     with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
