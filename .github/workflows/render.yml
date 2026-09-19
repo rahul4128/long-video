@@ -42,6 +42,18 @@ jobs:
       - name: Install Python Dependencies
         run: pip install -r requirements.txt
 
+      - name: Install Canva token rotation dependency
+        run: pip install pynacl
+
+      - name: Authenticate Canva and rotate refresh token
+        env:
+          CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
+          CANVA_CLIENT_SECRET: ${{ secrets.CANVA_CLIENT_SECRET }}
+          CANVA_REFRESH_TOKEN: ${{ secrets.CANVA_REFRESH_TOKEN }}
+          REPO_SECRETS_TOKEN: ${{ secrets.REPO_SECRETS_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/refresh_canva_token.py
+
       - name: Generate Unified Assets (4K B-Roll + FLUX.1 + Voiceover)
         env:
           DISPATCH_PAYLOAD: ${{ toJson(github.event.client_payload) }}
