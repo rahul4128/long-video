@@ -29,6 +29,8 @@ export interface DirectorPlan {
   emphasis?: 'climax' | 'normal';
   visual_priority?: string[];
   director_version?: number;
+  entertainmentBeat?: "hook" | "climax" | "reveal" | "action" | "curiosity" | "establish";
+  patternBreak?: boolean;
 }
 
 export interface SceneItem {
@@ -62,6 +64,7 @@ export interface SceneItem {
   // Subtitles.tsx is hardcoded text; see the comment on `words` usage there.
   words?: WordTiming[];
   director?: DirectorPlan;
+  entertainmentBeat?: string;
 }
 
 export interface SEOMetadata {
