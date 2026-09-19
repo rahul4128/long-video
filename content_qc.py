@@ -24,6 +24,13 @@ def validate_payload(payload):
     primary_keyword = _norm(seo.get("primaryKeyword"))
     secondary_keywords = seo.get("secondaryKeywords") or []
     cta = _norm(seo.get("cta"))
+    meta = payload.get("_meta") or {}
+    entertainment_angle = _norm(meta.get("entertainment_angle"))
+    festival_priority = _norm(meta.get("festival_priority"))
+    fun_with_fact_angle = _norm(meta.get("fun_with_fact_angle"))
+    content_role = _norm(meta.get("content_role"))
+    experiment_hypothesis = _norm(meta.get("experiment_hypothesis"))
+    next_episode_angle = _norm(meta.get("next_episode_angle"))
     issues, warnings = [], []
 
     if not scenes:
@@ -56,6 +63,18 @@ def validate_payload(payload):
         warnings.append("secondary_keywords_should_be_5_to_10")
     if not cta:
         warnings.append("missing_story_specific_cta")
+    if not entertainment_angle:
+        warnings.append("missing_entertainment_angle")
+    if not fun_with_fact_angle:
+        warnings.append("missing_fun_with_fact_angle")
+    if festival_priority in ("high", "medium") and not meta.get("festival_angle"):
+        warnings.append("festival_priority_without_festival_angle")
+    if content_role not in ("discovery", "retention", "conversion", "loyalty", "authority"):
+        warnings.append("missing_or_invalid_content_role")
+    if not experiment_hypothesis:
+        warnings.append("missing_experiment_hypothesis")
+    if not next_episode_angle:
+        warnings.append("missing_viewer_journey_next_episode")
     if cta and not any(token in cta for token in ("सब्सक्राइब", "subscribe", "कमेंट", "comment", "share", "शेयर")):
         warnings.append("cta_has_no_engagement_or_subscribe_signal")
     if scenes:
@@ -130,6 +149,10 @@ def validate_payload(payload):
         "issues": issues,
         "sceneCount": len(scenes),
         "hasHindi": any(DEVANAGARI.search(str(s.get("text") or "")) for s in scenes),
+        "entertainmentAngle": entertainment_angle,
+        "festivalPriority": festival_priority,
+        "funWithFactAngle": fun_with_fact_angle,
+        "contentRole": content_role,
     }
     return report
 
