@@ -19,6 +19,11 @@ def validate_payload(payload):
     hashtags = seo.get("hashtags") or []
     thumbnail = payload.get("thumbnail") or {}
     hook = _norm(thumbnail.get("thumbnailText") or seo.get("thumbnailText"))
+    title_variants = seo.get("titleVariants") or []
+    thumbnail_concepts = seo.get("thumbnailConcepts") or []
+    primary_keyword = _norm(seo.get("primaryKeyword"))
+    secondary_keywords = seo.get("secondaryKeywords") or []
+    cta = _norm(seo.get("cta"))
     issues, warnings = [], []
 
     if not scenes:
@@ -37,8 +42,22 @@ def validate_payload(payload):
         warnings.append("too_many_hashtags")
     if not hook:
         warnings.append("missing_thumbnail_hook")
-    elif len(hook.split()) > 6:
+    elif len(hook.split()) > 5:
         warnings.append("thumbnail_hook_too_long")
+    if len(title_variants) != 3:
+        warnings.append("title_variants_should_be_exactly_3")
+    elif len({_norm(x) for x in title_variants if x}) < 3:
+        warnings.append("title_variants_are_not_materially_distinct")
+    if len(thumbnail_concepts) != 3:
+        warnings.append("thumbnail_concepts_should_be_exactly_3")
+    if not primary_keyword:
+        warnings.append("missing_primary_keyword")
+    if not (5 <= len(secondary_keywords) <= 10):
+        warnings.append("secondary_keywords_should_be_5_to_10")
+    if not cta:
+        warnings.append("missing_story_specific_cta")
+    if cta and not any(token in cta for token in ("सब्सक्राइब", "subscribe", "कमेंट", "comment", "share", "शेयर")):
+        warnings.append("cta_has_no_engagement_or_subscribe_signal")
     if scenes:
         texts = [_norm(s.get("text") or s.get("narration_chunk")) for s in scenes]
         empty = sum(not t for t in texts)
@@ -63,6 +82,24 @@ def validate_payload(payload):
             warnings.append("fewer_than_5_scenes_for_3_minute_format")
         if len(scenes) > 12:
             warnings.append("too_many_scenes_for_3_minute_format")
+
+    # Growth-oriented packaging/originality guardrails. These are warnings rather than
+    # hard failures so a legitimate episode is never blocked solely by metadata.
+    all_scene_text = " ".join(_norm(s.get("text") or s.get("narration_chunk")) for s in scenes)
+    if all_scene_text:
+        words = all_scene_text.split()
+        if len(words) > 520:
+            warnings.append("narration_over_520_words")
+        if len(words) < 280:
+            warnings.append("narration_under_280_words")
+        # Repeated long phrases are a useful proxy for templated/mass-produced narration.
+        ngrams = {}
+        for i in range(max(0, len(words) - 5)):
+            gram = " ".join(words[i:i+6])
+            ngrams[gram] = ngrams.get(gram, 0) + 1
+        repeated_ngrams = sum(1 for v in ngrams.values() if v > 1)
+        if repeated_ngrams >= 3:
+            warnings.append("repeated_six_word_phrases_detected")
 
     # Detect obvious generic filler that tends to weaken retention.
     filler = ("आज की इस वीडियो में", "नमस्कार दोस्तों", "स्वागत है दोस्तों",
