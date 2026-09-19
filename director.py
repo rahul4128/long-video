@@ -14,7 +14,10 @@ def direct_scene(scene, index, total):
     w = _words(text)
     climax = bool(scene.get("isClimax") or scene.get("emphasis") == "climax")
     devotional = bool(w & {"krishna","shiva","ram","hanuman","कृष्ण","शिव","राम","हनुमान","मंदिर","पूजा","धर्म"})
-    reveal = bool(w & {"रहस्य","सत्य","reveal","mystery","सच","चमत्कार","अंत"})
+    reveal = bool(w & {"रहस्य","सत्य","reveal","mystery","सच","चमत्कार","अंत","क्यों","क्योंकि","कैसे","लेकिन","अचानक"})
+    question = bool("?" in text or "?" in text or w & {"क्यों","कैसे","क्या","रहस्य","सच"})
+    action = bool(w & {"भागा","दौड़ा","युद्ध","गिरा","उठा","पहुंचा","पहुंचे","देखा","मिला","खुला","crossed","walked","ran"})
+    pattern_break = "hook" if index == 1 else "climax" if climax else "reveal" if reveal else "action" if action else "curiosity" if question else "establish"
     camera = "slow_push" if climax or reveal else ("pan_left" if index % 3 == 0 else "zoom_in" if index % 3 == 1 else "pan_right")
     mood = "climax" if climax else "revelation" if reveal else "devotional" if devotional else "cinematic"
     sfx = scene.get("soundEffect")
@@ -27,7 +30,9 @@ def direct_scene(scene, index, total):
         "emphasis": "climax" if climax else "normal",
         "soundEffect": sfx,
         "visual_priority": ["subject","action","environment"],
-        "director_version": 1,
+        "entertainmentBeat": pattern_break,
+        "patternBreak": pattern_break in ("hook","climax","reveal","action"),
+        "director_version": 2,
     }
 
 def enrich_scenes(scenes):
