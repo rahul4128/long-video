@@ -1586,6 +1586,7 @@ async def process():
             "narration_chunk": scene.get("text", ""),
             "shots": shots,
             "director": scene.get("director", {}),
+            "entertainmentBeat": scene.get("director", {}).get("entertainmentBeat", ""),
             "imageFileName": shots[0]["file"] if shots else "",  # legacy/debug only, see Scene.tsx's resolveShots()
             "soundEffect": scene.get("soundEffect", "none"),
             "visualEntities": scene.get("visualEntities", scene.get("visual_entities", [])),
