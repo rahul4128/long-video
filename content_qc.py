@@ -31,6 +31,10 @@ def validate_payload(payload):
     content_role = _norm(meta.get("content_role"))
     experiment_hypothesis = _norm(meta.get("experiment_hypothesis"))
     next_episode_angle = _norm(meta.get("next_episode_angle"))
+    retention_adaptation = _norm(meta.get("retention_adaptation"))
+    experiment_id = _norm(meta.get("experiment_id"))
+    shorts_funnel_hook = _norm(meta.get("shorts_funnel_hook"))
+    long_video_continuation = _norm(meta.get("long_video_continuation"))
     issues, warnings = [], []
 
     if not scenes:
@@ -75,6 +79,14 @@ def validate_payload(payload):
         warnings.append("missing_experiment_hypothesis")
     if not next_episode_angle:
         warnings.append("missing_viewer_journey_next_episode")
+    if not retention_adaptation:
+        warnings.append("missing_retention_adaptation")
+    if not experiment_id:
+        warnings.append("missing_experiment_id")
+    if not shorts_funnel_hook:
+        warnings.append("missing_shorts_funnel_hook")
+    if not long_video_continuation:
+        warnings.append("missing_long_video_continuation")
     if cta and not any(token in cta for token in ("सब्सक्राइब", "subscribe", "कमेंट", "comment", "share", "शेयर")):
         warnings.append("cta_has_no_engagement_or_subscribe_signal")
     if scenes:
@@ -120,23 +132,6 @@ def validate_payload(payload):
         if repeated_ngrams >= 3:
             warnings.append("repeated_six_word_phrases_detected")
 
-    # Growth-oriented packaging/originality guardrails. These are warnings rather than
-    # hard failures so a legitimate episode is never blocked solely by metadata.
-    all_scene_text = " ".join(_norm(s.get("text") or s.get("narration_chunk")) for s in scenes)
-    if all_scene_text:
-        words = all_scene_text.split()
-        if len(words) > 520:
-            warnings.append("narration_over_520_words")
-        if len(words) < 280:
-            warnings.append("narration_under_280_words")
-        ngrams = {}
-        for i in range(max(0, len(words) - 5)):
-            gram = " ".join(words[i:i+6])
-            ngrams[gram] = ngrams.get(gram, 0) + 1
-        repeated_ngrams = sum(1 for v in ngrams.values() if v > 1)
-        if repeated_ngrams >= 3:
-            warnings.append("repeated_six_word_phrases_detected")
-
     # Detect obvious generic filler that tends to weaken retention.
     filler = ("आज की इस वीडियो में", "नमस्कार दोस्तों", "स्वागत है दोस्तों",
               "इस वीडियो में हम जानेंगे", "आज हम जानेंगे")
@@ -153,6 +148,10 @@ def validate_payload(payload):
         "festivalPriority": festival_priority,
         "funWithFactAngle": fun_with_fact_angle,
         "contentRole": content_role,
+        "retentionAdaptation": retention_adaptation,
+        "experimentId": experiment_id,
+        "shortsFunnelHook": shorts_funnel_hook,
+        "longVideoContinuation": long_video_continuation,
     }
     return report
 
