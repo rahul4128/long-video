@@ -101,6 +101,23 @@ def validate_payload(payload):
         if repeated_ngrams >= 3:
             warnings.append("repeated_six_word_phrases_detected")
 
+    # Growth-oriented packaging/originality guardrails. These are warnings rather than
+    # hard failures so a legitimate episode is never blocked solely by metadata.
+    all_scene_text = " ".join(_norm(s.get("text") or s.get("narration_chunk")) for s in scenes)
+    if all_scene_text:
+        words = all_scene_text.split()
+        if len(words) > 520:
+            warnings.append("narration_over_520_words")
+        if len(words) < 280:
+            warnings.append("narration_under_280_words")
+        ngrams = {}
+        for i in range(max(0, len(words) - 5)):
+            gram = " ".join(words[i:i+6])
+            ngrams[gram] = ngrams.get(gram, 0) + 1
+        repeated_ngrams = sum(1 for v in ngrams.values() if v > 1)
+        if repeated_ngrams >= 3:
+            warnings.append("repeated_six_word_phrases_detected")
+
     # Detect obvious generic filler that tends to weaken retention.
     filler = ("आज की इस वीडियो में", "नमस्कार दोस्तों", "स्वागत है दोस्तों",
               "इस वीडियो में हम जानेंगे", "आज हम जानेंगे")
