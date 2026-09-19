@@ -7,7 +7,7 @@ agnostic so Make.com can later replace/augment it with an LLM director.
 import re
 
 def _words(text):
-    return set(re.findall(r"[\\w\\u0900-\\u097F]+", (text or "").lower()))
+    return set(re.findall(r"[\w\u0900-\u097F]+", (text or "").lower()))
 
 def direct_scene(scene, index, total):
     text = scene.get("text") or scene.get("narration_chunk") or ""
