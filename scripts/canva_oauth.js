@@ -24,15 +24,14 @@ const REDIRECT_URI = "http://127.0.0.1:3001/oauth/redirect";
 const AUTH_URL = "https://www.canva.com/api/oauth/authorize";
 const TOKEN_URL = "https://api.canva.com/rest/v1/oauth/token";
 
+// Minimum scopes needed for our initial workflow.
+// Keep OAuth narrow; we can add Brand Template/Profile scopes later if needed.
 const SCOPES = [
   "asset:read",
   "asset:write",
   "design:content:read",
   "design:content:write",
   "design:meta:read",
-  "brandtemplate:meta:read",
-  "brandtemplate:content:read",
-  "profile:read",
 ].join(" ");
 
 function randomBase64Url(bytes = 96) {
