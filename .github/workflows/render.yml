@@ -5,6 +5,10 @@ on:
     types: [trigger-render-long]
   workflow_dispatch:
 
+concurrency:
+  group: canva-token-rotation
+  cancel-in-progress: false
+
 jobs:
   # ---------------------------------------------------------------
   # JOB 1: Generate all assets (images/video clips, narration audio,
