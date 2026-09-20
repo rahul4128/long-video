@@ -5,6 +5,7 @@ shot transitions, emphasis, mood and SFX hints. It is intentionally provider
 agnostic so Make.com can later replace/augment it with an LLM director.
 """
 import re
+from storyteller import build_prosody_map
 
 def _words(text):
     return set(re.findall(r"[\w\u0900-\u097F]+", (text or "").lower()))
@@ -23,9 +24,13 @@ def direct_scene(scene, index, total):
     sfx = scene.get("soundEffect")
     if not sfx or sfx == "none":
         sfx = "temple_bell" if devotional and index % 4 == 0 else "none"
+    beat = pattern_break
+    prosody = build_prosody_map(text, beat=beat)
     return {
         "camera": camera,
         "mood": mood,
+        "emotion": prosody["emotion"],
+        "prosody": prosody,
         "transition": "blur_cut" if reveal or climax else ("crossfade" if index % 2 == 0 else "blur_cut"),
         "emphasis": "climax" if climax else "normal",
         "soundEffect": sfx,
