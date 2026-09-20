@@ -27,7 +27,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Static Python syntax check
-        run: python -m py_compile content_qc.py director.py generate_assets.py audio_engine.py qc.py
+        run: python -m py_compile content_qc.py director.py generate_assets.py audio_engine.py qc.py scripts/canva_asset_bridge.py
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v7
@@ -68,7 +68,15 @@ jobs:
           COVERR_API_KEY: ${{ secrets.COVERR_API_KEY }}
           HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
+          CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
+          CANVA_ASSET_BRIDGE_ENABLED: 'true'
         run: python generate_assets.py
+
+      - name: Preserve final thumbnails in Canva
+        env:
+          CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
+          CANVA_ASSET_BRIDGE_ENABLED: 'true'
+        run: python scripts/canva_asset_bridge.py
 
       - name: Upload content QC report
         if: always()
@@ -131,6 +139,7 @@ jobs:
             out/thumbnail_shorts.jpg
             out/metadata.json
             out/content_qc_report.json
+            out/canva_assets.json
           retention-days: 1
 
   # ---------------------------------------------------------------
