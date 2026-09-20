@@ -17,6 +17,7 @@ from director import enrich_scenes
 from sfx_engine import resolve_sound_effect_audio
 from visual_matcher import extract_visual_requirements, candidate_is_accurate
 from content_qc import validate_payload
+from storyteller import build_prosody_map, prepare_storyteller_text
 try:
     from indicf5_engine import generate_indicf5_audio
 except Exception:
@@ -1135,14 +1136,16 @@ async def _generate_edge_chunked_audio(clean_text: str, audio_dest: str) -> list
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
-async def generate_clean_audio(narration: str, audio_dest: str) -> list:
+async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") -> list:
     """Kokoro Hindi TTS -> cinematic pause handling -> Edge fallback.
 
     Kokoro is the default local Hindi voice. Edge-TTS remains the automatic
     fallback so a temporary Kokoro/model/runtime failure does not stop a run.
     """
     async with tts_semaphore:
-        clean_text = _naturalize_text(narration) or "हरि ॐ तत्सत्"
+        original_text = _naturalize_text(narration) or "हरि ॐ तत्सत्"
+        prosody = build_prosody_map(original_text, beat=beat)
+        clean_text = prepare_storyteller_text(original_text)
         engine = os.getenv("AUDIO_TTS_ENGINE", "kokoro").strip().lower()
 
         # Kokoro is primary. audio_engine.py adds real silence after cinematic
@@ -1151,7 +1154,7 @@ async def generate_clean_audio(narration: str, audio_dest: str) -> list:
             if KOKORO_AVAILABLE:
                 try:
                     ok = await asyncio.to_thread(
-                        generate_kokoro_audio, clean_text, audio_dest
+                        generate_kokoro_audio, clean_text, audio_dest, prosody
                     )
                     if ok and os.path.exists(audio_dest):
                         return _fallback_word_timings(clean_text, audio_dest)
@@ -1540,12 +1543,12 @@ async def process():
     for i, scene in enumerate(long_scenes):
         idx = i + 1
         narration = scene.get("text") or scene.get("narration_chunk", "")
-        audio_tasks.append(generate_clean_audio(narration, f"public/audio/chunk_{idx}.mp3"))
+        audio_tasks.append(generate_clean_audio(narration, f"public/audio/chunk_{idx}.mp3", scene.get("director", {}).get("entertainmentBeat", "")))
 
     for i, scene in enumerate(shorts_scenes):
         idx = i + 1
         narration = scene.get("text") or scene.get("narration_chunk", "")
-        audio_tasks.append(generate_clean_audio(narration, f"public/audio/shorts_chunk_{idx}.mp3"))
+        audio_tasks.append(generate_clean_audio(narration, f"public/audio/shorts_chunk_{idx}.mp3", scene.get("director", {}).get("entertainmentBeat", "")))
 
     audio_word_timings = await asyncio.gather(*audio_tasks)
     long_word_timings = audio_word_timings[:len(long_scenes)]
