@@ -96,7 +96,7 @@ shorts_scenes = enrich_scenes(shorts_scenes)
 
 # Complete fallback metadata for a direct workflow_dispatch. repository_dispatch
 # receives the real Make.com payload; manual runs do not have client_payload.
-if not raw_payload:
+if not raw_payload or raw_payload in ("null", "{}"):
     payload = {
         "seo_metadata": {
             "long_video_title": "महाभारत का यह रहस्य आपको चौंका देगा",
