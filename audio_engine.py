@@ -11,7 +11,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from storyteller import build_prosody_map, apply_prosody_map, prepare_storyteller_text
+from storyteller import build_prosody_map, apply_prosody_map, prepare_storyteller_text, PRONUNCIATION_DICTIONARY
 
 KOKORO_AVAILABLE = False
 KOKORO_IMPORT_ERROR = ""
@@ -74,6 +74,13 @@ def _story_profile(chunk: str, index: int, total: int, prosody: dict) -> tuple:
 
     if re.search(r"[!]$", chunk):
         speed = max(speed, 1.00)
+
+    # Sanskrit/Hindi proper nouns get a tiny slowdown so consonant clusters
+    # are not rushed. This is intentionally subtle; it is not a spelling
+    # rewrite and therefore keeps subtitles aligned with the source text.
+    name_speeds = [meta.get("slow", 1.0) for word, meta in PRONUNCIATION_DICTIONARY.items() if word in chunk]
+    if name_speeds:
+        speed = min(speed, min(name_speeds))
 
     # First line gets a slightly more direct delivery; final line is warmer
     # and slower so the CTA does not sound like an abrupt ad read.
