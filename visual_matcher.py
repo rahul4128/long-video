@@ -39,6 +39,8 @@ ATTRIBUTE_ALIASES = {
     "male": {"male", "man", "boy", "पुरुष", "बालक"},
 }
 
+VISUAL_MIN_MATCHES = max(1, int(__import__("os").environ.get("VISUAL_MIN_MATCHES", "2")))
+
 GENERIC_NEGATIVE_FOR_ENTITY = {
     "krishna": {"generic child", "random child", "boy", "girl", "human child", "generic man", "generic woman", "buddha", "buddhist"},
 }
