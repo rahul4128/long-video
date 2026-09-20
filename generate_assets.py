@@ -94,6 +94,54 @@ if not shorts_scenes:
 long_scenes = enrich_scenes(long_scenes)
 shorts_scenes = enrich_scenes(shorts_scenes)
 
+# Complete fallback metadata for a direct workflow_dispatch. repository_dispatch
+# receives the real Make.com payload; manual runs do not have client_payload.
+if not raw_payload:
+    payload = {
+        "seo_metadata": {
+            "long_video_title": "महाभारत का यह रहस्य आपको चौंका देगा",
+            "long_video_description": "Manual Canva Hindi TTS test episode.",
+            "tags": ["महाभारत", "कृष्ण", "हिंदी कथा", "devotional"],
+            "hashtags": ["#महाभारत", "#कृष्ण", "#सनातन"],
+            "thumbnailText": "महाभारत का रहस्य",
+            "titleVariants": [
+                "महाभारत का यह रहस्य आपको चौंका देगा",
+                "कृष्ण से जुड़ा महाभारत का अनसुना रहस्य",
+                "महाभारत की इस बात पर आज भी सवाल क्यों है?"
+            ],
+            "thumbnailConcepts": [
+                "Krishna dramatic close-up with battlefield background",
+                "Ancient battlefield with mysterious glowing object",
+                "Arjuna and Krishna with strong revelation moment"
+            ],
+            "primaryKeyword": "महाभारत रहस्य",
+            "secondaryKeywords": ["कृष्ण", "अर्जुन", "महाभारत कथा", "सनातन", "पौराणिक कथा"],
+            "cta": "अगर आपको ऐसी रोचक कथाएँ पसंद हैं तो चैनल को सब्सक्राइब करें और अपनी राय कमेंट में बताएं।"
+        },
+        "thumbnail": {
+            "thumbnailText": "महाभारत का रहस्य",
+            "imagePrompt": "Lord Krishna and Arjuna on an ancient battlefield, mysterious golden light, cinematic devotional 16:9"
+        },
+        "_meta": {
+            "entertainment_angle": "मशहूर कथा के भीतर छिपे रहस्य को reveal करना",
+            "fun_with_fact_angle": "कहानी के साथ एक स्पष्ट factual payoff",
+            "festival_priority": "low",
+            "festival_angle": "",
+            "content_role": "discovery",
+            "experiment_hypothesis": "मिस्ट्री-फर्स्ट हुक से शुरुआती retention बेहतर हो सकती है",
+            "next_episode_angle": "इसी विषय से जुड़ा एक नया लेकिन अलग रहस्य",
+            "retention_adaptation": "NONE",
+            "experiment_id": "manual-canva-hindi-tts-test",
+            "shorts_funnel_hook": "महाभारत के इस रहस्य का जवाब long video में विस्तार से देखें।",
+            "long_video_continuation": "Shorts का सवाल long video में पूरा factual context देता है।"
+        },
+        "long_video": {"scenes": long_scenes},
+        "shorts": {"scenes": shorts_scenes}
+    }
+    seo_metadata = payload["seo_metadata"]
+    thumbnail_data = payload["thumbnail"]
+    meta_data = payload["_meta"]
+
 CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
 CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "").strip()
