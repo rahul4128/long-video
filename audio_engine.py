@@ -1,9 +1,10 @@
-"""Local-first Hindi TTS engine.
+"""Local-first Hindi TTS engine with storyteller-style prosody.
 
-Uses Kokoro as the primary Hindi narration engine, with cinematic punctuation
-pauses assembled as real silence between short prosody-safe chunks. The caller
-in generate_assets.py keeps Edge-TTS as the automatic fallback.
+Kokoro remains the primary Hindi narration engine. This layer deliberately
+varies pace and silence by storytelling function instead of rendering every
+sentence at one fixed speed/pause. The caller keeps Edge-TTS as the fallback.
 """
+import hashlib
 import os
 import re
 import subprocess
@@ -30,20 +31,13 @@ def _get_pipeline():
 
 
 def _split_cinematic_chunks(text: str) -> list:
-    """Split narration at strong performance boundaries without over-fragmenting it.
-
-    Ellipsis and em-dash are treated as intentional cinematic beats. Sentence
-    punctuation stays attached to the preceding text so Kokoro still receives
-    the punctuation cue and produces its own natural prosody.
-    """
+    """Split at performance boundaries while keeping natural sentence prosody."""
     text = re.sub(r"\s+", " ", (text or "").strip())
     if not text:
         return []
 
     chunks = []
     start = 0
-    # Split after sentence-ending punctuation, ellipsis, or an em-dash.
-    # A dash is kept with the preceding clause so it sounds like a reveal beat.
     for match in re.finditer(r"[।!?]+|…+|—", text):
         end = match.end()
         piece = text[start:end].strip()
@@ -59,28 +53,69 @@ def _split_cinematic_chunks(text: str) -> list:
     return chunks or [text]
 
 
-def _pause_seconds(chunk: str, index: int, total: int) -> float:
-    """Return a cinematic pause after a chunk based on its ending cue."""
-    if index >= total - 1:
-        return 0.0
+def _story_profile(chunk: str, index: int) -> tuple:
+    """Return a restrained speed/pause profile for a human storyteller feel.
 
-    chunk = chunk.rstrip()
-    if chunk.endswith("…"):
-        return max(0.0, float(os.getenv("KOKORO_ELLIPSIS_PAUSE_MS", "360")) / 1000.0)
-    if chunk.endswith("—"):
-        return max(0.0, float(os.getenv("KOKORO_DASH_PAUSE_MS", "260")) / 1000.0)
-    if re.search(r"[!?]$", chunk):
-        return max(0.0, float(os.getenv("KOKORO_EXCLAMATION_PAUSE_MS", "300")) / 1000.0)
-    if chunk.endswith("।"):
-        return max(0.0, float(os.getenv("KOKORO_SENTENCE_PAUSE_MS", "220")) / 1000.0)
-    return max(0.0, float(os.getenv("KOKORO_CLAUSE_PAUSE_MS", "110")) / 1000.0)
+    The variation is deterministic (not random) so renders remain reproducible.
+    It uses lexical and punctuation cues rather than pretending TTS has emotion
+    it cannot reliably express.
+    """
+    lowered = (chunk or "").lower()
+    speed = 1.0
+    pause = None
+
+    # Curiosity / question: slightly slower, then leave room for the viewer.
+    if "?" in chunk or any(token in lowered for token in (
+        "क्यों", "कैसे", "क्या", "रहस्य", "सच", "लेकिन", "मगर"
+    )):
+        speed = 0.94
+        pause = 0.26
+
+    # Revelation / high-stakes words: slow the key sentence without making it
+    # unnaturally theatrical.
+    if any(token in lowered for token in (
+        "अचानक", "चौंक", "खुलासा", "सच्चाई", "असल में", "यही वजह",
+        "रहस्य", "चमत्कार", "सत्य", "reveal", "mystery"
+    )):
+        speed = min(speed, 0.90)
+        pause = max(pause or 0.0, 0.30)
+
+    # Action: a little quicker to create contrast with explanation/reveal.
+    if any(token in lowered for token in (
+        "भागा", "दौड़ा", "युद्ध", "गिरा", "उठा", "पहुंचा", "पहुंचे",
+        "अचानक", "देखा", "मिला", "खुला", "दौड़", "युद्ध"
+    )):
+        speed = max(speed, 1.02)
+
+    # Exclamation gets energy; don't let this override a deliberate reveal.
+    if re.search(r"[!]$", chunk):
+        speed = max(speed, 1.00)
+
+    # Short deterministic micro-variation prevents every chunk from having
+    # exactly the same cadence while remaining reproducible across CI runs.
+    digest = hashlib.sha1(chunk.encode("utf-8")).digest()[0]
+    micro = (-0.012, 0.0, 0.010)[digest % 3]
+    speed = max(0.86, min(1.06, speed + micro))
+
+    if pause is None:
+        if chunk.endswith("…"):
+            pause = 0.36
+        elif chunk.endswith("—"):
+            pause = 0.24
+        elif re.search(r"[!?]$", chunk):
+            pause = 0.22
+        elif chunk.endswith("।"):
+            pause = 0.16
+        else:
+            pause = 0.10
+
+    # Keep pauses short enough that the narration never sounds chopped up.
+    return speed, max(0.07, min(0.42, pause))
 
 
 def _synthesize_chunk(pipeline, text: str, voice: str, speed: float):
     pieces = []
     for result in pipeline(text, voice=voice, speed=speed):
-        # Kokoro's current iterator yields (graphemes, phonemes, audio).
-        # Keep a compatibility fallback for wrappers exposing .audio.
         if isinstance(result, tuple) and len(result) >= 3:
             audio = result[2]
         else:
@@ -93,12 +128,12 @@ def _synthesize_chunk(pipeline, text: str, voice: str, speed: float):
 
 
 def generate_kokoro_audio(text: str, output_path: str) -> bool:
-    """Generate Hindi narration with Kokoro and cinematic punctuation pauses."""
+    """Generate Hindi narration with storyteller-style dynamic pacing."""
     if not KOKORO_AVAILABLE:
         raise RuntimeError("Kokoro is not installed. " + KOKORO_IMPORT_ERROR)
 
     voice = os.getenv("KOKORO_VOICE", "hm_omega")
-    speed = float(os.getenv("KOKORO_SPEED", "0.96"))
+    base_speed = float(os.getenv("KOKORO_SPEED", "0.96"))
     sample_rate = 24000
     pipeline = _get_pipeline()
     chunks = _split_cinematic_chunks(text)
@@ -110,17 +145,22 @@ def generate_kokoro_audio(text: str, output_path: str) -> bool:
     silence_cache = {}
 
     for index, chunk in enumerate(chunks):
+        profile_speed, pause = _story_profile(chunk, index)
+        # KOKORO_SPEED remains the global personality control; the profile is a
+        # bounded multiplier so the new layer never becomes cartoonishly fast.
+        speed = max(0.84, min(1.08, base_speed * profile_speed))
         audio = _synthesize_chunk(pipeline, chunk, voice, speed)
         if audio is None:
             return False
         audio_parts.append(audio)
 
-        pause = _pause_seconds(chunk, index, len(chunks))
-        if pause > 0:
+        if index < len(chunks) - 1:
+            pause_ms = int(round(pause * 1000))
             pause_samples = int(round(pause * sample_rate))
-            # Reuse identical silence arrays to keep concatenation lightweight.
             if pause_samples not in silence_cache:
-                silence_cache[pause_samples] = np.zeros(pause_samples, dtype=audio.dtype)
+                silence_cache[pause_samples] = np.zeros(
+                    pause_samples, dtype=audio.dtype
+                )
             audio_parts.append(silence_cache[pause_samples])
 
     audio = np.concatenate(audio_parts)
