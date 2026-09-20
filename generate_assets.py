@@ -1548,7 +1548,7 @@ async def process():
     for i, scene in enumerate(shorts_scenes):
         idx = i + 1
         narration = scene.get("text") or scene.get("narration_chunk", "")
-        audio_tasks.append(generate_clean_audio(narration, f"public/audio/shorts_chunk_{idx}.mp3", scene.get("director", {}).get("entertainmentBeat", "")))
+        audio_tasks.append(generate_clean_audio(narration, f"public/audio/shorts_chunk_{idx}.mp3", scene.get("director", {}).get("audioBeat", scene.get("director", {}).get("entertainmentBeat", ""))))
 
     audio_word_timings = await asyncio.gather(*audio_tasks)
     long_word_timings = audio_word_timings[:len(long_scenes)]
