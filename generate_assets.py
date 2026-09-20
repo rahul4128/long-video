@@ -1543,7 +1543,7 @@ async def process():
     for i, scene in enumerate(long_scenes):
         idx = i + 1
         narration = scene.get("text") or scene.get("narration_chunk", "")
-        audio_tasks.append(generate_clean_audio(narration, f"public/audio/chunk_{idx}.mp3", scene.get("director", {}).get("entertainmentBeat", "")))
+        audio_tasks.append(generate_clean_audio(narration, f"public/audio/chunk_{idx}.mp3", scene.get("director", {}).get("audioBeat", scene.get("director", {}).get("entertainmentBeat", ""))))
 
     for i, scene in enumerate(shorts_scenes):
         idx = i + 1
