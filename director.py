@@ -24,12 +24,13 @@ def direct_scene(scene, index, total):
     sfx = scene.get("soundEffect")
     if not sfx or sfx == "none":
         sfx = "temple_bell" if devotional and index % 4 == 0 else "none"
-    beat = pattern_break
+    beat = "divine" if devotional and pattern_break == "establish" else pattern_break
     prosody = build_prosody_map(text, beat=beat)
     return {
         "camera": camera,
         "mood": mood,
         "emotion": prosody["emotion"],
+        "audioBeat": beat,
         "prosody": prosody,
         "transition": "blur_cut" if reveal or climax else ("crossfade" if index % 2 == 0 else "blur_cut"),
         "emphasis": "climax" if climax else "normal",
