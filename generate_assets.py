@@ -981,6 +981,56 @@ def generate_multi_shot_ai_images(
 # -------------------------------------------------------------
 from audio_engine import generate_kokoro_audio, KOKORO_AVAILABLE
 
+def _fit_long_narration_to_target(audio_paths: list, word_timings: list, target_seconds: float = 205.0) -> float:
+    """Keep long-form narration inside the production duration target.
+
+    The Make payload can occasionally contain a perfectly valid story whose
+    generated narration is longer than the 150-210s production window. Rather
+    than rendering a >210s file and failing QC, speed the narration uniformly
+    with FFmpeg's atempo filter (pitch-preserving), then scale the word
+    timestamps by the same factor so subtitles stay synchronized.
+    """
+    durations = [get_audio_duration(path) for path in audio_paths if os.path.exists(path)]
+    total = sum(durations)
+    if total <= target_seconds or total <= 0:
+        return total
+
+    factor = min(2.0, max(1.0, total / target_seconds))
+    print(
+        f"🎚️ Long narration is {total:.2f}s; fitting to {target_seconds:.0f}s "
+        f"with pitch-preserving {factor:.3f}x tempo.",
+        flush=True,
+    )
+
+    for path in audio_paths:
+        if not os.path.exists(path):
+            continue
+        temp_path = path + ".fit.mp3"
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", path,
+                "-filter:a", f"atempo={factor:.6f}",
+                "-ar", "24000", "-ac", "1",
+                "-c:a", "libmp3lame", "-q:a", "3",
+                temp_path,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if result.returncode != 0 or not os.path.exists(temp_path):
+            raise RuntimeError(f"Failed to fit narration audio: {path}")
+        os.replace(temp_path, path)
+
+    for timings in word_timings:
+        if not timings:
+            continue
+        for cue in timings:
+            cue["start"] = round(float(cue.get("start", 0)) / factor, 3)
+            cue["end"] = round(float(cue.get("end", 0)) / factor, 3)
+
+    return sum(get_audio_duration(path) for path in audio_paths if os.path.exists(path))
+
+
 def get_audio_duration(file_path: str) -> float:
     cmd = [
         "ffprobe", "-v", "error", "-show_entries", "format=duration",
@@ -1546,6 +1596,12 @@ async def process():
     audio_word_timings = await asyncio.gather(*audio_tasks)
     long_word_timings = audio_word_timings[:len(long_scenes)]
     shorts_word_timings = audio_word_timings[len(long_scenes):]
+
+    # Keep the long-form narration inside the 150-210s production window.
+    # Target 205s here so the per-scene render padding still leaves headroom
+    # for the final Remotion composition without weakening media QC.
+    long_audio_paths = [f"public/audio/chunk_{i + 1}.mp3" for i in range(len(long_scenes))]
+    _fit_long_narration_to_target(long_audio_paths, long_word_timings, target_seconds=205.0)
 
     # 4b. Sound-Effect Layer (BOTH Long video and Shorts now carry an
     # optional soundEffect field - Shorts previously had none at all in the
