@@ -61,33 +61,26 @@ shorts_scenes = shorts_data.get("scenes", []) if isinstance(shorts_data, dict) e
 long_scenes = enrich_scenes(long_scenes)
 shorts_scenes = enrich_scenes(shorts_scenes)
 
-# Fallback test scenes for direct workflow_dispatch testing
+# Fallback test scenes for direct workflow_dispatch testing.
+# Keep workflow_dispatch renders inside the same 2:30-3:30 production gate as
+# real Make payloads. A short two-scene smoke test is not representative and
+# correctly fails media QC, so the manual test payload mirrors the production
+# story length instead of weakening QC.
 if not long_scenes:
     long_scenes = [
-        {
-            "scene_number": 1,
-            "mediaType": "ai_image",
-            "text": "जीवन के हर मोड़ पर हमें कर्म और धर्म का सही मार्ग चुनना होता है।",
-            "imagePrompt": "Lord Krishna in yellow silk robes standing on golden chariot talking to warrior Arjuna on Kurukshetra battlefield, cinematic 16:9, warm divine lighting",
-            "videoSearchQuery": "ancient battlefield dust storm sunset"
-        },
-        {
-            "scene_number": 2,
-            "mediaType": "video",
-            "text": "जब मन में शांति और श्रद्धा होती है तो सभी संशय स्वतः दूर हो जाते हैं।",
-            "imagePrompt": "Ancient Himalayan spiritual temple with glowing diya flames golden light 16:9",
-            "videoSearchQuery": "burning diya temple sacred smoke"
-        }
+        {"scene_number": 1, "mediaType": "ai_image", "text": "कुरुक्षेत्र की धूल में एक सवाल बार-बार उठ रहा था — जब सामने अपना ही परिवार खड़ा हो, तब धर्म किसे कहते हैं? अर्जुन के हाथ कांप रहे थे, लेकिन कृष्ण शांत थे। उस क्षण गीता का उपदेश केवल युद्ध की बात नहीं था, बल्कि निर्णय के उस डर की बात था, जिसे हर इंसान किसी न किसी रूप में जानता है।", "imagePrompt": "Lord Krishna and Arjuna on a golden chariot in Kurukshetra, tense battlefield, cinematic 16:9, divine dawn lighting", "videoSearchQuery": "ancient battlefield chariot dust"},
+        {"scene_number": 2, "mediaType": "video", "text": "कृष्ण ने अर्जुन को तुरंत जीत का वादा नहीं दिया। उन्होंने पहले उसके भ्रम को सामने रखा। यही इस कथा का पहला रोचक मोड़ है — समस्या बाहर के युद्ध से पहले भीतर चल रही थी। अर्जुन को तय करना था कि वह डर के कारण पीछे हटेगा, या अपनी जिम्मेदारी को समझकर आगे बढ़ेगा।", "imagePrompt": "Krishna calmly explaining dharma to Arjuna on chariot, emotional close-up, Kurukshetra, cinematic 16:9", "videoSearchQuery": "Krishna Arjuna chariot battlefield"},
+        {"scene_number": 3, "mediaType": "ai_image", "text": "गीता का संदेश यहीं से गहरा होता है। कृष्ण कहते हैं कि मनुष्य का अधिकार अपने कर्म पर है, केवल उसके परिणाम पर नहीं। सुनने में यह सरल लगता है, लेकिन युद्धभूमि में इसका अर्थ बहुत कठोर था। अर्जुन को परिणाम का डर छोड़कर उस कर्म को देखना था, जिसे वह सही मानकर निभा सकता था।", "imagePrompt": "Krishna teaching Arjuna, symbolic glowing scripture and battlefield horizon, reverent cinematic 16:9", "videoSearchQuery": "ancient scripture temple light"},
+        {"scene_number": 4, "mediaType": "video", "text": "लेकिन यहाँ एक और दिलचस्प बात छिपी है। निष्काम कर्म का अर्थ यह नहीं कि परिणाम की कोई कीमत ही नहीं है। अर्थ यह है कि परिणाम की चिंता निर्णय को इतना कमजोर न कर दे कि सही कर्म ही छूट जाए। इसी वजह से गीता का संदेश आज भी केवल धार्मिक कथा नहीं, बल्कि निर्णय लेने की एक चुनौती जैसा महसूस होता है।", "imagePrompt": "symbolic crossroads with Krishna silhouette, glowing path and battlefield, cinematic mystery mood, 16:9", "videoSearchQuery": "mysterious ancient path sunrise"},
+        {"scene_number": 5, "mediaType": "ai_image", "text": "फिर कथा उस जगह पहुंचती है जहाँ असली बदलाव शुरू होता है। अर्जुन अपने डर को छिपाता नहीं, बल्कि उसे स्वीकार करता है। यही उसकी कमजोरी नहीं, बल्कि सीखने की शुरुआत बनती है। कृष्ण भी उसे केवल सांत्वना नहीं देते — वे उसके सवालों को एक-एक करके चुनौती देते हैं, ताकि फैसला भावुकता से नहीं, समझ से निकले।", "imagePrompt": "Arjuna listening with renewed focus while Krishna speaks, emotional divine light, Kurukshetra, cinematic 16:9", "videoSearchQuery": "warrior listening spiritual teacher"},
+        {"scene_number": 6, "mediaType": "video", "text": "और अब आता है वह विचार, जो पूरी कहानी को पलट देता है। मनुष्य अपने कर्म को नियंत्रित कर सकता है, लेकिन हर परिणाम को नहीं। इसलिए असली स्वतंत्रता हर चीज अपने मुताबिक कर लेने में नहीं, बल्कि अनिश्चित परिणाम के बीच भी सही कदम चुनने में है। यही बात अर्जुन के भीतर धीरे-धीरे डर से स्पष्टता की ओर रास्ता खोलती है।", "imagePrompt": "radiant Krishna revealing universal wisdom to Arjuna, dramatic golden aura, cinematic 16:9", "videoSearchQuery": "divine revelation golden light"},
+        {"scene_number": 7, "mediaType": "video", "text": "कुरुक्षेत्र का युद्ध बहुत पुरानी घटना है, लेकिन इसका सवाल आज भी नया लगता है। नौकरी का कठिन फैसला हो, परिवार की जिम्मेदारी हो या किसी डर के सामने खड़ा होना — परिणाम हमारे हाथ में हमेशा नहीं होता। फिर भी अगला सही कदम चुनना हमारे हाथ में हो सकता है। यही गीता के इस विचार का सबसे व्यावहारिक अर्थ है।", "imagePrompt": "modern person silhouette visually connected to ancient Krishna Arjuna scene, timeless wisdom, cinematic 16:9", "videoSearchQuery": "person reflection sunrise"},
+        {"scene_number": 8, "mediaType": "ai_image", "text": "शायद इसलिए अर्जुन की कहानी सिर्फ युद्धभूमि की कहानी बनकर नहीं रह जाती। उसका असली सवाल है — जब मन डर से भर जाए, तब क्या हम परिणाम के पीछे भागेंगे, या अपने कर्तव्य को समझकर कदम उठाएंगे? यही वह छोटा सा विचार है, जो हजारों साल पुरानी कथा को आज के जीवन से जोड़ देता है।", "imagePrompt": "Krishna and Arjuna silhouetted at sunrise after revelation, peaceful Kurukshetra horizon, cinematic 16:9", "videoSearchQuery": "sunrise ancient battlefield peaceful"}
     ]
 
 if not shorts_scenes:
     shorts_scenes = [
-        {
-            "scene_number": 1,
-            "text": "क्या आप जानते हैं महाभारत का सबसे बड़ा रहस्य क्या था?",
-            "imagePrompt": "Lord Krishna with radiant divine golden aura looking intensely forward, dramatic vertical 9:16",
-            "videoSearchQuery": "burning diya aarti flame"
-        }
+        {"scene_number": 1, "text": "कुरुक्षेत्र में अर्जुन के सामने सबसे बड़ा सवाल जीत या हार नहीं था। सवाल था — जब परिणाम हमारे हाथ में न हो, तब सही कर्म कैसे चुना जाए? कृष्ण का उत्तर आज भी चौंकाता है: परिणाम की चिंता से पहले अपने कर्तव्य को समझो।", "imagePrompt": "Krishna and Arjuna dramatic vertical 9:16, battlefield sunrise", "videoSearchQuery": "Krishna Arjuna chariot"}
     ]
 
 # Re-run the director after fallback scene injection so workflow_dispatch
