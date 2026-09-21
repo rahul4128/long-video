@@ -1031,7 +1031,7 @@ async def _generate_edge_chunked_audio(clean_text: str, audio_dest: str) -> list
     """
     voice = os.getenv("EDGE_TTS_VOICE", "hi-IN-MadhurNeural")
     rate = os.getenv("EDGE_TTS_RATE", "-4%")
-    pitch = os.getenv("EDGE_TTS_PITCH", "0Hz")
+    pitch = os.getenv("EDGE_TTS_PITCH", "+0Hz")
     pause_ms = max(0, int(os.getenv("EDGE_TTS_SENTENCE_PAUSE_MS", "140")))
 
     chunks = [
@@ -1147,7 +1147,7 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") 
             if KOKORO_AVAILABLE:
                 try:
                     ok = await asyncio.to_thread(
-                        generate_kokoro_audio, clean_text, audio_dest, prosody
+                        generate_kokoro_audio, clean_text, audio_dest
                     )
                     if ok and os.path.exists(audio_dest):
                         return _fallback_word_timings(clean_text, audio_dest)
@@ -1182,7 +1182,7 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") 
                     clean_text,
                     voice=os.getenv("EDGE_TTS_VOICE", "hi-IN-MadhurNeural"),
                     rate=os.getenv("EDGE_TTS_RATE", "-4%"),
-                    pitch=os.getenv("EDGE_TTS_PITCH", "0Hz"),
+                    pitch=os.getenv("EDGE_TTS_PITCH", "+0Hz"),
                 )
                 submaker = edge_tts.SubMaker()
                 audio_bytes = bytearray()
