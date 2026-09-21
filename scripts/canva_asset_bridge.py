@@ -19,6 +19,7 @@ import requests
 
 API = "https://api.canva.com/rest/v1"
 
+
 def upload(path, token, name):
     data = Path(path).read_bytes()
     headers = {
@@ -32,15 +33,22 @@ def upload(path, token, name):
     r.raise_for_status()
     job_id = r.json()["job"]["id"]
     for _ in range(30):
-        s = requests.get(f"{API}/asset-uploads/{job_id}", headers={"Authorization": f"Bearer {token}"}, timeout=30)
+        s = requests.get(
+            f"{API}/asset-uploads/{job_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
         s.raise_for_status()
         job = s.json()["job"]
         if job.get("status") == "success":
             return job.get("asset", {})
         if job.get("status") == "failed":
-            raise RuntimeError(job.get("error", {}).get("message", "Canva asset upload failed"))
+            raise RuntimeError(
+                job.get("error", {}).get("message", "Canva asset upload failed")
+            )
         time.sleep(2)
     raise TimeoutError(f"Canva asset upload timed out: {name}")
+
 
 def main():
     token = os.getenv("CANVA_ACCESS_TOKEN", "").strip()
@@ -59,7 +67,12 @@ def main():
     # user's Canva library with dozens of intermediate renders.
     extra = os.getenv("CANVA_UPLOAD_SCENE_ASSETS", "").lower() == "true"
     if extra:
-        candidates.extend((str(p), f"Scene Visual {p.stem}") for p in sorted(Path("public/images").glob("*")) if p.is_file()][:3])
+        scene_assets = [
+            (str(p), f"Scene Visual {p.stem}")
+            for p in sorted(Path("public/images").glob("*"))
+            if p.is_file()
+        ][:3]
+        candidates.extend(scene_assets)
 
     results = []
     for path, name in candidates:
@@ -67,16 +80,25 @@ def main():
             continue
         try:
             asset = upload(path, token, name)
-            results.append({"path": path, "name": name, "assetId": asset.get("id"), "type": asset.get("type")})
+            results.append({
+                "path": path,
+                "name": name,
+                "assetId": asset.get("id"),
+                "type": asset.get("type"),
+            })
         except Exception as exc:
             print(f"::warning::Canva upload failed for {path}: {exc}")
 
     Path("out").mkdir(exist_ok=True)
-    Path("out/canva_assets.json").write_text(json.dumps({
-        "enabled": True,
-        "assets": results,
-        "note": "Canva API-supported asset bridge; final video remains rendered by Remotion."
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    Path("out/canva_assets.json").write_text(
+        json.dumps({
+            "enabled": True,
+            "assets": results,
+            "note": "Canva API-supported asset bridge; final video remains rendered by Remotion.",
+        }, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
 
 if __name__ == "__main__":
     try:
