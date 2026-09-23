@@ -18,25 +18,21 @@ interface SceneProps {
   format?: 'long' | 'shorts';
 }
 
-// Normalizes a scene's visual assets into one ordered shot list, whether it
-// came from the new `shots` field or the legacy single-asset fields (a
-// video filename, one image filename, or an array of image filenames). This
-// is what lets Scene.tsx treat "a scene made of 2 stock clips + 1 AI image
-// top-up" and "an old scene with a single imageFileName" through the exact
-// same rendering path below.
 function resolveShots(scene: SceneItem): Shot[] {
-  if (scene.shots && scene.shots.length > 0) {
-    return scene.shots;
-  }
+  if (scene.shots && scene.shots.length > 0) return scene.shots;
   const legacy = scene.imageFileName;
-  if (Array.isArray(legacy)) {
-    return legacy.map((file) => ({ type: 'image', file }));
-  }
-  if (legacy) {
-    return [{ type: legacy.endsWith('.mp4') ? 'video' : 'image', file: legacy }];
-  }
+  if (Array.isArray(legacy)) return legacy.map((file) => ({ type: 'image', file }));
+  if (legacy) return [{ type: legacy.endsWith('.mp4') ? 'video' : 'image', file: legacy }];
   return [];
 }
+
+const PARTICLES = Array.from({ length: 22 }, (_, i) => ({
+  left: ((i * 47) % 97) + 1,
+  top: ((i * 71) % 91) + 4,
+  size: 2 + ((i * 13) % 5),
+  drift: ((i % 5) - 2) * 18,
+  speed: 0.45 + (i % 4) * 0.08,
+}));
 
 export const Scene: React.FC<SceneProps> = ({
   scene,
@@ -47,126 +43,92 @@ export const Scene: React.FC<SceneProps> = ({
   const frame = useCurrentFrame();
   const safeDuration = Math.max(30, durationInFrames);
   const fadeDuration = 12;
+  const animation = scene.director?.animation;
+  const intensity = Math.max(0, Math.min(1, animation?.intensity ?? 0.22));
+  const type = animation?.type ?? (scene.director?.camera === 'slow_push' ? 'slow_push' : direction);
+  const vignette = animation?.vignette ?? 0.38;
 
-  // Smooth Cross-fade in/out of the WHOLE scene (unchanged from before).
   let opacity = 1;
-  if (frame < fadeDuration) {
-    opacity = frame / fadeDuration;
-  } else if (frame > safeDuration - fadeDuration) {
-    opacity = (safeDuration - frame) / fadeDuration;
-  }
+  if (frame < fadeDuration) opacity = frame / fadeDuration;
+  else if (frame > safeDuration - fadeDuration) opacity = (safeDuration - frame) / fadeDuration;
   opacity = Math.max(0, Math.min(1, opacity));
 
-  // Long and Shorts renders write narration audio under different filename prefixes
-  // (see generate_assets.py: chunk_N.mp3 vs shorts_chunk_N.mp3) - pick the right one.
   const narrationFile =
     format === 'shorts'
       ? `audio/shorts_chunk_${scene.scene_number}.mp3`
       : `audio/chunk_${scene.scene_number}.mp3`;
-
-  // generate_assets.py always guarantees this file exists whenever soundEffect !== 'none'
-  // (a fresh Freesound CC0 clip, a checked-in library fallback, or silence as a last
-  // resort) - see resolve_sound_effect_audio(). Both long-video AND shorts payloads
-  // now carry a soundEffect field (shorts used to have none at all).
   const effectFile = `audio/effects/${format}_effect_${scene.scene_number}.mp3`;
 
-  // --- Multi-shot bookkeeping. THIS IS THE ACTUAL FIX for "stock clip ends,
-  // freezes, narration keeps going": generate_assets.py now sizes the number
-  // of shots (video and/or image, freely mixed) to cover the scene's full
-  // duration - see fetch_video_shots_for_duration() in generate_assets.py -
-  // so a scene's total on-screen time is never longer than its combined
-  // shots. Fully backward-compatible: a single-shot scene (shots.length ===
-  // 1) behaves exactly as the old single-asset code did, just with a
-  // slightly punchier Ken Burns range.
   const shots = resolveShots(scene);
   const shotCount = Math.max(1, shots.length);
   const shotDurationFrames = safeDuration / shotCount;
   const transitionFrames = Math.max(4, Math.min(15, shotDurationFrames / 3));
-
   const currentShot = Math.min(shotCount - 1, Math.floor(frame / shotDurationFrames));
   const nextShot = Math.min(shotCount - 1, currentShot + 1);
   const intoCurrentShot = frame - currentShot * shotDurationFrames;
   const framesToNextShotBoundary = (currentShot + 1) * shotDurationFrames - frame;
-
-  // 0 = fully on currentShot, 1 = fully on nextShot - only ramps up in the
-  // last `transitionFrames` of a shot, and only when there IS a distinct
-  // next shot to cross into.
   const crossFade =
     nextShot !== currentShot && framesToNextShotBoundary < transitionFrames
       ? 1 - Math.max(0, framesToNextShotBoundary) / transitionFrames
       : 0;
 
-  // Cut-style variety: alternate a plain cross-dissolve with a quick
-  // "blur cut" (a short gaussian-blur dip through the transition, like a
-  // fast rack-focus) between shot boundaries, driven by the outgoing shot's
-  // OWN transition hint when generate_assets.py provided one, falling back
-  // to a deterministic alternation by shot index so this never depends on
-  // upstream data being present. Doing this at every cut - not just plain
-  // cross-fade every time - is what keeps a multi-shot scene from feeling
-  // monotonous/workflow-generated.
   const outgoingTransition = shots[currentShot]?.transition;
-  const useBlurCut = outgoingTransition ? outgoingTransition === 'blur_cut' : currentShot % 2 === 1;
-  const blurPx = useBlurCut ? interpolate(crossFade, [0, 0.5, 1], [0, 6, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }) : 0;
+  const useBlurCut =
+    outgoingTransition === 'blur_cut' ||
+    (!outgoingTransition && (animation?.transition === 'blur_cut' || currentShot % 3 === 1));
+  const blurPx = useBlurCut
+    ? interpolate(crossFade, [0, 0.5, 1], [0, 4 + intensity * 4, 0], {
+        extrapolateLeft: 'clamp',
+        extrapolateRight: 'clamp',
+      })
+    : 0;
 
-  // A short "whoosh" swipe under each cut - cheap, high-impact cinematic
-  // sound design that plain cross-fades alone don't sell. Shared single
-  // asset (fetched once per run by generate_assets.py's resolve_sound_effect_audio
-  // call for "transition_whoosh"), reused at every boundary in both formats.
-  // Skipped entirely for single-shot scenes (no cut happens).
-  const shotBoundaryFrames: number[] = [];
-  if (shotCount > 1) {
-    for (let i = 1; i < shotCount; i++) {
-      shotBoundaryFrames.push(Math.round(i * shotDurationFrames));
-    }
-  }
+  const localProgress = Math.max(0, Math.min(1, intoCurrentShot / Math.max(1, shotDurationFrames)));
+  const baseScale =
+    type === 'climax_push'
+      ? 1.0 + intensity * 0.14 * localProgress
+      : type === 'slow_pull'
+        ? 1.10 - intensity * 0.08 * localProgress
+        : type === 'parallax'
+          ? 1.06 + intensity * 0.06 * localProgress
+          : 1.02 + intensity * 0.08 * localProgress;
 
-  // Ken Burns motion for a single sub-shot, alternating direction both by
-  // the scene's own parity (the `direction` prop, set by the parent
-  // composition) AND by shot index within the scene, so a multi-shot scene
-  // doesn't repeat the exact same pan on every sub-shot. Now applies to
-  // VIDEO shots too (previously video got zero motion treatment at all -
-  // a plain static crop) so real footage reads as intentionally framed
-  // rather than just dropped in.
-  const kenBurnsTransform = (localFrame: number, shotIndex: number): string => {
-    const planned = scene.director?.camera;
-    const shotDirection: 'zoom-in' | 'pan-right' =
-      planned === 'pan_left'
-        ? 'pan-right'
-        : planned === 'pan_right'
-          ? 'pan-right'
-          : planned === 'slow_push'
-            ? 'zoom-in'
-            : shotIndex % 2 === 0 ? direction : direction === 'zoom-in' ? 'pan-right' : 'zoom-in';
-    const scale =
-      shotDirection === 'zoom-in'
-        ? interpolate(localFrame, Array.of(0, shotDurationFrames), Array.of(1.0, scene.director?.camera === 'slow_push' ? 1.10 : 1.18), {
-            extrapolateLeft: 'clamp',
-            extrapolateRight: 'clamp',
-          })
-        : interpolate(localFrame, Array.of(0, shotDurationFrames), Array.of(1.15, 1.05), {
-            extrapolateLeft: 'clamp',
-            extrapolateRight: 'clamp',
-          });
-    const translateX =
-      shotDirection === 'pan-right'
-        ? interpolate(localFrame, Array.of(0, shotDurationFrames), Array.of(scene.director?.camera === 'pan_left' ? 30 : -30, scene.director?.camera === 'pan_left' ? -30 : 30), {
-            extrapolateLeft: 'clamp',
-            extrapolateRight: 'clamp',
-          })
-        : 0;
-    return `scale(${scale}) translateX(${translateX}px)`;
+  const motion = type === 'pan_left' ? -1 : type === 'pan_right' ? 1 : 0;
+  const pan = motion * interpolate(localProgress, [0, 1], [-34, 34], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  }) * intensity / 0.34;
+  const parallaxX = type === 'parallax'
+    ? Math.sin(localProgress * Math.PI) * 22 * intensity
+    : 0;
+  const parallaxY = type === 'parallax'
+    ? Math.cos(localProgress * Math.PI) * -10 * intensity
+    : 0;
+  const shakeAmount = (animation?.cameraShake ?? 0) * 100;
+  const shakeX = shakeAmount ? Math.sin(frame * 1.7) * shakeAmount : 0;
+  const shakeY = shakeAmount ? Math.cos(frame * 1.45) * shakeAmount * 0.65 : 0;
+
+  const transform = (layer: number) => {
+    const layerDepth = layer === 0 ? 1 : 1 + layer * 0.012;
+    return `translate3d(${pan + parallaxX + shakeX}px,${parallaxY + shakeY}px,0) scale(${baseScale * layerDepth})`;
   };
 
-  // Renders one shot (video or image) with Ken Burns + the given opacity.
-  // `loop` is passed on <Video> as a safety net only: generate_assets.py
-  // sizes shots so each clip's own duration should already cover its
-  // allotted window, but a slightly-short clip (an odd rounding, or a
-  // shorter-than-expected stock hit) now loops seamlessly within its OWN
-  // (much smaller, evenly-split) window instead of freezing - a world
-  // better fallback than the old "one clip, no loop, freezes for the rest
-  // of the whole scene" behavior.
-  const renderShot = (shot: Shot, shotIndex: number, localFrame: number, shotOpacity: number) => {
-    const transform = kenBurnsTransform(localFrame, shotIndex);
+  const shotBoundaryFrames: number[] = [];
+  for (let i = 1; i < shotCount; i++) shotBoundaryFrames.push(Math.round(i * shotDurationFrames));
+
+  const renderShot = (
+    shot: Shot,
+    shotIndex: number,
+    shotLocalFrame: number,
+    shotOpacity: number,
+    layer = 0,
+  ) => {
+    const layerProgress = Math.max(0, Math.min(1, shotLocalFrame / Math.max(1, shotDurationFrames)));
+    const layerTransform =
+      layer === 0
+        ? transform(0)
+        : `translate3d(${(layerProgress * 26 - 13) * intensity * (layer % 2 ? 1 : -1)}px,0,0) scale(${baseScale * (1 + layer * 0.015)})`;
+
     if (shot.type === 'video') {
       return (
         <Video
@@ -175,7 +137,7 @@ export const Scene: React.FC<SceneProps> = ({
             width: '100%',
             height: '100%',
             objectFit: 'cover',
-            transform,
+            transform: layerTransform,
             opacity: shotOpacity,
           }}
           muted
@@ -190,30 +152,26 @@ export const Scene: React.FC<SceneProps> = ({
           width: '100%',
           height: '100%',
           objectFit: 'cover',
-          transform,
+          transform: layerTransform,
           opacity: shotOpacity,
         }}
       />
     );
   };
 
-  return (
-    <AbsoluteFill style={{ opacity, overflow: 'hidden', backgroundColor: '#000000' }}>
-      {/* 1. Scene Audio Track (100% synchronized voiceover per scene) */}
-      <Audio
-        src={staticFile(narrationFile)}
-        volume={1.0}
-      />
+  const activeShot = shots[currentShot];
+  const shouldParallax = type === 'parallax' && activeShot?.type === 'image';
+  const particlesOn = Boolean(animation?.particles);
+  const lightRaysOn = Boolean(animation?.lightRays);
 
-      {/* 1b. Optional Sound-Effect Layer (temple bell / shankh / om drone / flute swell) */}
+  return (
+    <AbsoluteFill style={{ opacity, overflow: 'hidden', backgroundColor: '#000' }}>
+      <Audio src={staticFile(narrationFile)} volume={1.0} />
+
       {scene.soundEffect && scene.soundEffect !== 'none' && (
-        <Audio
-          src={staticFile(effectFile)}
-          volume={0.35}
-        />
+        <Audio src={staticFile(effectFile)} volume={0.30} />
       )}
 
-      {/* 1c. Transition whoosh at every shot cut inside this scene */}
       {shotBoundaryFrames.map((boundaryFrame) => (
         <Sequence
           key={boundaryFrame}
@@ -221,29 +179,93 @@ export const Scene: React.FC<SceneProps> = ({
           durationInFrames={Math.round(transitionFrames * 1.5)}
           layout="none"
         >
-          <Audio src={staticFile('audio/sfx/whoosh.mp3')} volume={0.25} />
+          <Audio src={staticFile('audio/sfx/whoosh.mp3')} volume={0.20} />
         </Sequence>
       ))}
 
-      {/* 2. Visual Layer: cross-fades (plain, or a quick blur-cut for
-          variety) between an ordered list of video/image sub-shots sized by
-          generate_assets.py to cover this scene's full duration. */}
       <AbsoluteFill style={{ filter: blurPx > 0 ? `blur(${blurPx}px)` : undefined }}>
+        {shouldParallax && (
+          <AbsoluteFill style={{ transform: 'scale(1.10)', opacity: 0.32 }}>
+            {renderShot(activeShot, currentShot, intoCurrentShot, 1, 1)}
+          </AbsoluteFill>
+        )}
         <AbsoluteFill>
-          {renderShot(shots[currentShot] ?? { type: 'image', file: '' }, currentShot, intoCurrentShot, 1 - crossFade)}
+          {activeShot
+            ? renderShot(activeShot, currentShot, intoCurrentShot, 1 - crossFade)
+            : null}
         </AbsoluteFill>
-        {crossFade > 0 && nextShot !== currentShot && (
+        {crossFade > 0 && nextShot !== currentShot && shots[nextShot] && (
           <AbsoluteFill>
             {renderShot(shots[nextShot], nextShot, 0, crossFade)}
           </AbsoluteFill>
         )}
       </AbsoluteFill>
 
-      {/* 3. Subtle Cinematic Vignette */}
+      {lightRaysOn && (
+        <AbsoluteFill
+          style={{
+            opacity: 0.08 + intensity * 0.10,
+            background:
+              'conic-gradient(from 210deg at 50% 0%, transparent 0deg, rgba(255,220,140,0.28) 22deg, transparent 48deg, rgba(255,220,140,0.18) 72deg, transparent 105deg)',
+            mixBlendMode: 'screen',
+          }}
+        />
+      )}
+
+      {particlesOn && (
+        <AbsoluteFill>
+          {PARTICLES.map((particle, i) => {
+            const y = (particle.top + ((frame * particle.speed) / 18)) % 104 - 2;
+            const x = particle.left + Math.sin(frame / 28 + i) * particle.drift / 10;
+            const pulse = 0.35 + 0.30 * Math.sin(frame / 12 + i);
+            return (
+              <div
+                key={i}
+                style={{
+                  position: 'absolute',
+                  left: `${x}%`,
+                  top: `${y}%`,
+                  width: particle.size,
+                  height: particle.size,
+                  borderRadius: '50%',
+                  background: 'rgba(255,224,160,0.75)',
+                  opacity: pulse,
+                  boxShadow: '0 0 8px rgba(255,210,120,0.55)',
+                }}
+              />
+            );
+          })}
+        </AbsoluteFill>
+      )}
+
+      {animation?.overlay === 'fact' && scene.narration_chunk && (
+        <AbsoluteFill style={{ justifyContent: 'flex-start', alignItems: 'flex-start', padding: format === 'shorts' ? 36 : 64 }}>
+          <div
+            style={{
+              maxWidth: format === 'shorts' ? '82%' : '58%',
+              padding: '10px 16px',
+              borderRadius: 14,
+              background: 'rgba(8,8,12,0.55)',
+              border: '1px solid rgba(255,215,120,0.35)',
+              color: '#FFEAA7',
+              fontSize: format === 'shorts' ? 22 : 25,
+              fontWeight: 700,
+              opacity: interpolate(localProgress, [0, 0.12, 0.82, 1], [0, 1, 1, 0], {
+                extrapolateLeft: 'clamp',
+                extrapolateRight: 'clamp',
+              }),
+            }}
+          >
+            {scene.entertainmentBeat === 'reveal' || scene.director?.animation?.overlay === 'fact'
+              ? 'रहस्य का संकेत'
+              : 'महत्वपूर्ण तथ्य'}
+          </div>
+        </AbsoluteFill>
+      )}
+
       <AbsoluteFill
         style={{
-          background:
-            'radial-gradient(circle at center, transparent 60%, rgba(0, 0, 0, 0.45) 100%)',
+          background: `radial-gradient(circle at center, transparent 54%, rgba(0,0,0,${Math.max(0.18, Math.min(0.65, vignette))}) 100%)`,
         }}
       />
     </AbsoluteFill>
