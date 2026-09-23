@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Optional Canva asset bridge.
 
-Canva Connect can upload images/videos to the user's Canva library. It cannot
-programmatically search Canva's internal stock catalog or invoke Canva's
-built-in Hindi TTS/AI-video UI. This bridge therefore uses Canva where the
-public API actually supports it: preserve the best generated visual assets in
-Canva for premium/manual finishing without making the render dependent on an
-unsupported API.
+The bridge uses Canva only where the public API supports a deterministic
+library upload. The Remotion render remains the production source of truth;
+the final outputs are additionally preserved in the user's Canva library so
+they can be opened for manual finishing/branding without a re-upload step.
 """
 import base64
 import json
@@ -29,10 +27,10 @@ def upload(path, token, name):
             "name_base64": base64.b64encode(name.encode("utf-8")).decode("ascii")
         }),
     }
-    r = requests.post(f"{API}/asset-uploads", headers=headers, data=data, timeout=120)
+    r = requests.post(f"{API}/asset-uploads", headers=headers, data=data, timeout=180)
     r.raise_for_status()
     job_id = r.json()["job"]["id"]
-    for _ in range(30):
+    for _ in range(60):
         s = requests.get(
             f"{API}/asset-uploads/{job_id}",
             headers={"Authorization": f"Bearer {token}"},
@@ -60,18 +58,20 @@ def main():
         return
 
     candidates = [
+        ("out/final_video.mp4", "Devotional Long Video — Final"),
+        ("out/final_video_shorts.mp4", "Devotional Shorts — Final"),
         ("out/thumbnail.jpg", "Devotional Long Video Thumbnail"),
-        ("out/thumbnail_shorts.jpg", "Devotional Shorts Thumbnail"),
+        ("out/thumbnail_shorts_final.jpg", "Devotional Shorts Thumbnail"),
     ]
-    # Upload only the final thumbnails by default: this avoids filling the
-    # user's Canva library with dozens of intermediate renders.
-    extra = os.getenv("CANVA_UPLOAD_SCENE_ASSETS", "").lower() == "true"
-    if extra:
+
+    # Optional scene preservation remains opt-in so the Canva library is not
+    # flooded with every intermediate image.
+    if os.getenv("CANVA_UPLOAD_SCENE_ASSETS", "").lower() == "true":
         scene_assets = [
             (str(p), f"Scene Visual {p.stem}")
             for p in sorted(Path("public/images").glob("*"))
             if p.is_file()
-        ][:3]
+        ][:6]
         candidates.extend(scene_assets)
 
     results = []
@@ -86,6 +86,7 @@ def main():
                 "assetId": asset.get("id"),
                 "type": asset.get("type"),
             })
+            print(f"Canva asset ready: {name}", flush=True)
         except Exception as exc:
             print(f"::warning::Canva upload failed for {path}: {exc}")
 
@@ -94,7 +95,11 @@ def main():
         json.dumps({
             "enabled": True,
             "assets": results,
-            "note": "Canva API-supported asset bridge; final video remains rendered by Remotion.",
+            "note": (
+                "Final Remotion outputs are preserved in Canva for optional "
+                "manual finishing/branding. The production render remains "
+                "deterministic and does not depend on Canva editing."
+            ),
         }, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
