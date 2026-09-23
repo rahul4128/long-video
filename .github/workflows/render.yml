@@ -351,11 +351,81 @@ jobs:
           path: out
       - name: Run automated media QC
         run: python qc.py
-      - name: Upload QC report
+      - name: Upload QC report + visual contact sheets
         uses: actions/upload-artifact@v7
         with:
           name: media-qc-${{ github.run_id }}
-          path: out/qc_report.json
+          path: |
+            out/qc_report.json
+            out/qc_contact_long.jpg
+            out/qc_contact_shorts.jpg
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ---------------------------------------------------------------
+  # JOB 4d: Preserve final rendered outputs in Canva after QC.
+  # ---------------------------------------------------------------
+  canva-finish:
+    needs: media-qc
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Install Canva dependencies
+        run: pip install requests pynacl
+
+      - name: Authenticate Canva and rotate refresh token
+        env:
+          CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
+          CANVA_CLIENT_SECRET: ${{ secrets.CANVA_CLIENT_SECRET }}
+          CANVA_REFRESH_TOKEN: ${{ secrets.CANVA_REFRESH_TOKEN }}
+          REPO_SECRETS_TOKEN: ${{ secrets.REPO_SECRETS_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/refresh_canva_token.py
+
+      - name: Download final long video
+        uses: actions/download-artifact@v7
+        with:
+          name: devotional-video-${{ github.run_id }}
+          path: out
+
+      - name: Download final Shorts video
+        uses: actions/download-artifact@v7
+        with:
+          name: devotional-shorts-${{ github.run_id }}
+          path: out
+
+      - name: Download final long thumbnail
+        uses: actions/download-artifact@v7
+        with:
+          name: devotional-thumbnail-${{ github.run_id }}
+          path: out
+
+      - name: Download final Shorts thumbnail
+        uses: actions/download-artifact@v7
+        with:
+          name: devotional-thumbnail-shorts-${{ github.run_id }}
+          path: out
+
+      - name: Preserve final outputs in Canva
+        env:
+          CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
+          CANVA_ASSET_BRIDGE_ENABLED: 'true'
+          CANVA_UPLOAD_SCENE_ASSETS: 'false'
+        run: python scripts/canva_asset_bridge.py
+
+      - name: Upload Canva preservation report
+        uses: actions/upload-artifact@v7
+        with:
+          name: canva-assets-${{ github.run_id }}
+          path: out/canva_assets.json
+          if-no-files-found: ignore
           retention-days: 14
 
   # ---------------------------------------------------------------
@@ -367,7 +437,7 @@ jobs:
   # title/description/thumbnail and files each into its playlist.
   # ---------------------------------------------------------------
   publish-and-notify:
-    needs: [generate-assets, render-long, render-shorts, render-thumbnail, render-thumbnail-shorts, media-qc]
+    needs: [generate-assets, render-long, render-shorts, render-thumbnail, render-thumbnail-shorts, media-qc, canva-finish]
     runs-on: ubuntu-latest
     permissions:
       contents: write
