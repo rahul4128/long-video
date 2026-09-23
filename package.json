@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "scripts": {
     "start": "remotion preview src/index.ts",
-    "build": "remotion render DevotionalComposition out/final_video.mp4"
+    "build": "remotion render DevotionalComposition out/final_video.mp4",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.0",
