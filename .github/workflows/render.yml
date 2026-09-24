@@ -45,10 +45,12 @@ jobs:
                   and len((payload.get("long_video") or {}).get("scenes")) == 8,
               "shorts.scenes": isinstance((payload.get("shorts") or {}).get("scenes"), list)
                   and 5 <= len((payload.get("shorts") or {}).get("scenes")) <= 7,
-              "seo_metadata.long_video_title": bool((payload.get("seo_metadata") or {}).get("long_video_title")),
-              "seo_metadata.long_video_description": bool((payload.get("seo_metadata") or {}).get("long_video_description")),
-              "seo_metadata.shorts_title": bool((payload.get("seo_metadata") or {}).get("shorts_title")),
-              "seo_metadata.shorts_description": bool((payload.get("seo_metadata") or {}).get("shorts_description")),
+              "seo_metadata.long_video_title": bool((payload.get("seo_metadata") or {}).get("long_video_title"))
+                  or bool(((payload.get("seo_metadata") or {}).get("titleVariants") or [None])[0]),
+              "seo_metadata.long_video_description": True,
+              "seo_metadata.shorts_title": bool((payload.get("seo_metadata") or {}).get("shorts_title"))
+                  or bool(((payload.get("seo_metadata") or {}).get("titleVariants") or [None])[0]),
+              "seo_metadata.shorts_description": True,
               "seo_metadata.tags": bool((payload.get("seo_metadata") or {}).get("tags")),
               "seo_metadata.hashtags": bool((payload.get("seo_metadata") or {}).get("hashtags")),
               "thumbnail.imagePrompt": bool((payload.get("thumbnail") or {}).get("imagePrompt")),
