@@ -25,6 +25,8 @@ def validate_payload(payload):
     secondary_keywords = seo.get("secondaryKeywords") or []
     cta = _norm(seo.get("cta"))
     meta = payload.get("_meta") or {}
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "").strip()
+    strict_dispatch = event_name == "repository_dispatch"
     entertainment_angle = _norm(meta.get("entertainment_angle"))
     festival_priority = _norm(meta.get("festival_priority"))
     fun_with_fact_angle = _norm(meta.get("fun_with_fact_angle"))
@@ -41,6 +43,34 @@ def validate_payload(payload):
         issues.append("no_long_video_scenes")
     if not title:
         issues.append("missing_title")
+
+    # repository_dispatch is the production path. Never allow a malformed
+    # Make.com payload to fall through to the local/manual fallback scenes.
+    # The GitHub workflow can still be manually smoke-tested with
+    # workflow_dispatch, but production dispatches must contain the actual
+    # repaired story and packaging fields.
+    if strict_dispatch:
+        shorts = (payload.get("shorts") or {}).get("scenes") or []
+        source_reference = str(payload.get("source_reference") or "").strip()
+        arc = payload.get("arc") or {}
+        thumb_prompt = str((thumbnail.get("imagePrompt") or "")).strip()
+        shorts_thumb = payload.get("shorts_thumbnail") or {}
+        shorts_thumb_prompt = str((shorts_thumb.get("imagePrompt") or "")).strip()
+        if not isinstance(long_video.get("scenes"), list) or len(scenes) != 8:
+            issues.append("production_long_video_must_have_exactly_8_scenes")
+        if not isinstance(shorts, list) or not (5 <= len(shorts) <= 7):
+            issues.append("production_shorts_must_have_5_to_7_scenes")
+        if not source_reference:
+            issues.append("missing_source_reference")
+        if not isinstance(arc, dict) or not arc.get("arc_id"):
+            issues.append("missing_arc")
+        if not thumb_prompt:
+            issues.append("missing_thumbnail_imagePrompt")
+        if not shorts_thumb_prompt:
+            issues.append("missing_shorts_thumbnail_imagePrompt")
+        for i, scene in enumerate(shorts if isinstance(shorts, list) else []):
+            if not isinstance(scene, dict) or not str(scene.get("imagePrompt") or "").strip():
+                issues.append(f"shorts_scene_{i+1}_missing_imagePrompt")
     if len(title) > 100:
         warnings.append("title_over_100_chars")
     if not description:
