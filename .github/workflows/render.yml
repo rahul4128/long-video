@@ -26,6 +26,56 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Production dispatch payload preflight
+        if: ${{ github.event_name == 'repository_dispatch' }}
+        env:
+          DISPATCH_PAYLOAD: ${{ toJson(github.event.client_payload) }}
+        run: |
+          python - <<'PY'
+          import json, os, sys
+          raw = os.environ.get("DISPATCH_PAYLOAD", "").strip()
+          try:
+              payload = json.loads(raw) if raw else {}
+          except Exception as exc:
+              print(f"::error::Invalid repository_dispatch client_payload JSON: {exc}")
+              sys.exit(1)
+
+          checks = {
+              "long_video.scenes": isinstance((payload.get("long_video") or {}).get("scenes"), list)
+                  and len((payload.get("long_video") or {}).get("scenes")) == 8,
+              "shorts.scenes": isinstance((payload.get("shorts") or {}).get("scenes"), list)
+                  and 5 <= len((payload.get("shorts") or {}).get("scenes")) <= 7,
+              "seo_metadata.long_video_title": bool((payload.get("seo_metadata") or {}).get("long_video_title")),
+              "seo_metadata.long_video_description": bool((payload.get("seo_metadata") or {}).get("long_video_description")),
+              "seo_metadata.shorts_title": bool((payload.get("seo_metadata") or {}).get("shorts_title")),
+              "seo_metadata.shorts_description": bool((payload.get("seo_metadata") or {}).get("shorts_description")),
+              "seo_metadata.tags": bool((payload.get("seo_metadata") or {}).get("tags")),
+              "seo_metadata.hashtags": bool((payload.get("seo_metadata") or {}).get("hashtags")),
+              "thumbnail.imagePrompt": bool((payload.get("thumbnail") or {}).get("imagePrompt")),
+              "thumbnail.thumbnailText": bool((payload.get("thumbnail") or {}).get("thumbnailText")),
+              "shorts_thumbnail.imagePrompt": bool((payload.get("shorts_thumbnail") or {}).get("imagePrompt")),
+              "shorts_thumbnail.thumbnailText": bool((payload.get("shorts_thumbnail") or {}).get("thumbnailText")),
+              "source_reference": bool(payload.get("source_reference")),
+              "arc.arc_id": bool((payload.get("arc") or {}).get("arc_id")),
+          }
+
+          missing = [name for name, ok in checks.items() if not ok]
+          shorts = (payload.get("shorts") or {}).get("scenes") or []
+          missing += [
+              f"shorts.scenes[{i}].imagePrompt"
+              for i, scene in enumerate(shorts)
+              if not isinstance(scene, dict) or not scene.get("imagePrompt")
+          ]
+
+          if missing:
+              print("::error::MAKE_MAPPING_ERROR — production payload is incomplete.")
+              print("::error::Missing/invalid fields: " + ", ".join(missing))
+              print("::error::Do not start asset generation until Make module 40 maps the repaired module 313 output.")
+              sys.exit(1)
+
+          print("Production dispatch payload preflight: PASS")
+          PY
+
       - name: Static Python syntax check
         run: python -m py_compile content_qc.py director.py generate_assets.py audio_engine.py qc.py scripts/canva_asset_bridge.py
 
