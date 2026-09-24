@@ -56,10 +56,14 @@ shorts_data = payload.get("shorts", {})
 long_scenes = long_data.get("scenes", []) if isinstance(long_data, dict) else []
 shorts_scenes = shorts_data.get("scenes", []) if isinstance(shorts_data, dict) else []
 
-# AI-Director planning is deterministic and works even when the upstream
-# payload has no director fields.
-long_scenes = enrich_scenes(long_scenes)
-shorts_scenes = enrich_scenes(shorts_scenes)
+# Normalize upstream null/malformed scene values before any director
+# processing. Make.com may legitimately send "scenes": null on an empty/new
+# run; enrich_scenes() expects a list and cannot call len(None).
+# The fallback scenes below are the production-safe smoke/default payload.
+if not isinstance(long_scenes, list):
+    long_scenes = []
+if not isinstance(shorts_scenes, list):
+    shorts_scenes = []
 
 # Fallback test scenes for direct workflow_dispatch testing.
 # Keep workflow_dispatch renders inside the same 2:30-3:30 production gate as
@@ -83,8 +87,8 @@ if not shorts_scenes:
         {"scene_number": 1, "text": "कुरुक्षेत्र में अर्जुन के सामने सबसे बड़ा सवाल जीत या हार नहीं था। सवाल था — जब परिणाम हमारे हाथ में न हो, तब सही कर्म कैसे चुना जाए? कृष्ण का उत्तर आज भी चौंकाता है: परिणाम की चिंता से पहले अपने कर्तव्य को समझो।", "imagePrompt": "Krishna and Arjuna dramatic vertical 9:16, battlefield sunrise", "videoSearchQuery": "Krishna Arjuna chariot"}
     ]
 
-# Re-run the director after fallback scene injection so workflow_dispatch
-# test renders receive exactly the same production metadata as normal runs.
+# Run the director only after fallback injection. This also fixes
+# repository_dispatch payloads where Make.com sends scenes=null.
 long_scenes = enrich_scenes(long_scenes)
 shorts_scenes = enrich_scenes(shorts_scenes)
 
