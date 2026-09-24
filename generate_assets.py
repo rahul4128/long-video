@@ -1486,7 +1486,36 @@ def build_chapters_block(scenes: list) -> str:
 # 6. MASTER EXECUTION PIPELINE
 # -------------------------------------------------------------
 async def process():
-    content_report = validate_payload(payload)
+    # Manual workflow_dispatch runs intentionally use the built-in smoke-test
+    # scenes above. Production repository_dispatch runs must validate the
+    # actual Make.com payload and must never silently substitute those scenes.
+    validation_payload = payload
+    if os.environ.get("GITHUB_EVENT_NAME", "").strip() == "workflow_dispatch" and not payload:
+        validation_payload = {
+            "long_video": {"scenes": long_scenes},
+            "shorts": {"scenes": shorts_scenes},
+            "seo_metadata": {
+                "long_video_title": "Devotional Long Video",
+                "long_video_description": "Manual workflow_dispatch smoke test.",
+                "shorts_title": "Devotional Shorts",
+                "shorts_description": "Manual workflow_dispatch smoke test.",
+                "tags": ["devotional", "hinduism", "spirituality"],
+                "hashtags": ["#devotional", "#spirituality"],
+            },
+            "thumbnail": {
+                "imagePrompt": "Devotional Krishna Arjuna cinematic thumbnail, 16:9",
+                "thumbnailText": "Devotional Wisdom",
+            },
+            "shorts_thumbnail": {
+                "imagePrompt": "Devotional Krishna Arjuna cinematic thumbnail, vertical 9:16",
+                "thumbnailText": "Devotional Wisdom",
+            },
+            "source_reference": "Manual workflow_dispatch smoke test",
+            "arc": {"arc_id": "manual-smoke-test"},
+            "_meta": {},
+        }
+
+    content_report = validate_payload(validation_payload)
     with open("out/content_qc_report.json", "w", encoding="utf-8") as f:
         json.dump(content_report, f, ensure_ascii=False, indent=2)
     print(f"🧪 Content QC: {len(content_report['issues'])} blocking issue(s), {len(content_report['warnings'])} warning(s).", flush=True)
