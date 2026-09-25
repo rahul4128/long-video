@@ -51,8 +51,6 @@ def validate_payload(payload):
     # repaired story and packaging fields.
     if strict_dispatch:
         shorts = (payload.get("shorts") or {}).get("scenes") or []
-        source_reference = str(payload.get("source_reference") or "").strip()
-        arc = payload.get("arc") or {}
         thumb_prompt = str((thumbnail.get("imagePrompt") or "")).strip()
         shorts_thumb = payload.get("shorts_thumbnail") or {}
         shorts_thumb_prompt = str((shorts_thumb.get("imagePrompt") or "")).strip()
@@ -60,10 +58,6 @@ def validate_payload(payload):
             issues.append("production_long_video_scenes_must_be_non_empty")
         if not isinstance(shorts, list) or not shorts:
             issues.append("production_shorts_scenes_must_be_non_empty")
-        if not source_reference:
-            issues.append("missing_source_reference")
-        if not isinstance(arc, dict) or not arc.get("arc_id"):
-            issues.append("missing_arc")
         if not thumb_prompt:
             issues.append("missing_thumbnail_imagePrompt")
         if not shorts_thumb_prompt:
@@ -91,26 +85,6 @@ def validate_payload(payload):
         warnings.append("secondary_keywords_should_be_5_to_10")
     if not cta:
         warnings.append("missing_story_specific_cta")
-    if not entertainment_angle:
-        warnings.append("missing_entertainment_angle")
-    if not fun_with_fact_angle:
-        warnings.append("missing_fun_with_fact_angle")
-    if festival_priority in ("high", "medium") and not meta.get("festival_angle"):
-        warnings.append("festival_priority_without_festival_angle")
-    if content_role not in ("discovery", "retention", "conversion", "loyalty", "authority"):
-        warnings.append("missing_or_invalid_content_role")
-    if not experiment_hypothesis:
-        warnings.append("missing_experiment_hypothesis")
-    if not next_episode_angle:
-        warnings.append("missing_viewer_journey_next_episode")
-    if not retention_adaptation:
-        warnings.append("missing_retention_adaptation")
-    if not experiment_id:
-        warnings.append("missing_experiment_id")
-    if not shorts_funnel_hook:
-        warnings.append("missing_shorts_funnel_hook")
-    if not long_video_continuation:
-        warnings.append("missing_long_video_continuation")
     if cta and not any(token in cta for token in ("सब्सक्राइब", "subscribe", "कमेंट", "comment", "share", "शेयर")):
         warnings.append("cta_has_no_engagement_or_subscribe_signal")
     if scenes:
@@ -168,14 +142,6 @@ def validate_payload(payload):
         "issues": issues,
         "sceneCount": len(scenes),
         "hasHindi": any(DEVANAGARI.search(str(s.get("text") or "")) for s in scenes),
-        "entertainmentAngle": entertainment_angle,
-        "festivalPriority": festival_priority,
-        "funWithFactAngle": fun_with_fact_angle,
-        "contentRole": content_role,
-        "retentionAdaptation": retention_adaptation,
-        "experimentId": experiment_id,
-        "shortsFunnelHook": shorts_funnel_hook,
-        "longVideoContinuation": long_video_continuation,
     }
     return report
 
