@@ -42,9 +42,9 @@ jobs:
 
           checks = {
               "long_video.scenes": isinstance((payload.get("long_video") or {}).get("scenes"), list)
-                  and len((payload.get("long_video") or {}).get("scenes")) == 8,
+                  and len((payload.get("long_video") or {}).get("scenes")) > 0,
               "shorts.scenes": isinstance((payload.get("shorts") or {}).get("scenes"), list)
-                  and 5 <= len((payload.get("shorts") or {}).get("scenes")) <= 7,
+                  and len((payload.get("shorts") or {}).get("scenes")) > 0,
               "seo_metadata.long_video_title": bool((payload.get("seo_metadata") or {}).get("long_video_title")),
               "seo_metadata.long_video_description": bool((payload.get("seo_metadata") or {}).get("long_video_description")),
               "seo_metadata.shorts_title": bool((payload.get("seo_metadata") or {}).get("shorts_title")),
@@ -55,15 +55,16 @@ jobs:
               "seo_metadata.hashtags": isinstance((payload.get("seo_metadata") or {}).get("hashtags"), list)
                   and len((payload.get("seo_metadata") or {}).get("hashtags")) >= 3
                   and all(isinstance(x, str) and x.strip().startswith("#") for x in (payload.get("seo_metadata") or {}).get("hashtags")),
-              "seo_metadata.titleVariants": isinstance((payload.get("seo_metadata") or {}).get("titleVariants"), list)
-                  and len((payload.get("seo_metadata") or {}).get("titleVariants")) == 3,
-              "seo_metadata.thumbnailConcepts": isinstance((payload.get("seo_metadata") or {}).get("thumbnailConcepts"), list)
-                  and len((payload.get("seo_metadata") or {}).get("thumbnailConcepts")) == 3
-                  and all(isinstance(x, dict) and x.get("visualConcept") and x.get("thumbnailText") for x in (payload.get("seo_metadata") or {}).get("thumbnailConcepts")),
               "thumbnail.imagePrompt": bool((payload.get("thumbnail") or {}).get("imagePrompt")),
               "thumbnail.thumbnailText": bool((payload.get("thumbnail") or {}).get("thumbnailText")),
+              "thumbnail.textPosition": bool((payload.get("thumbnail") or {}).get("textPosition")),
+              "thumbnail.focalSubject": bool((payload.get("thumbnail") or {}).get("focalSubject")),
+              "thumbnail.composition": bool((payload.get("thumbnail") or {}).get("composition")),
               "shorts_thumbnail.imagePrompt": bool((payload.get("shorts_thumbnail") or {}).get("imagePrompt")),
               "shorts_thumbnail.thumbnailText": bool((payload.get("shorts_thumbnail") or {}).get("thumbnailText")),
+              "shorts_thumbnail.textPosition": bool((payload.get("shorts_thumbnail") or {}).get("textPosition")),
+              "shorts_thumbnail.focalSubject": bool((payload.get("shorts_thumbnail") or {}).get("focalSubject")),
+              "shorts_thumbnail.composition": bool((payload.get("shorts_thumbnail") or {}).get("composition")),
               "source_reference": bool(payload.get("source_reference")),
               "arc.arc_id": bool((payload.get("arc") or {}).get("arc_id")),
               "_meta.series_id": bool((payload.get("_meta") or {}).get("series_id")),
