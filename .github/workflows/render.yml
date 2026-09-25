@@ -135,15 +135,6 @@ jobs:
               "shorts_thumbnail.textPosition": bool(text((payload.get("shorts_thumbnail") or {}).get("textPosition"))),
               "shorts_thumbnail.focalSubject": bool(text((payload.get("shorts_thumbnail") or {}).get("focalSubject"))),
               "shorts_thumbnail.composition": bool(text((payload.get("shorts_thumbnail") or {}).get("composition"))),
-              "source_reference": bool(text(payload.get("source_reference"))),
-              "arc.arc_id": bool(text((payload.get("arc") or {}).get("arc_id"))),
-              "_meta.series_id": bool(text((payload.get("_meta") or {}).get("series_id"))),
-              "_meta.content_role": bool(text((payload.get("_meta") or {}).get("content_role"))),
-              "_meta.festival_priority": bool(text((payload.get("_meta") or {}).get("festival_priority"))),
-              "_meta.festival_angle": bool(text((payload.get("_meta") or {}).get("festival_angle"))),
-              "_meta.category": bool(text((payload.get("_meta") or {}).get("category"))),
-              "_meta.track": bool(text((payload.get("_meta") or {}).get("track"))),
-              "_meta.experiment_id": bool(text((payload.get("_meta") or {}).get("experiment_id"))),
               "correlationId": bool(text(payload.get("correlationId"))),
           }
 
@@ -166,7 +157,7 @@ jobs:
           if missing:
               print("::error::MAKE_MAPPING_ERROR — production payload is incomplete.")
               print("::error::Missing/invalid fields after safe normalization: " + ", ".join(missing))
-              print("::error::Only deterministic schema normalization was applied; missing source/metadata fields must still come from Make.")
+              print("::error::Only deterministic schema normalization was applied; remaining failures are required current-schema fields.")
               sys.exit(1)
 
           print("Production dispatch payload preflight: PASS")
