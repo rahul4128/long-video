@@ -32,7 +32,8 @@ jobs:
           DISPATCH_PAYLOAD: ${{ toJson(github.event.client_payload) }}
         run: |
           python - <<'PY'
-          import json, os, sys
+          import json, os, re, sys
+
           raw = os.environ.get("DISPATCH_PAYLOAD", "").strip()
           try:
               payload = json.loads(raw) if raw else {}
@@ -40,64 +41,134 @@ jobs:
               print(f"::error::Invalid repository_dispatch client_payload JSON: {exc}")
               sys.exit(1)
 
+          def text(value):
+              return str(value or "").strip()
+
+          def as_list(value, prefix_hash=False):
+              if isinstance(value, list):
+                  items = value
+              elif isinstance(value, str):
+                  items = re.split(r"[,\\n;|]+", value)
+              else:
+                  items = []
+              out = []
+              for item in items:
+                  item = text(item)
+                  if not item:
+                      continue
+                  if prefix_hash and not item.startswith("#"):
+                      item = "#" + item.lstrip("#")
+                  out.append(item)
+              return out
+
+          seo = payload.get("seo_metadata")
+          if not isinstance(seo, dict):
+              seo = {}
+              payload["seo_metadata"] = seo
+
+          # New 1+1 packaging: accept Make's string form as well as arrays.
+          seo["tags"] = as_list(seo.get("tags"))
+          seo["hashtags"] = as_list(seo.get("hashtags"), prefix_hash=True)
+
+          # New thumbnail schema keeps one thumbnail object per format.
+          # If the hook text is omitted, derive a deterministic short hook from
+          # the already-approved title instead of inventing new content.
+          for key, title_key in (("thumbnail", "long_video_title"), ("shorts_thumbnail", "shorts_title")):
+              item = payload.get(key)
+              if not isinstance(item, dict):
+                  item = {}
+                  payload[key] = item
+              if not text(item.get("thumbnailText")):
+                  title = text(seo.get(title_key))
+                  words = re.findall(r"[^\\s]+", title)
+                  item["thumbnailText"] = " ".join(words[:5]).strip()
+
+          # New dynamic scene schema: imagePrompt is optional when visuals or
+          # description already provide the visual brief. Build it deterministically
+          # from the supplied scene data; never invent story facts.
+          for group in ("long_video", "shorts"):
+              block = payload.get(group)
+              if not isinstance(block, dict):
+                  continue
+              scenes = block.get("scenes")
+              if not isinstance(scenes, list):
+                  continue
+              for scene in scenes:
+                  if not isinstance(scene, dict) or text(scene.get("imagePrompt")):
+                      continue
+                  visuals = scene.get("visuals")
+                  if isinstance(visuals, list):
+                      visuals = ", ".join(text(v) for v in visuals if text(v))
+                  if text(visuals):
+                      scene["imagePrompt"] = text(visuals)
+                  elif text(scene.get("description")):
+                      scene["imagePrompt"] = text(scene["description"])
+
+          # Persist the normalized payload for every later step in this job.
+          normalized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+          env_file = os.environ["GITHUB_ENV"]
+          with open(env_file, "a", encoding="utf-8") as f:
+              f.write("DISPATCH_PAYLOAD<<MAKE_NORMALIZED_PAYLOAD\n")
+              f.write(normalized)
+              f.write("\nMAKE_NORMALIZED_PAYLOAD\n")
+
           checks = {
               "long_video.scenes": isinstance((payload.get("long_video") or {}).get("scenes"), list)
                   and len((payload.get("long_video") or {}).get("scenes")) > 0,
               "shorts.scenes": isinstance((payload.get("shorts") or {}).get("scenes"), list)
                   and len((payload.get("shorts") or {}).get("scenes")) > 0,
-              "seo_metadata.long_video_title": bool((payload.get("seo_metadata") or {}).get("long_video_title")),
-              "seo_metadata.long_video_description": bool((payload.get("seo_metadata") or {}).get("long_video_description")),
-              "seo_metadata.shorts_title": bool((payload.get("seo_metadata") or {}).get("shorts_title")),
-              "seo_metadata.shorts_description": bool((payload.get("seo_metadata") or {}).get("shorts_description")),
-              "seo_metadata.tags": isinstance((payload.get("seo_metadata") or {}).get("tags"), list)
-                  and len((payload.get("seo_metadata") or {}).get("tags")) >= 5
-                  and all(isinstance(x, str) and x.strip() for x in (payload.get("seo_metadata") or {}).get("tags")),
-              "seo_metadata.hashtags": isinstance((payload.get("seo_metadata") or {}).get("hashtags"), list)
-                  and len((payload.get("seo_metadata") or {}).get("hashtags")) >= 3
-                  and all(isinstance(x, str) and x.strip().startswith("#") for x in (payload.get("seo_metadata") or {}).get("hashtags")),
-              "thumbnail.imagePrompt": bool((payload.get("thumbnail") or {}).get("imagePrompt")),
-              "thumbnail.thumbnailText": bool((payload.get("thumbnail") or {}).get("thumbnailText")),
-              "thumbnail.textPosition": bool((payload.get("thumbnail") or {}).get("textPosition")),
-              "thumbnail.focalSubject": bool((payload.get("thumbnail") or {}).get("focalSubject")),
-              "thumbnail.composition": bool((payload.get("thumbnail") or {}).get("composition")),
-              "shorts_thumbnail.imagePrompt": bool((payload.get("shorts_thumbnail") or {}).get("imagePrompt")),
-              "shorts_thumbnail.thumbnailText": bool((payload.get("shorts_thumbnail") or {}).get("thumbnailText")),
-              "shorts_thumbnail.textPosition": bool((payload.get("shorts_thumbnail") or {}).get("textPosition")),
-              "shorts_thumbnail.focalSubject": bool((payload.get("shorts_thumbnail") or {}).get("focalSubject")),
-              "shorts_thumbnail.composition": bool((payload.get("shorts_thumbnail") or {}).get("composition")),
-              "source_reference": bool(payload.get("source_reference")),
-              "arc.arc_id": bool((payload.get("arc") or {}).get("arc_id")),
-              "_meta.series_id": bool((payload.get("_meta") or {}).get("series_id")),
-              "_meta.content_role": bool((payload.get("_meta") or {}).get("content_role")),
-              "_meta.festival_priority": bool((payload.get("_meta") or {}).get("festival_priority")),
-              "_meta.festival_angle": bool((payload.get("_meta") or {}).get("festival_angle")),
-              "_meta.category": bool((payload.get("_meta") or {}).get("category")),
-              "_meta.track": bool((payload.get("_meta") or {}).get("track")),
-              "_meta.experiment_id": bool((payload.get("_meta") or {}).get("experiment_id")),
-              "correlationId": bool(payload.get("correlationId")),
+              "seo_metadata.long_video_title": bool(text(seo.get("long_video_title"))),
+              "seo_metadata.long_video_description": bool(text(seo.get("long_video_description"))),
+              "seo_metadata.shorts_title": bool(text(seo.get("shorts_title"))),
+              "seo_metadata.shorts_description": bool(text(seo.get("shorts_description"))),
+              "seo_metadata.tags": len(seo["tags"]) >= 5,
+              "seo_metadata.hashtags": len(seo["hashtags"]) >= 3,
+              "thumbnail.imagePrompt": bool(text((payload.get("thumbnail") or {}).get("imagePrompt"))),
+              "thumbnail.thumbnailText": bool(text((payload.get("thumbnail") or {}).get("thumbnailText"))),
+              "thumbnail.textPosition": bool(text((payload.get("thumbnail") or {}).get("textPosition"))),
+              "thumbnail.focalSubject": bool(text((payload.get("thumbnail") or {}).get("focalSubject"))),
+              "thumbnail.composition": bool(text((payload.get("thumbnail") or {}).get("composition"))),
+              "shorts_thumbnail.imagePrompt": bool(text((payload.get("shorts_thumbnail") or {}).get("imagePrompt"))),
+              "shorts_thumbnail.thumbnailText": bool(text((payload.get("shorts_thumbnail") or {}).get("thumbnailText"))),
+              "shorts_thumbnail.textPosition": bool(text((payload.get("shorts_thumbnail") or {}).get("textPosition"))),
+              "shorts_thumbnail.focalSubject": bool(text((payload.get("shorts_thumbnail") or {}).get("focalSubject"))),
+              "shorts_thumbnail.composition": bool(text((payload.get("shorts_thumbnail") or {}).get("composition"))),
+              "source_reference": bool(text(payload.get("source_reference"))),
+              "arc.arc_id": bool(text((payload.get("arc") or {}).get("arc_id"))),
+              "_meta.series_id": bool(text((payload.get("_meta") or {}).get("series_id"))),
+              "_meta.content_role": bool(text((payload.get("_meta") or {}).get("content_role"))),
+              "_meta.festival_priority": bool(text((payload.get("_meta") or {}).get("festival_priority"))),
+              "_meta.festival_angle": bool(text((payload.get("_meta") or {}).get("festival_angle"))),
+              "_meta.category": bool(text((payload.get("_meta") or {}).get("category"))),
+              "_meta.track": bool(text((payload.get("_meta") or {}).get("track"))),
+              "_meta.experiment_id": bool(text((payload.get("_meta") or {}).get("experiment_id"))),
+              "correlationId": bool(text(payload.get("correlationId"))),
           }
 
           missing = [name for name, ok in checks.items() if not ok]
+
           shorts = (payload.get("shorts") or {}).get("scenes") or []
           missing += [
               f"shorts.scenes[{i}].imagePrompt"
               for i, scene in enumerate(shorts)
-              if not isinstance(scene, dict) or not scene.get("imagePrompt")
+              if not isinstance(scene, dict) or not text(scene.get("imagePrompt"))
           ]
+
           long_scenes = (payload.get("long_video") or {}).get("scenes") or []
           missing += [
               f"long_video.scenes[{i}].imagePrompt"
               for i, scene in enumerate(long_scenes)
-              if not isinstance(scene, dict) or not scene.get("imagePrompt")
+              if not isinstance(scene, dict) or not text(scene.get("imagePrompt"))
           ]
 
           if missing:
               print("::error::MAKE_MAPPING_ERROR — production payload is incomplete.")
-              print("::error::Missing/invalid fields: " + ", ".join(missing))
-              print("::error::Do not start asset generation until the Make payload passes the final validation gate.")
+              print("::error::Missing/invalid fields after safe normalization: " + ", ".join(missing))
+              print("::error::Only deterministic schema normalization was applied; missing source/metadata fields must still come from Make.")
               sys.exit(1)
 
           print("Production dispatch payload preflight: PASS")
+          print(f"Normalized tags={len(seo['tags'])}, hashtags={len(seo['hashtags'])}, longScenes={len(long_scenes)}, shortScenes={len(shorts)}")
           PY
 
       - name: Static Python syntax check
