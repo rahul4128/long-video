@@ -48,7 +48,7 @@ jobs:
               if isinstance(value, list):
                   items = value
               elif isinstance(value, str):
-                  items = re.split(r"[,\\n;|]+", value)
+                  items = re.split(r"[,\n;|]+", value)
               else:
                   items = []
               out = []
@@ -80,7 +80,7 @@ jobs:
                   payload[key] = item
               if not text(item.get("thumbnailText")):
                   title = text(seo.get(title_key))
-                  words = re.findall(r"[^\\s]+", title)
+                  words = re.findall(r"[^\s]+", title)
                   item["thumbnailText"] = " ".join(words[:5]).strip()
 
           # New dynamic scene schema: imagePrompt is optional when visuals or
