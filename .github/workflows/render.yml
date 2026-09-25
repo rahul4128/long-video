@@ -45,20 +45,35 @@ jobs:
                   and len((payload.get("long_video") or {}).get("scenes")) == 8,
               "shorts.scenes": isinstance((payload.get("shorts") or {}).get("scenes"), list)
                   and 5 <= len((payload.get("shorts") or {}).get("scenes")) <= 7,
-              "seo_metadata.long_video_title": bool((payload.get("seo_metadata") or {}).get("long_video_title"))
-                  or bool(((payload.get("seo_metadata") or {}).get("titleVariants") or [None])[0]),
-              "seo_metadata.long_video_description": True,
-              "seo_metadata.shorts_title": bool((payload.get("seo_metadata") or {}).get("shorts_title"))
-                  or bool(((payload.get("seo_metadata") or {}).get("titleVariants") or [None])[0]),
-              "seo_metadata.shorts_description": True,
-              "seo_metadata.tags": bool((payload.get("seo_metadata") or {}).get("tags")),
-              "seo_metadata.hashtags": bool((payload.get("seo_metadata") or {}).get("hashtags")),
+              "seo_metadata.long_video_title": bool((payload.get("seo_metadata") or {}).get("long_video_title")),
+              "seo_metadata.long_video_description": bool((payload.get("seo_metadata") or {}).get("long_video_description")),
+              "seo_metadata.shorts_title": bool((payload.get("seo_metadata") or {}).get("shorts_title")),
+              "seo_metadata.shorts_description": bool((payload.get("seo_metadata") or {}).get("shorts_description")),
+              "seo_metadata.tags": isinstance((payload.get("seo_metadata") or {}).get("tags"), list)
+                  and len((payload.get("seo_metadata") or {}).get("tags")) >= 5
+                  and all(isinstance(x, str) and x.strip() for x in (payload.get("seo_metadata") or {}).get("tags")),
+              "seo_metadata.hashtags": isinstance((payload.get("seo_metadata") or {}).get("hashtags"), list)
+                  and len((payload.get("seo_metadata") or {}).get("hashtags")) >= 3
+                  and all(isinstance(x, str) and x.strip().startswith("#") for x in (payload.get("seo_metadata") or {}).get("hashtags")),
+              "seo_metadata.titleVariants": isinstance((payload.get("seo_metadata") or {}).get("titleVariants"), list)
+                  and len((payload.get("seo_metadata") or {}).get("titleVariants")) == 3,
+              "seo_metadata.thumbnailConcepts": isinstance((payload.get("seo_metadata") or {}).get("thumbnailConcepts"), list)
+                  and len((payload.get("seo_metadata") or {}).get("thumbnailConcepts")) == 3
+                  and all(isinstance(x, dict) and x.get("visualConcept") and x.get("thumbnailText") for x in (payload.get("seo_metadata") or {}).get("thumbnailConcepts")),
               "thumbnail.imagePrompt": bool((payload.get("thumbnail") or {}).get("imagePrompt")),
               "thumbnail.thumbnailText": bool((payload.get("thumbnail") or {}).get("thumbnailText")),
               "shorts_thumbnail.imagePrompt": bool((payload.get("shorts_thumbnail") or {}).get("imagePrompt")),
               "shorts_thumbnail.thumbnailText": bool((payload.get("shorts_thumbnail") or {}).get("thumbnailText")),
               "source_reference": bool(payload.get("source_reference")),
               "arc.arc_id": bool((payload.get("arc") or {}).get("arc_id")),
+              "_meta.series_id": bool((payload.get("_meta") or {}).get("series_id")),
+              "_meta.content_role": bool((payload.get("_meta") or {}).get("content_role")),
+              "_meta.festival_priority": bool((payload.get("_meta") or {}).get("festival_priority")),
+              "_meta.festival_angle": bool((payload.get("_meta") or {}).get("festival_angle")),
+              "_meta.category": bool((payload.get("_meta") or {}).get("category")),
+              "_meta.track": bool((payload.get("_meta") or {}).get("track")),
+              "_meta.experiment_id": bool((payload.get("_meta") or {}).get("experiment_id")),
+              "correlationId": bool(payload.get("correlationId")),
           }
 
           missing = [name for name, ok in checks.items() if not ok]
@@ -68,11 +83,17 @@ jobs:
               for i, scene in enumerate(shorts)
               if not isinstance(scene, dict) or not scene.get("imagePrompt")
           ]
+          long_scenes = (payload.get("long_video") or {}).get("scenes") or []
+          missing += [
+              f"long_video.scenes[{i}].imagePrompt"
+              for i, scene in enumerate(long_scenes)
+              if not isinstance(scene, dict) or not scene.get("imagePrompt")
+          ]
 
           if missing:
               print("::error::MAKE_MAPPING_ERROR — production payload is incomplete.")
               print("::error::Missing/invalid fields: " + ", ".join(missing))
-              print("::error::Do not start asset generation until Make module 40 maps the repaired module 313 output.")
+              print("::error::Do not start asset generation until the Make payload passes the final validation gate.")
               sys.exit(1)
 
           print("Production dispatch payload preflight: PASS")
