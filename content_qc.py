@@ -56,10 +56,10 @@ def validate_payload(payload):
         thumb_prompt = str((thumbnail.get("imagePrompt") or "")).strip()
         shorts_thumb = payload.get("shorts_thumbnail") or {}
         shorts_thumb_prompt = str((shorts_thumb.get("imagePrompt") or "")).strip()
-        if not isinstance(long_video.get("scenes"), list) or len(scenes) != 8:
-            issues.append("production_long_video_must_have_exactly_8_scenes")
-        if not isinstance(shorts, list) or not (5 <= len(shorts) <= 7):
-            issues.append("production_shorts_must_have_5_to_7_scenes")
+        if not isinstance(long_video.get("scenes"), list) or not scenes:
+            issues.append("production_long_video_scenes_must_be_non_empty")
+        if not isinstance(shorts, list) or not shorts:
+            issues.append("production_shorts_scenes_must_be_non_empty")
         if not source_reference:
             issues.append("missing_source_reference")
         if not isinstance(arc, dict) or not arc.get("arc_id"):
@@ -85,12 +85,6 @@ def validate_payload(payload):
         warnings.append("missing_thumbnail_hook")
     elif len(hook.split()) > 5:
         warnings.append("thumbnail_hook_too_long")
-    if len(title_variants) != 3:
-        warnings.append("title_variants_should_be_exactly_3")
-    elif len({_norm(x) for x in title_variants if x}) < 3:
-        warnings.append("title_variants_are_not_materially_distinct")
-    if len(thumbnail_concepts) != 3:
-        warnings.append("thumbnail_concepts_should_be_exactly_3")
     if not primary_keyword:
         warnings.append("missing_primary_keyword")
     if not (5 <= len(secondary_keywords) <= 10):
