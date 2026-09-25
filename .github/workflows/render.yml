@@ -106,6 +106,8 @@ jobs:
 
           # Persist the normalized payload for every later step in this job.
           normalized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+          with open(".github_dispatch_payload.json", "w", encoding="utf-8") as f:
+              f.write(normalized)
           env_file = os.environ["GITHUB_ENV"]
           with open(env_file, "a", encoding="utf-8") as f:
               f.write("DISPATCH_PAYLOAD<<MAKE_NORMALIZED_PAYLOAD\n")
@@ -205,7 +207,6 @@ jobs:
 
       - name: Generate Unified Assets (4K B-Roll + FLUX.1 + Voiceover)
         env:
-          DISPATCH_PAYLOAD: ${{ toJson(github.event.client_payload) }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -215,7 +216,12 @@ jobs:
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
           CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
           CANVA_ASSET_BRIDGE_ENABLED: 'true'
-        run: python generate_assets.py
+        run: |
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            DISPATCH_PAYLOAD="$(cat .github_dispatch_payload.json)" python generate_assets.py
+          else
+            DISPATCH_PAYLOAD='${{ toJson(github.event.client_payload) }}' python generate_assets.py
+          fi
 
       - name: Preserve final thumbnails in Canva
         env:
