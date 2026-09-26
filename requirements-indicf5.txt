@@ -1,6 +1,9 @@
 # Optional higher-quality IndicF5 backend.
 # Install only when AUDIO_TTS_ENGINE=indicf5 is desired.
+# NOTE: torchcodec is intentionally NOT installed. Its prebuilt .so must match
+# the exact torch build and FFmpeg libs, and on the GitHub runner it failed with
+# "Could not load this library: libtorchcodec_image.so". indicf5_engine.py
+# loads audio with soundfile instead, so torchcodec is not needed.
 git+https://github.com/ai4bharat/IndicF5.git
 transformers==4.50.0
 torch
-torchcodec

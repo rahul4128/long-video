@@ -17,10 +17,35 @@ from pathlib import Path
 
 _model = None
 _lock = threading.Lock()  # the model is not thread-safe; scenes run in parallel
+_audio_patched = False
+
+
+def _patch_torchaudio_load():
+    """torchaudio >= 2.9 routes torchaudio.load() through torchcodec, whose
+    prebuilt .so must match the exact torch build + FFmpeg libs. On the GitHub
+    runner that failed with "Could not load this library: libtorchcodec_image.so",
+    so every scene silently fell back to Edge-TTS. IndicF5 only needs
+    torchaudio.load() to read the reference WAV, so read it with soundfile
+    (already installed) and return the same (tensor[channels, frames], sr)."""
+    global _audio_patched
+    if _audio_patched:
+        return
+    import numpy as np
+    import soundfile as sf
+    import torch
+    import torchaudio
+
+    def _sf_load(path, *args, **kwargs):
+        data, sr = sf.read(str(path), dtype="float32", always_2d=True)  # (frames, ch)
+        return torch.from_numpy(np.ascontiguousarray(data.T)), sr
+
+    torchaudio.load = _sf_load
+    _audio_patched = True
 
 
 def _load_model():
     global _model
+    _patch_torchaudio_load()
     if _model is None:
         from transformers import AutoModel
         repo = os.getenv("INDICF5_MODEL", "ai4bharat/IndicF5")

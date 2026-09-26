@@ -1223,9 +1223,9 @@ async def _generate_edge_chunked_audio(clean_text: str, audio_dest: str) -> list
         concat_list = os.path.join(work_dir, "concat.txt")
         with open(concat_list, "w", encoding="utf-8") as f:
             for index, path in enumerate(chunk_paths):
-                f.write(f"file '{os.path.abspath(path)}'\\n")
+                f.write(f"file '{os.path.abspath(path)}'\n")
                 if index < len(chunk_paths) - 1:
-                    f.write(f"file '{os.path.abspath(silence)}'\\n")
+                    f.write(f"file '{os.path.abspath(silence)}'\n")
 
         normalize = subprocess.run(
             [
@@ -1274,9 +1274,15 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") 
                     if ok and os.path.exists(audio_dest):
                         return _fallback_word_timings(clean_text, audio_dest)
                 except Exception as e:
+                    import traceback
                     print(f"IndicF5 notice: {e} - falling back to Edge-TTS.", flush=True)
+                    traceback.print_exc()
+                    if os.getenv("INDICF5_STRICT", "false").strip().lower() == "true":
+                        raise RuntimeError(f"INDICF5_STRICT=true: own voice failed ({e}); stopping instead of using Edge-TTS.")
             else:
                 print("IndicF5 notice: engine not installed - falling back to Edge-TTS.", flush=True)
+                if os.getenv("INDICF5_STRICT", "false").strip().lower() == "true":
+                    raise RuntimeError("INDICF5_STRICT=true: IndicF5 engine not installed; stopping instead of using Edge-TTS.")
             engine = "edge"
 
         # Kokoro is primary. audio_engine.py adds real silence after cinematic

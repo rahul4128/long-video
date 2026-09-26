@@ -93,7 +93,7 @@ jobs:
         if: ${{ vars.AUDIO_TTS_ENGINE == 'indicf5' || vars.AUDIO_TTS_ENGINE == 'kokoro' || vars.CLIP_RERANK_ENABLED == 'true' }}
         run: |
           pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-          if [ "${{ vars.AUDIO_TTS_ENGINE }}" = "indicf5" ]; then pip install -r requirements-indicf5.txt; fi
+          if [ "${{ vars.AUDIO_TTS_ENGINE }}" = "indicf5" ]; then pip install -r requirements-indicf5.txt; pip uninstall -y torchcodec || true; fi
           if [ "${{ vars.AUDIO_TTS_ENGINE }}" = "kokoro" ]; then pip install -r requirements-kokoro.txt; fi
           if [ "${{ vars.CLIP_RERANK_ENABLED }}" = "true" ]; then pip install -r requirements-clip.txt; fi
 
@@ -109,6 +109,9 @@ jobs:
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
           HF_TOKEN: ${{ secrets.HUGGINGFACE_API_KEY }}
           AUDIO_TTS_ENGINE: ${{ vars.AUDIO_TTS_ENGINE || 'edge' }}
+          # true = stop the run if the own voice (IndicF5) fails, instead of
+          # silently narrating with Edge-TTS. Set repo variable INDICF5_STRICT.
+          INDICF5_STRICT: ${{ vars.INDICF5_STRICT || 'false' }}
           CLIP_RERANK_ENABLED: ${{ vars.CLIP_RERANK_ENABLED || 'false' }}
           HOOK_OVERLAY_ENABLED: ${{ vars.HOOK_OVERLAY_ENABLED || 'true' }}
           THUMBNAIL_VARIANTS: ${{ vars.THUMBNAIL_VARIANTS || '3' }}
