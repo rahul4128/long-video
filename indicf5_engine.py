@@ -35,9 +35,29 @@ def _patch_torchaudio_load():
     import torch
     import torchaudio
 
+    original_load = torchaudio.load
+
+    def _to_tensor(data, sr):
+        return torch.from_numpy(np.ascontiguousarray(data.T)), sr  # (ch, frames)
+
     def _sf_load(path, *args, **kwargs):
-        data, sr = sf.read(str(path), dtype="float32", always_2d=True)  # (frames, ch)
-        return torch.from_numpy(np.ascontiguousarray(data.T)), sr
+        # 1) soundfile: WAV/FLAC/OGG (and MP3 with libsndfile >= 1.1)
+        try:
+            data, sr = sf.read(str(path), dtype="float32", always_2d=True)
+            return _to_tensor(data, sr)
+        except Exception:
+            pass
+        # 2) ffmpeg decodes ANY format to a temp WAV, then soundfile reads it
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            wav = os.path.join(tmp, "decoded.wav")
+            proc = subprocess.run(["ffmpeg", "-y", "-i", str(path), "-c:a", "pcm_f32le", wav],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if proc.returncode == 0 and os.path.exists(wav):
+                data, sr = sf.read(wav, dtype="float32", always_2d=True)
+                return _to_tensor(data, sr)
+        # 3) last resort: torchaudio's own loader
+        return original_load(path, *args, **kwargs)
 
     torchaudio.load = _sf_load
     _audio_patched = True

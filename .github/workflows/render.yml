@@ -544,6 +544,9 @@ jobs:
         run: |
           set -e
           TAG="devotional-${{ github.run_id }}"
+          # "Re-run failed jobs" keeps the same run_id: replace this run's old
+          # release instead of failing with "release already exists".
+          gh release delete "$TAG" --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
           {
             cat out/youtube_pack.md 2>/dev/null || echo "_YouTube pack not generated._"
             echo
@@ -574,7 +577,11 @@ jobs:
           echo "thumb_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="thumbnail.jpg") | .browser_download_url')" >> "$GITHUB_OUTPUT"
           echo "shorts_thumb_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="thumbnail_shorts_final.jpg") | .browser_download_url')" >> "$GITHUB_OUTPUT"
 
+      # Uploads are manual: with no MAKE_YOUTUBE_WEBHOOK_URL secret this step
+      # just skips. If the secret exists but the webhook is dead, it only warns -
+      # it can never turn a finished run red.
       - name: Notify Make.com (uploads long video + Shorts to YouTube)
+        continue-on-error: true
         env:
           MAKE_WEBHOOK_URL: ${{ secrets.MAKE_YOUTUBE_WEBHOOK_URL }}
           YOUTUBE_PRIVACY: ${{ inputs.privacy || vars.YOUTUBE_PRIVACY || 'public' }}

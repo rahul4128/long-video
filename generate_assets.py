@@ -1276,11 +1276,15 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") 
                 except Exception as e:
                     import traceback
                     print(f"IndicF5 notice: {e} - falling back to Edge-TTS.", flush=True)
+                    # Shows as a yellow warning on the run's Summary page, so a
+                    # non-Natasha narration is visible before you upload.
+                    print(f"::warning title=Own voice NOT used::IndicF5 failed for {os.path.basename(audio_dest)} ({e}); this scene uses Edge-TTS.", flush=True)
                     traceback.print_exc()
                     if os.getenv("INDICF5_STRICT", "false").strip().lower() == "true":
                         raise RuntimeError(f"INDICF5_STRICT=true: own voice failed ({e}); stopping instead of using Edge-TTS.")
             else:
                 print("IndicF5 notice: engine not installed - falling back to Edge-TTS.", flush=True)
+                print("::warning title=Own voice NOT used::IndicF5 is not installed; narration uses Edge-TTS.", flush=True)
                 if os.getenv("INDICF5_STRICT", "false").strip().lower() == "true":
                     raise RuntimeError("INDICF5_STRICT=true: IndicF5 engine not installed; stopping instead of using Edge-TTS.")
             engine = "edge"
