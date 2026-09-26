@@ -26,6 +26,10 @@ on:
         description: 'Live scout note'
         required: false
         type: string
+      privacy:
+        description: 'YouTube privacy for this run: public, unlisted or private (use private/unlisted when you want to polish in Canva first)'
+        required: false
+        type: string
 
 concurrency:
   group: canva-token-rotation
@@ -68,18 +72,6 @@ jobs:
       - name: Install Python Dependencies
         run: pip install -r requirements.txt
 
-      - name: Install Canva token rotation dependency
-        run: pip install pynacl
-
-      - name: Authenticate Canva and rotate refresh token
-        env:
-          CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
-          CANVA_CLIENT_SECRET: ${{ secrets.CANVA_CLIENT_SECRET }}
-          CANVA_REFRESH_TOKEN: ${{ secrets.CANVA_REFRESH_TOKEN }}
-          REPO_SECRETS_TOKEN: ${{ secrets.REPO_SECRETS_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python scripts/refresh_canva_token.py
-
       - name: Generate Unified Assets (4K B-Roll + FLUX.1 + Voiceover)
         env:
           DISPATCH_PAYLOAD: ${{ inputs.payload || toJson(github.event.client_payload) }}
@@ -90,15 +82,7 @@ jobs:
           COVERR_API_KEY: ${{ secrets.COVERR_API_KEY }}
           HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
-          CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
-          CANVA_ASSET_BRIDGE_ENABLED: 'true'
         run: python generate_assets.py
-
-      - name: Preserve final thumbnails in Canva
-        env:
-          CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
-          CANVA_ASSET_BRIDGE_ENABLED: 'true'
-        run: python scripts/canva_asset_bridge.py
 
       - name: Upload content QC report
         if: always()
@@ -427,6 +411,46 @@ jobs:
           name: devotional-thumbnail-shorts-${{ github.run_id }}
           path: thumbnail_shorts_final
 
+      # -----------------------------------------------------------
+      # Canva finishing: runs on the FINAL rendered files. Uploads both
+      # videos + both thumbnails to Canva and creates ready-to-edit
+      # thumbnail designs; links go into the release notes. Every Canva
+      # problem is a warning only - it can never block publishing.
+      # -----------------------------------------------------------
+      - name: Set up Python for Canva finishing
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Install Canva dependencies
+        run: pip install requests pynacl
+
+      - name: Authenticate Canva and rotate refresh token
+        id: canva_auth
+        continue-on-error: true
+        env:
+          CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
+          CANVA_CLIENT_SECRET: ${{ secrets.CANVA_CLIENT_SECRET }}
+          CANVA_REFRESH_TOKEN: ${{ secrets.CANVA_REFRESH_TOKEN }}
+          REPO_SECRETS_TOKEN: ${{ secrets.REPO_SECRETS_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/refresh_canva_token.py
+
+      - name: Canva finishing (upload final videos + thumbnails, create editable designs)
+        continue-on-error: true
+        env:
+          CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
+          CANVA_ASSET_BRIDGE_ENABLED: ${{ vars.CANVA_FINISHING_ENABLED || 'true' }}
+          CANVA_UPLOAD_VIDEOS: ${{ vars.CANVA_UPLOAD_VIDEOS || 'true' }}
+          CANVA_METADATA_JSON: assets/out/metadata.json
+          CANVA_THUMB_PATH: thumbnail_final/thumbnail.jpg
+          CANVA_SHORTS_THUMB_PATH: thumbnail_shorts_final/thumbnail_shorts_final.jpg
+          CANVA_LONG_VIDEO_PATH: video/final_video.mp4
+          CANVA_SHORTS_VIDEO_PATH: shorts/final_video_shorts.mp4
+        run: |
+          python scripts/canva_asset_bridge.py
+          cat out/canva_notes.md >> "$GITHUB_STEP_SUMMARY" || true
+
       - name: Create GitHub Release with video + thumbnail assets
         id: release
         env:
@@ -434,6 +458,11 @@ jobs:
         run: |
           set -e
           TAG="devotional-${{ github.run_id }}"
+          {
+            echo "Automated release - source assets for the Make.com YouTube upload webhook."
+            echo
+            cat out/canva_notes.md 2>/dev/null || echo "_Canva finishing not run._"
+          } > release_notes.md
           gh release create "$TAG" \
             "video/final_video.mp4" \
             "shorts/final_video_shorts.mp4" \
@@ -441,7 +470,7 @@ jobs:
             "thumbnail_shorts_final/thumbnail_shorts_final.jpg" \
             --repo "${{ github.repository }}" \
             --title "Devotional upload $TAG" \
-            --notes "Automated release - source assets for the Make.com YouTube upload webhook."
+            --notes-file release_notes.md
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Look up public download URLs for the release assets
@@ -460,9 +489,17 @@ jobs:
       - name: Notify Make.com (uploads long video + Shorts to YouTube)
         env:
           MAKE_WEBHOOK_URL: ${{ secrets.MAKE_YOUTUBE_WEBHOOK_URL }}
+          YOUTUBE_PRIVACY: ${{ inputs.privacy || vars.YOUTUBE_PRIVACY || 'public' }}
         run: |
           set -e
+          if [ -z "$MAKE_WEBHOOK_URL" ]; then
+            echo "::warning::MAKE_YOUTUBE_WEBHOOK_URL is not set - videos are in the GitHub Release (and Canva) but were NOT sent for YouTube upload."
+            exit 0
+          fi
+          CANVA_JSON=$( [ -f out/canva_assets.json ] && cat out/canva_assets.json || echo '{}' )
           jq -n \
+            --arg privacy "$YOUTUBE_PRIVACY" \
+            --argjson canva "$CANVA_JSON" \
             --arg releaseTag "${{ steps.release.outputs.tag }}" \
             --arg longUrl "${{ steps.assets.outputs.long_url }}" \
             --arg shortsUrl "${{ steps.assets.outputs.shorts_url }}" \
@@ -471,6 +508,11 @@ jobs:
             --slurpfile meta "assets/out/metadata.json" \
             '{
               releaseTag: $releaseTag,
+              privacyStatus: $privacy,
+              canva: {
+                designs: [($canva.designs // [])[] | {label, edit_url}],
+                assets: [($canva.assets // [])[] | {name, assetId, type}]
+              },
               long_video: {
                 downloadUrl: $longUrl,
                 title: $meta[0].long_video_title,
