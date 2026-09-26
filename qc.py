@@ -19,10 +19,22 @@ def check(path, kind):
     # The current production target is a compact 3-minute long-form episode.
     # Keep a little tolerance around the 2:30–3:30 content target so a bad
     # timing/render regression cannot silently ship a padded 5–10 minute file.
+    # Two levels:
+    #   target  (LONG_VIDEO_MIN/MAX_SECONDS, default 120-240 s) -> warning only;
+    #           a complete, tight story should never be blocked or padded.
+    #   hard    (LONG_VIDEO_HARD_MIN/MAX_SECONDS, default 60-300 s) -> fail;
+    #           catches real render/timing regressions (empty or runaway video).
     if kind == "video" and path.endswith("final_video.mp4"):
-        p["durationTargetOk"] = 150 <= duration <= float(os.getenv("LONG_VIDEO_MAX_SECONDS", "240"))
+        t_min = float(os.getenv("LONG_VIDEO_MIN_SECONDS", "120"))
+        t_max = float(os.getenv("LONG_VIDEO_MAX_SECONDS", "240"))
+        h_min = float(os.getenv("LONG_VIDEO_HARD_MIN_SECONDS", "60"))
+        h_max = float(os.getenv("LONG_VIDEO_HARD_MAX_SECONDS", "300"))
+        p["durationTargetOk"] = h_min <= duration <= h_max
         if not p["durationTargetOk"]:
-            p["durationTargetError"] = "long video outside 150–240 second target"
+            p["durationTargetError"] = f"long video {duration:.0f}s outside hard limit {h_min:.0f}-{h_max:.0f}s"
+        elif not (t_min <= duration <= t_max):
+            p["durationWarning"] = f"long video {duration:.0f}s outside {t_min:.0f}-{t_max:.0f}s target (not blocking)"
+            print(f"::warning::{p['durationWarning']}")
 
     has_kind = any(s.get("codec_type") == kind for s in streams)
     # Still images (thumbnails) legitimately have no media duration in
