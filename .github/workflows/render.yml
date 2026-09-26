@@ -67,13 +67,13 @@ jobs:
       # Model weights for the optional engines (IndicF5 own voice, OpenCLIP)
       # are downloaded once and then restored from cache on later runs.
       - name: Cache model weights (optional engines)
-        if: ${{ vars.AUDIO_TTS_ENGINE == 'indicf5' || vars.AUDIO_TTS_ENGINE == 'kokoro' || vars.CLIP_RERANK_ENABLED == 'true' }}
+        if: ${{ (vars.AUDIO_TTS_ENGINE || 'kokoro') == 'indicf5' || (vars.AUDIO_TTS_ENGINE || 'kokoro') == 'kokoro' || vars.CLIP_RERANK_ENABLED == 'true' }}
         uses: actions/cache@v4
         with:
           path: |
             ~/.cache/huggingface
             ~/.cache/torch
-          key: models-${{ vars.AUDIO_TTS_ENGINE || 'edge' }}-${{ vars.CLIP_RERANK_ENABLED || 'false' }}-v1
+          key: models-${{ vars.AUDIO_TTS_ENGINE || 'kokoro' }}-${{ vars.CLIP_RERANK_ENABLED || 'false' }}-v1
 
       # Caches the downloaded .deb files, keyed on the package list below.
       # Only re-downloads from the network if you change the package list
@@ -90,11 +90,11 @@ jobs:
       # Optional engines - installed only when switched on with repo
       # variables, so the default (Edge voice) run stays fast.
       - name: Install optional engines (own voice / Kokoro / CLIP)
-        if: ${{ vars.AUDIO_TTS_ENGINE == 'indicf5' || vars.AUDIO_TTS_ENGINE == 'kokoro' || vars.CLIP_RERANK_ENABLED == 'true' }}
+        if: ${{ (vars.AUDIO_TTS_ENGINE || 'kokoro') == 'indicf5' || (vars.AUDIO_TTS_ENGINE || 'kokoro') == 'kokoro' || vars.CLIP_RERANK_ENABLED == 'true' }}
         run: |
           pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-          if [ "${{ vars.AUDIO_TTS_ENGINE }}" = "indicf5" ]; then pip install -r requirements-indicf5.txt; pip uninstall -y torchcodec || true; fi
-          if [ "${{ vars.AUDIO_TTS_ENGINE }}" = "kokoro" ]; then pip install -r requirements-kokoro.txt; fi
+          if [ "${{ vars.AUDIO_TTS_ENGINE || 'kokoro' }}" = "indicf5" ]; then pip install -r requirements-indicf5.txt; pip uninstall -y torchcodec || true; fi
+          if [ "${{ vars.AUDIO_TTS_ENGINE || 'kokoro' }}" = "kokoro" ]; then pip install -r requirements-kokoro.txt; fi
           if [ "${{ vars.CLIP_RERANK_ENABLED }}" = "true" ]; then pip install -r requirements-clip.txt; fi
 
       - name: Generate Unified Assets (4K B-Roll + FLUX.1 + Voiceover)
@@ -108,7 +108,7 @@ jobs:
           HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
           HF_TOKEN: ${{ secrets.HUGGINGFACE_API_KEY }}
-          AUDIO_TTS_ENGINE: ${{ vars.AUDIO_TTS_ENGINE || 'edge' }}
+          AUDIO_TTS_ENGINE: ${{ vars.AUDIO_TTS_ENGINE || 'kokoro' }}
           # true = stop the run if the own voice (IndicF5) fails, instead of
           # silently narrating with Edge-TTS. Set repo variable INDICF5_STRICT.
           INDICF5_STRICT: ${{ vars.INDICF5_STRICT || 'false' }}

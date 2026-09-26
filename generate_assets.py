@@ -1263,7 +1263,7 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") 
         # Edge's Hindi neural voices (Madhur/Swara) sound far more human than
         # Kokoro's Hindi voice, which listeners described as robotic. Kokoro is
         # still available with AUDIO_TTS_ENGINE=kokoro.
-        engine = os.getenv("AUDIO_TTS_ENGINE", "edge").strip().lower()
+        engine = os.getenv("AUDIO_TTS_ENGINE", "kokoro").strip().lower()
 
         # Own-voice narration (human element): IndicF5 clones the creator's
         # own recorded reference voice. Opt-in; falls back to Edge on error.
@@ -1304,8 +1304,10 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") 
                         f"Kokoro notice: {e} - falling back to Edge-TTS.",
                         flush=True,
                     )
+                    print(f"::warning title=Kokoro voice NOT used::{os.path.basename(audio_dest)}: {e} - this scene uses Edge-TTS.", flush=True)
             else:
                 print("Kokoro notice: package unavailable - falling back to Edge-TTS.", flush=True)
+                print("::warning title=Kokoro voice NOT used::Kokoro is not installed - narration uses Edge-TTS.", flush=True)
 
         # Edge remains available as an explicit engine and as the automatic
         # fallback when Kokoro fails.
@@ -1749,7 +1751,9 @@ async def process():
     # Target 205s here so the per-scene render padding still leaves headroom
     # for the final Remotion composition without weakening media QC.
     long_audio_paths = [f"public/audio/chunk_{i + 1}.mp3" for i in range(len(long_scenes))]
-    _fit_long_narration_to_target(long_audio_paths, long_word_timings, target_seconds=205.0)
+    # 240 s (top of the 2-4 min target): the calm Kokoro pace is kept as-is for a
+    # normal-length story; only an unusually long script gets a gentle (<=8%) trim.
+    _fit_long_narration_to_target(long_audio_paths, long_word_timings, target_seconds=240.0)
 
     # 4b. Sound-Effect Layer (BOTH Long video and Shorts now carry an
     # optional soundEffect field - Shorts previously had none at all in the
