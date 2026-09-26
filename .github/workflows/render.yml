@@ -4,6 +4,28 @@ on:
   repository_dispatch:
     types: [trigger-render-long]
   workflow_dispatch:
+    inputs:
+      payload:
+        description: 'Make.com render payload JSON'
+        required: true
+        type: string
+      pipeline:
+        description: 'Pipeline label'
+        required: false
+        default: 'office-make-clone'
+        type: string
+      qc_verdict:
+        description: 'Agent QC verdict'
+        required: false
+        type: string
+      agent_critique:
+        description: 'Agent critique'
+        required: false
+        type: string
+      scout_note:
+        description: 'Live scout note'
+        required: false
+        type: string
 
 concurrency:
   group: canva-token-rotation
@@ -60,7 +82,7 @@ jobs:
 
       - name: Generate Unified Assets (4K B-Roll + FLUX.1 + Voiceover)
         env:
-          DISPATCH_PAYLOAD: ${{ toJson(github.event.client_payload) }}
+          DISPATCH_PAYLOAD: ${{ inputs.payload || toJson(github.event.client_payload) }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
