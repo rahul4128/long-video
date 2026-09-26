@@ -18,6 +18,7 @@ from sfx_engine import resolve_sound_effect_audio
 from visual_matcher import extract_visual_requirements, candidate_is_accurate
 from content_qc import validate_payload
 from storyteller import build_prosody_map, prepare_storyteller_text
+from hindi_text import to_spoken_hindi, hindi_display_text, pick_hindi, text_free_prompt, has_latin
 try:
     from indicf5_engine import generate_indicf5_audio
 except Exception:
@@ -795,8 +796,8 @@ def generate_cloudflare_flux(prompt: str, dest_path: str, aspect_ratio: str = "1
         "Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}",
         "Content-Type": "application/json"
     }
-    clean_text = prompt.replace("\n", " ").replace("\"", "").strip()
-    final_prompt = f"{clean_text}, Indian mythological devotional art, {aspect_ratio} composition, warm divine lighting, 8k, highly detailed"
+    clean_text = text_free_prompt(prompt).replace("\"", "").strip()
+    final_prompt = f"{clean_text}, Indian mythological devotional painting, {aspect_ratio} composition, warm divine lighting, highly detailed"
 
     try:
         res = requests.post(url, headers=headers, json={"prompt": final_prompt[:450], "steps": 4}, timeout=50)
@@ -832,8 +833,8 @@ def generate_huggingface_image(prompt: str, dest_path: str, aspect_ratio: str = 
         "Authorization": f"Bearer {HUGGINGFACE_API_KEY}",
         "Content-Type": "application/json",
     }
-    clean_text = prompt.replace("\n", " ").replace("\"", "").strip()
-    final_prompt = f"{clean_text}, Indian mythological devotional art, {aspect_ratio} composition, warm divine lighting, 8k, highly detailed"
+    clean_text = text_free_prompt(prompt).replace("\"", "").strip()
+    final_prompt = f"{clean_text}, Indian mythological devotional painting, {aspect_ratio} composition, warm divine lighting, highly detailed"
     width, height = (1024, 576) if aspect_ratio == "16:9" else (576, 1024)
     try:
         res = requests.post(
@@ -892,8 +893,8 @@ def generate_ai_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9",
             pass
 
 def download_pollinations_fallback(prompt: str, img_dest: str, width: int = 1920, height: int = 1080) -> bool:
-    clean_text = prompt.replace("\n", " ").replace("\"", "").strip()[:180]
-    encoded = urllib.parse.quote(f"{clean_text}, Indian devotional art")
+    clean_text = text_free_prompt(prompt).replace("\"", "").strip()[:220]
+    encoded = urllib.parse.quote(f"{clean_text}, Indian devotional painting")
     seed = random.randint(1000, 999999)
     url = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&model=turbo&seed={seed}&nologo=true"
 
@@ -995,7 +996,13 @@ def _fit_long_narration_to_target(audio_paths: list, word_timings: list, target_
     if total <= target_seconds or total <= 0:
         return total
 
-    factor = min(2.0, max(1.0, total / target_seconds))
+    # Speeding speech up by more than ~8% is clearly audible and makes the
+    # voice sound mechanical, so never compress harder than that; a slightly
+    # longer video is better than a chipmunk-fast narrator.
+    max_factor = float(os.getenv("NARRATION_MAX_TEMPO", "1.08"))
+    factor = min(max_factor, max(1.0, total / target_seconds))
+    if total / target_seconds > max_factor:
+        print(f"⚠️ Narration {total:.1f}s exceeds target even at {max_factor}x; keeping natural pace (video will run longer).", flush=True)
     print(
         f"🎚️ Long narration is {total:.2f}s; fitting to {target_seconds:.0f}s "
         f"with pitch-preserving {factor:.3f}x tempo.",
@@ -1080,15 +1087,22 @@ async def _generate_edge_chunked_audio(clean_text: str, audio_dest: str) -> list
     pass. WordBoundary timings are preserved with cumulative offsets.
     """
     voice = os.getenv("EDGE_TTS_VOICE", "hi-IN-MadhurNeural")
-    rate = os.getenv("EDGE_TTS_RATE", "-4%")
-    pitch = os.getenv("EDGE_TTS_PITCH", "+0Hz")
+    rate = os.getenv("EDGE_TTS_RATE", "-6%")
+    pitch = os.getenv("EDGE_TTS_PITCH", "-2Hz")
     pause_ms = max(0, int(os.getenv("EDGE_TTS_SENTENCE_PAUSE_MS", "140")))
 
-    chunks = [
-        part.strip()
-        for part in re.split(r"(?<=[।!?])\s+|(?<=[.!?])\s+", clean_text)
-        if part.strip()
-    ]
+    # One synthesis pass per scene keeps the neural voice's natural intonation
+    # across sentences; sentence-by-sentence synthesis resets the pitch contour
+    # on every sentence, which is what made narration sound robotic. Set
+    # EDGE_TTS_SENTENCE_CHUNKS=true to restore the old behaviour.
+    if os.getenv("EDGE_TTS_SENTENCE_CHUNKS", "false").lower() == "true":
+        chunks = [
+            part.strip()
+            for part in re.split(r"(?<=[।!?])\s+|(?<=[.!?])\s+", clean_text)
+            if part.strip()
+        ]
+    else:
+        chunks = [clean_text]
     if not chunks:
         chunks = [clean_text]
 
@@ -1186,10 +1200,15 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") 
     fallback so a temporary Kokoro/model/runtime failure does not stop a run.
     """
     async with tts_semaphore:
-        original_text = _naturalize_text(narration) or "हरि ॐ तत्सत्"
+        if has_latin(narration):
+            print(f"🔤 Hindi-only notice: removed/converted Latin words before TTS: {narration[:80]}", flush=True)
+        original_text = _naturalize_text(to_spoken_hindi(narration)) or "हरि ॐ तत्सत्"
         prosody = build_prosody_map(original_text, beat=beat)
         clean_text = prepare_storyteller_text(original_text)
-        engine = os.getenv("AUDIO_TTS_ENGINE", "kokoro").strip().lower()
+        # Edge's Hindi neural voices (Madhur/Swara) sound far more human than
+        # Kokoro's Hindi voice, which listeners described as robotic. Kokoro is
+        # still available with AUDIO_TTS_ENGINE=kokoro.
+        engine = os.getenv("AUDIO_TTS_ENGINE", "edge").strip().lower()
 
         # Kokoro is primary. audio_engine.py adds real silence after cinematic
         # punctuation such as …, —, । and !/? while preserving Kokoro prosody.
@@ -1523,14 +1542,19 @@ async def process():
     # script. out/thumbnail.jpg above stays as the plain background image;
     # the render-thumbnail job produces the final text-overlaid version that
     # publish-and-notify actually releases and sends to YouTube.
-    thumbnail_hook_text = (thumbnail_data.get("thumbnailText") or "").strip()
+    thumbnail_hook_text = pick_hindi(
+        thumbnail_data.get("thumbnailText"),
+        seo_metadata.get("thumbnailText"),
+        seo_metadata.get("long_video_title"),
+        max_words=6,
+    )
     if not thumbnail_hook_text:
         # Fallback so the thumbnail still gets SOME on-image text even if the
         # upstream Make.com prompt hasn't been updated yet to supply a
         # dedicated thumbnailText field - a short slice of the video's own
         # title beats no text at all.
         fallback_title = (seo_metadata.get("long_video_title") or "").strip()
-        thumbnail_hook_text = " ".join(fallback_title.split()[:6])
+        thumbnail_hook_text = pick_hindi(fallback_title, max_words=6)
     with open("public/thumbnail_props.json", "w", encoding="utf-8") as f:
         json.dump(
             {"backgroundImage": "thumbnail.jpg", "hookText": thumbnail_hook_text},
@@ -1551,13 +1575,18 @@ async def process():
     generate_ai_image(shorts_thumb_prompt, shorts_thumb_dest, aspect_ratio="9:16", pollinations_width=1080, pollinations_height=1920)
     subprocess.run(["cp", shorts_thumb_dest, "out/thumbnail_shorts.jpg"], check=False)
 
-    shorts_thumbnail_hook_text = (shorts_thumbnail_data.get("thumbnailText") or "").strip()
+    shorts_thumbnail_hook_text = pick_hindi(
+        shorts_thumbnail_data.get("thumbnailText"),
+        seo_metadata.get("shorts_title"),
+        thumbnail_hook_text,
+        max_words=6,
+    )
     if not shorts_thumbnail_hook_text:
         # Same graceful fallback as the long-video thumbnail above: prefer a
         # dedicated hook line, but a slice of the Shorts' own title beats no
         # text at all if the upstream Make.com prompt hasn't been updated yet.
         fallback_shorts_title = (seo_metadata.get("shorts_title") or "").strip()
-        shorts_thumbnail_hook_text = " ".join(fallback_shorts_title.split()[:6])
+        shorts_thumbnail_hook_text = pick_hindi(fallback_shorts_title, max_words=6)
     with open("public/thumbnail_props_shorts.json", "w", encoding="utf-8") as f:
         json.dump(
             {"backgroundImage": "thumbnail_shorts.jpg", "hookText": shorts_thumbnail_hook_text},
@@ -1635,7 +1664,7 @@ async def process():
         enriched_long.append({
             "scene_number": idx,
             "durationInSeconds": round(duration + 0.3, 2),
-            "narration_chunk": scene.get("text", ""),
+            "narration_chunk": hindi_display_text(scene.get("text", "")),
             "shots": shots,
             "director": scene.get("director", {}),
             "entertainmentBeat": scene.get("director", {}).get("entertainmentBeat", ""),
@@ -1659,7 +1688,7 @@ async def process():
         enriched_shorts.append({
             "scene_number": idx,
             "durationInSeconds": round(duration + 0.2, 2),
-            "narration_chunk": scene.get("text", ""),
+            "narration_chunk": hindi_display_text(scene.get("text", "")),
             "shots": shots,
             "imageFileName": shots[0]["file"] if shots else "",  # legacy/debug only, see Scene.tsx's resolveShots()
             "soundEffect": scene.get("soundEffect", "none"),

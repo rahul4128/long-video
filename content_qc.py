@@ -36,6 +36,17 @@ def validate_payload(payload):
     shorts_funnel_hook = _norm(meta.get("shorts_funnel_hook"))
     long_video_continuation = _norm(meta.get("long_video_continuation"))
     issues, warnings = [], []
+    try:
+        from hindi_text import has_latin
+        if has_latin(title):
+            warnings.append("title_contains_latin_letters")
+        latin_scenes = [i + 1 for i, sc in enumerate(scenes) if has_latin((sc or {}).get("text", ""))]
+        if latin_scenes:
+            warnings.append(f"latin_words_in_narration_scenes_{latin_scenes}_auto_converted")
+        if has_latin(hook):
+            warnings.append("thumbnail_text_contains_latin_auto_replaced")
+    except Exception:
+        pass
 
     if not scenes:
         issues.append("no_long_video_scenes")

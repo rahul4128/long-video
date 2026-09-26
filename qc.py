@@ -20,9 +20,9 @@ def check(path, kind):
     # Keep a little tolerance around the 2:30–3:30 content target so a bad
     # timing/render regression cannot silently ship a padded 5–10 minute file.
     if kind == "video" and path.endswith("final_video.mp4"):
-        p["durationTargetOk"] = 150 <= duration <= 210
+        p["durationTargetOk"] = 150 <= duration <= float(os.getenv("LONG_VIDEO_MAX_SECONDS", "240"))
         if not p["durationTargetOk"]:
-            p["durationTargetError"] = "long video outside 150–210 second target"
+            p["durationTargetError"] = "long video outside 150–240 second target"
 
     has_kind = any(s.get("codec_type") == kind for s in streams)
     # Still images (thumbnails) legitimately have no media duration in
