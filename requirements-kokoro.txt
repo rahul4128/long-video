@@ -1,0 +1,4 @@
+# Optional Kokoro engine (AUDIO_TTS_ENGINE=kokoro). Pulls in torch, so it is
+# no longer installed on every run - that alone saved several minutes.
+kokoro>=0.9.4
+misaki>=0.9.4

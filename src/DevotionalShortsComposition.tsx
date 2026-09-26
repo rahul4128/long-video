@@ -9,9 +9,11 @@ import {
 import { DevotionalVideoProps } from './types';
 import { Scene } from './Scene';
 import { Subtitles } from './Subtitles';
+import { HookOverlay } from './HookOverlay';
 
 export const DevotionalShortsComposition: React.FC<DevotionalVideoProps> = ({
   scenes = [],
+  hookText = '',
 }) => {
   const { fps } = useVideoConfig();
 
@@ -47,6 +49,9 @@ export const DevotionalShortsComposition: React.FC<DevotionalVideoProps> = ({
           );
         })}
       </Series>
+
+      {/* First-1.8s on-screen Hindi hook */}
+      <HookOverlay text={hookText} format="shorts" />
     </AbsoluteFill>
   );
 };

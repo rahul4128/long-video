@@ -1,0 +1,4 @@
+# Optional OpenCLIP stock-clip re-ranking (repo variable CLIP_RERANK_ENABLED=true).
+# torch is installed separately from the CPU-only index by the workflow.
+open_clip_torch>=2.24
+pillow>=10

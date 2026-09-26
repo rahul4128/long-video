@@ -16,9 +16,13 @@ import edge_tts
 from director import enrich_scenes
 from sfx_engine import resolve_sound_effect_audio
 from visual_matcher import extract_visual_requirements, candidate_is_accurate
-from content_qc import validate_payload
+from content_qc import validate_payload, fact_check_items
 from storyteller import build_prosody_map, prepare_storyteller_text
-from hindi_text import to_spoken_hindi, hindi_display_text, pick_hindi, text_free_prompt, has_latin
+from hindi_text import to_spoken_hindi, hindi_display_text, pick_hindi, text_free_prompt, has_latin, best_hindi_title
+try:
+    import clip_rerank
+except Exception:  # optional dependency (open_clip/torch) - never required
+    clip_rerank = None
 try:
     from indicf5_engine import generate_indicf5_audio
 except Exception:
@@ -37,6 +41,42 @@ if raw_payload and raw_payload != "null":
 
 # Extract multi-format payload blocks
 seo_metadata = payload.get("seo_metadata", {})
+if not isinstance(seo_metadata, dict):
+    seo_metadata = {}
+# Make sends the packaging experiment fields (titleVariants, thumbnailConcepts,
+# chapterPlan, cta, keywords...) in a separate "seo" object. Merge them in so
+# QC, the thumbnail variants and the YouTube copy-paste pack can all see them.
+_seo_pack = payload.get("seo", {})
+if isinstance(_seo_pack, dict):
+    for _k, _v in _seo_pack.items():
+        if _v not in (None, "", [], {}) and not seo_metadata.get(_k):
+            seo_metadata[_k] = _v
+
+
+def _as_list(value):
+    """Make sometimes serialises arrays as JSON strings - accept both."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str) and value.strip().startswith("["):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
+
+
+# Title repair: Make's gate only requires Hindi to be present, so a stray
+# Roman word is converted to Devanagari here (instead of skipping the day),
+# and a too-short title is replaced by the best of the 3 titleVariants.
+_variant_titles = [str(v.get("title") if isinstance(v, dict) else v) for v in _as_list(seo_metadata.get("titleVariants"))]
+_fixed_long_title = best_hindi_title(seo_metadata.get("long_video_title"), _variant_titles)
+if _fixed_long_title:
+    seo_metadata["long_video_title"] = _fixed_long_title
+_fixed_shorts_title = best_hindi_title(seo_metadata.get("shorts_title"), _fixed_long_title, min_len=10, max_len=95)
+if _fixed_shorts_title:
+    seo_metadata["shorts_title"] = _fixed_shorts_title
+payload["seo_metadata"] = seo_metadata
 thumbnail_data = payload.get("thumbnail", {})
 # Shorts-specific 9:16 thumbnail (own background image + hook text) - see
 # the Make.com prompt's new `shorts_thumbnail` field and section 2c below.
@@ -253,7 +293,8 @@ def _extract_keywords(*texts: str) -> VisualKeywordSet:
                 words.add(raw)
     return VisualKeywordSet(words)
 
-def _best_scoring_index(candidate_texts: list, target_keywords, candidate_ids: list = None, source: str = None):
+def _best_scoring_index(candidate_texts: list, target_keywords, candidate_ids: list = None, source: str = None,
+                        preview_urls: list = None):
     """Returns (best_index, best_score, any_text_available) for a list of
     candidate descriptive strings (one per API hit, "" where a source gives
     no usable text). any_text_available is False when every hit had no text
@@ -282,6 +323,17 @@ def _best_scoring_index(candidate_texts: list, target_keywords, candidate_ids: l
                 scores.append(-10000)
                 continue
         scores.append(len(_extract_keywords(candidate_text) & target_keywords))
+    # Optional OpenCLIP visual re-rank (CLIP_RERANK_ENABLED=true): score each
+    # candidate's preview image against the scene prompt. Clips that clearly
+    # don't LOOK like the scene are rejected even if their tags matched.
+    if clip_rerank is not None and preview_urls and clip_rerank.enabled():
+        sims = clip_rerank.similarities(getattr(target_keywords, "prompt", ""), preview_urls)
+        if sims:
+            floor = clip_rerank.min_similarity()
+            for i, sim in enumerate(sims):
+                if sim is None or i >= len(scores) or scores[i] < 0:
+                    continue
+                scores[i] = -1 if sim < floor else scores[i] + sim * 20
     best_score = max(scores)
     if best_score < 0:
         return 0, -1, True
@@ -316,8 +368,9 @@ def fetch_pexels_video(query: str, dest_path: str, orientation: str = "landscape
             best_idx, best_score, scorable = _best_scoring_index(
                 [v.get("url", "") for v in videos], target_keywords,
                 candidate_ids=[v.get("id") for v in videos], source="pexels",
+                preview_urls=[v.get("image", "") for v in videos],
             )
-            if scorable and best_score == 0:
+            if scorable and best_score <= 0:
                 return False
             chosen = videos[best_idx] if scorable else videos[0]
             files = chosen.get("video_files", [])
@@ -365,8 +418,9 @@ def fetch_pixabay_video(query: str, dest_path: str, target_keywords: set = None)
                 best_idx, best_score, scorable = _best_scoring_index(
                     [h.get("tags", "") for h in hits], target_keywords,
                     candidate_ids=[h.get("id") for h in hits], source="pixabay",
+                    preview_urls=[((h.get("videos") or {}).get("medium") or {}).get("thumbnail", "") for h in hits],
                 )
-                if scorable and best_score == 0:
+                if scorable and best_score <= 0:
                     continue
                 chosen = hits[best_idx] if scorable else hits[0]
                 videos_dict = chosen.get("videos", {})
@@ -404,7 +458,7 @@ def fetch_coverr_video(query: str, dest_path: str, target_keywords: set = None) 
                 target_keywords,
                 candidate_ids=[h.get("id") for h in hits], source="coverr",
             )
-            if scorable and best_score == 0:
+            if scorable and best_score <= 0:
                 return False
             chosen = hits[best_idx] if scorable else hits[0]
             video_url = (chosen.get("urls") or {}).get("mp4")
@@ -470,7 +524,7 @@ def fetch_wikimedia_video(query: str, dest_path: str, target_keywords: set = Non
         best_idx, best_score, scorable = _best_scoring_index(
             [title for title, _ in candidates], target_keywords
         )
-        if scorable and best_score == 0:
+        if scorable and best_score <= 0:
             return False
         ordered = candidates
         if scorable:
@@ -694,6 +748,7 @@ def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "lan
     for candidate in candidates:
         target_keywords = _extract_keywords(candidate, prompt_text)
         target_keywords.requirements = requirements
+        target_keywords.prompt = f"{prompt_text or candidate}".strip()
         # 1. Try Pexels only when its URL metadata can prove the strict entity.
         if fetch_pexels_video(candidate, dest_path, orientation, target_keywords):
             print(f"  ✅ Accurate video fetched from Pexels ('{candidate}')", flush=True)
@@ -1210,6 +1265,20 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") 
         # still available with AUDIO_TTS_ENGINE=kokoro.
         engine = os.getenv("AUDIO_TTS_ENGINE", "edge").strip().lower()
 
+        # Own-voice narration (human element): IndicF5 clones the creator's
+        # own recorded reference voice. Opt-in; falls back to Edge on error.
+        if engine == "indicf5":
+            if generate_indicf5_audio is not None:
+                try:
+                    ok = await asyncio.to_thread(generate_indicf5_audio, clean_text, audio_dest)
+                    if ok and os.path.exists(audio_dest):
+                        return _fallback_word_timings(clean_text, audio_dest)
+                except Exception as e:
+                    print(f"IndicF5 notice: {e} - falling back to Edge-TTS.", flush=True)
+            else:
+                print("IndicF5 notice: engine not installed - falling back to Edge-TTS.", flush=True)
+            engine = "edge"
+
         # Kokoro is primary. audio_engine.py adds real silence after cinematic
         # punctuation such as …, —, । and !/? while preserving Kokoro prosody.
         if engine in ("kokoro", "auto"):
@@ -1593,6 +1662,46 @@ async def process():
             f, ensure_ascii=False, indent=2,
         )
 
+    # 2d. Thumbnail A/B/C variants for YouTube Studio's "Test & Compare"
+    # (upload all three manually; YouTube picks the winner by watch time).
+    #   A = main image + main hook text (the thumbnail rendered above)
+    #   B = same image + concept #2 text (tests the TEXT hook)
+    #   C = new image from concept #3 + its text (tests the IMAGE)
+    thumbnail_variants = []
+    if os.getenv("THUMBNAIL_VARIANTS", "3").strip() != "1":
+        concepts = [c for c in _as_list(seo_metadata.get("thumbnailConcepts")) if isinstance(c, dict)]
+        used = {thumbnail_hook_text}
+        def _concept_text(concept):
+            txt = pick_hindi(concept.get("text"), max_words=6) if concept else ""
+            return txt if txt and txt not in used else ""
+        text_b = _concept_text(concepts[1] if len(concepts) > 1 else {}) or pick_hindi(
+            seo_metadata.get("thumbnailText"), shorts_thumbnail_hook_text, max_words=6)
+        if text_b and text_b not in used:
+            used.add(text_b)
+            thumbnail_variants.append({"id": "b", "backgroundImage": "thumbnail.jpg", "hookText": text_b})
+        concept_c = concepts[2] if len(concepts) > 2 else {}
+        text_c = _concept_text(concept_c) or text_b or thumbnail_hook_text
+        visual_c = " ".join(str(concept_c.get(k, "")) for k in ("visualSubject", "emotionAction", "composition")).strip()
+        bg_c = "thumbnail.jpg"
+        if visual_c:
+            try:
+                generate_ai_image(
+                    f"{visual_c}, dramatic high-contrast close-up, cinematic 16:9 devotional painting",
+                    "public/images/thumbnail_c.jpg", aspect_ratio="16:9",
+                    pollinations_width=1920, pollinations_height=1080,
+                )
+                if os.path.exists("public/images/thumbnail_c.jpg"):
+                    bg_c = "thumbnail_c.jpg"
+            except Exception as e:
+                print(f"Thumbnail C notice: {e} - reusing main image.", flush=True)
+        if bg_c != "thumbnail.jpg" or text_c not in used:
+            thumbnail_variants.append({"id": "c", "backgroundImage": bg_c, "hookText": text_c})
+    for variant in thumbnail_variants:
+        with open(f"public/thumbnail_props_{variant['id']}.json", "w", encoding="utf-8") as f:
+            json.dump({"backgroundImage": variant["backgroundImage"], "hookText": variant["hookText"]},
+                      f, ensure_ascii=False, indent=2)
+    print(f"🖼️ Thumbnail test variants prepared: A + {', '.join(v['id'].upper() for v in thumbnail_variants) or 'none'}", flush=True)
+
     # 3. Parallel Visuals (Pexels + Pixabay + Coverr + FLUX.1 for Long & Shorts)
     long_items = [(i + 1, s) for i, s in enumerate(long_scenes)]
     shorts_items = [(i + 1, s) for i, s in enumerate(shorts_scenes)]
@@ -1712,8 +1821,16 @@ async def process():
         bgm_swell_scene_numbers = []
 
     # Save props and metadata
+    # On-screen Hindi hook for the first ~1.8 s (HookOverlay.tsx): the
+    # thumbnail promise repeated on screen so viewers who clicked see it
+    # confirmed instantly - the biggest early-drop fix for Shorts and long.
+    hook_enabled = os.getenv("HOOK_OVERLAY_ENABLED", "true").strip().lower() != "false"
+    long_hook = pick_hindi(thumbnail_hook_text, seo_metadata.get("thumbnailText"), max_words=6) if hook_enabled else ""
+    shorts_hook = pick_hindi(shorts_thumbnail_hook_text, thumbnail_hook_text, max_words=6) if hook_enabled else ""
+
     long_props = {
         "title": seo_metadata.get("long_video_title", "Devotional Long Video"),
+        "hookText": long_hook,
         "fps": 30,
         "scenes": enriched_long,
         "seo_metadata": seo_metadata,
@@ -1721,6 +1838,7 @@ async def process():
     }
     shorts_props = {
         "title": seo_metadata.get("shorts_title", "Devotional Shorts"),
+        "hookText": shorts_hook,
         "fps": 30,
         "scenes": enriched_shorts,
         "seo_metadata": seo_metadata
@@ -1742,6 +1860,19 @@ async def process():
         base_description = (metadata_for_upload.get("long_video_description") or "").strip()
         metadata_for_upload["long_video_description"] = f"{base_description}\n\n{chapters_block}".strip()
         metadata_for_upload["chapters"] = chapters_block
+
+    # Extra context for the YouTube copy-paste pack (scripts/youtube_pack.py).
+    metadata_for_upload["thumbnailVariants"] = [
+        {"id": "a", "file": "thumbnail.jpg", "hookText": thumbnail_hook_text}
+    ] + [{"id": v["id"], "file": f"thumbnail_{v['id']}.jpg", "hookText": v["hookText"]} for v in thumbnail_variants]
+    metadata_for_upload["meta"] = {
+        k: meta_data.get(k) for k in (
+            "category", "track", "content_role", "festival_angle", "experiment_id",
+            "experiment_hypothesis", "agent_critique", "qc_verdict", "next_episode_angle",
+        ) if meta_data.get(k)
+    }
+    metadata_for_upload["factCheck"] = fact_check_items(payload)
+    metadata_for_upload["aiDisclosureRecommended"] = True
 
     with open("out/metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata_for_upload, f, ensure_ascii=False, indent=2)

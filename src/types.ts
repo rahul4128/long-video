@@ -77,6 +77,8 @@ export interface SEOMetadata {
 
 export interface DevotionalVideoProps {
   title: string;
+  // Short Hindi hook shown big on screen for the first ~1.8 s (HookOverlay).
+  hookText?: string;
   scenes: SceneItem[];
   fps: number;
   seo_metadata?: SEOMetadata;

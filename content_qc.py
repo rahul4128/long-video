@@ -9,8 +9,51 @@ DEVANAGARI = re.compile(r"[\u0900-\u097F]")
 def _norm(s):
     return re.sub(r"\s+", " ", str(s or "").strip()).lower()
 
+# ---------------------------------------------------------------------------
+# Fact-risk checklist. This does NOT verify facts automatically (no free tool
+# can do that reliably for scripture/history). It pulls out every sentence
+# that makes a checkable or risky claim so the creator can verify it in a
+# minute before uploading, and flags overclaiming language outright.
+# ---------------------------------------------------------------------------
+_SENT_SPLIT = re.compile(r"(?<=[।!?])\s+|\n+")
+_CHECKABLE = re.compile(
+    r"[0-9०-९]|अध्याय|श्लोक|पुराण|उपनिषद|वेद|रामायण|महाभारत|गीता|शिलालेख|"
+    r"इतिहासकार|पुरातत्व|ASI|यूनेस्को|सदी|ईसा|वर्ष पहले|साल पहले|राजा|वंश|निर्माण|बनवाया"
+)
+_OVERCLAIM = re.compile(
+    r"वैज्ञानिक(ों)?\s*(ने)?\s*(भी)?\s*(सिद्ध|साबित)|विज्ञान\s*(भी)?\s*(हैरान|नहीं समझ|समझा नहीं)|"
+    r"100\s*%|सौ प्रतिशत|आज तक कोई नहीं|कोई नहीं जानता|एलियन|साबित हो चुका|पक्का सबूत"
+)
+_HEDGED = re.compile(r"मान्यता|लोक कथा|कहा जाता|माना जाता|परंपरा|कथा के अनुसार|प्रमाण नहीं")
+
+
+def fact_check_items(payload, limit=12):
+    """Return [{scene, claim, risk}] for the YouTube pack's verify list."""
+    items = []
+    scenes = ((payload.get("long_video") or {}).get("scenes") or [])
+    for n, scene in enumerate(scenes, start=1):
+        for sent in _SENT_SPLIT.split(str(scene.get("text") or "")):
+            sent = sent.strip()
+            if len(sent) < 12:
+                continue
+            if _OVERCLAIM.search(sent):
+                items.append({"scene": n, "claim": sent, "risk": "HIGH - overclaim; soften or remove"})
+            elif _CHECKABLE.search(sent) and not _HEDGED.search(sent):
+                items.append({"scene": n, "claim": sent, "risk": "CHECK - verify source / date / verse"})
+    items.sort(key=lambda x: 0 if x["risk"].startswith("HIGH") else 1)
+    return items[:limit]
+
+
+def _merged_seo(payload):
+    seo = dict(payload.get("seo_metadata") or {})
+    for k, v in (payload.get("seo") or {}).items():
+        if v not in (None, "", [], {}) and not seo.get(k):
+            seo[k] = v
+    return seo
+
+
 def validate_payload(payload):
-    seo = payload.get("seo_metadata") or {}
+    seo = _merged_seo(payload)
     long_video = payload.get("long_video") or {}
     scenes = long_video.get("scenes") or []
     title = _norm(seo.get("long_video_title"))
@@ -148,6 +191,10 @@ def validate_payload(payload):
               "इस वीडियो में हम जानेंगे", "आज हम जानेंगे")
     if any(x in _norm(s.get("text")) for s in scenes for x in filler):
         warnings.append("generic_intro_filler_detected")
+
+    risky = [i for i in fact_check_items(payload) if i["risk"].startswith("HIGH")]
+    if risky:
+        warnings.append(f"fact_overclaim_in_scenes_{','.join(str(i['scene']) for i in risky)}")
 
     report = {
         "ok": not issues,

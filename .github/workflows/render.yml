@@ -43,6 +43,8 @@ jobs:
   # ---------------------------------------------------------------
   generate-assets:
     runs-on: ubuntu-latest
+    # Own-voice IndicF5 on a CPU runner is slow; keep a generous ceiling.
+    timeout-minutes: 90
     # Needed so the "Persist clip-usage history" step below can push
     # used_clips_history.json back to the repo (see generate_assets.py's
     # clip-usage-history section for why this file exists).
@@ -53,12 +55,25 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Static Python syntax check
-        run: python -m py_compile content_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py scripts/canva_asset_bridge.py
+        run: python -m py_compile content_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v7
         with:
           python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements*.txt
+
+      # Model weights for the optional engines (IndicF5 own voice, OpenCLIP)
+      # are downloaded once and then restored from cache on later runs.
+      - name: Cache model weights (optional engines)
+        if: ${{ vars.AUDIO_TTS_ENGINE == 'indicf5' || vars.AUDIO_TTS_ENGINE == 'kokoro' || vars.CLIP_RERANK_ENABLED == 'true' }}
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/torch
+          key: models-${{ vars.AUDIO_TTS_ENGINE || 'edge' }}-${{ vars.CLIP_RERANK_ENABLED || 'false' }}-v1
 
       # Caches the downloaded .deb files, keyed on the package list below.
       # Only re-downloads from the network if you change the package list
@@ -72,6 +87,16 @@ jobs:
       - name: Install Python Dependencies
         run: pip install -r requirements.txt
 
+      # Optional engines - installed only when switched on with repo
+      # variables, so the default (Edge voice) run stays fast.
+      - name: Install optional engines (own voice / Kokoro / CLIP)
+        if: ${{ vars.AUDIO_TTS_ENGINE == 'indicf5' || vars.AUDIO_TTS_ENGINE == 'kokoro' || vars.CLIP_RERANK_ENABLED == 'true' }}
+        run: |
+          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+          if [ "${{ vars.AUDIO_TTS_ENGINE }}" = "indicf5" ]; then pip install -r requirements-indicf5.txt; fi
+          if [ "${{ vars.AUDIO_TTS_ENGINE }}" = "kokoro" ]; then pip install -r requirements-kokoro.txt; fi
+          if [ "${{ vars.CLIP_RERANK_ENABLED }}" = "true" ]; then pip install -r requirements-clip.txt; fi
+
       - name: Generate Unified Assets (4K B-Roll + FLUX.1 + Voiceover)
         env:
           DISPATCH_PAYLOAD: ${{ inputs.payload || toJson(github.event.client_payload) }}
@@ -82,6 +107,11 @@ jobs:
           COVERR_API_KEY: ${{ secrets.COVERR_API_KEY }}
           HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
+          HF_TOKEN: ${{ secrets.HUGGINGFACE_API_KEY }}
+          AUDIO_TTS_ENGINE: ${{ vars.AUDIO_TTS_ENGINE || 'edge' }}
+          CLIP_RERANK_ENABLED: ${{ vars.CLIP_RERANK_ENABLED || 'false' }}
+          HOOK_OVERLAY_ENABLED: ${{ vars.HOOK_OVERLAY_ENABLED || 'true' }}
+          THUMBNAIL_VARIANTS: ${{ vars.THUMBNAIL_VARIANTS || '3' }}
         run: python generate_assets.py
 
       - name: Upload content QC report
@@ -139,8 +169,7 @@ jobs:
             public/audio
             public/props.json
             public/props_shorts.json
-            public/thumbnail_props.json
-            public/thumbnail_props_shorts.json
+            public/thumbnail_props*.json
             out/thumbnail.jpg
             out/thumbnail_shorts.jpg
             out/metadata.json
@@ -168,7 +197,17 @@ jobs:
 
       # Skips "npm install" completely on a cache hit - only reinstalls
       # when package.json / package-lock.json actually change.
+      # node_modules (incl. Remotion's headless Chrome) is restored from
+      # cache; npm install only runs when package.json changes.
+      - name: Cache node_modules
+        id: nodecache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package.json') }}-v1
+
       - name: Install Node.js Dependencies
+        if: steps.nodecache.outputs.cache-hit != 'true'
         run: npm install
 
       - name: Install System Dependencies (ffmpeg + fonts)
@@ -204,7 +243,17 @@ jobs:
         with:
           node-version: '24'
 
+      # node_modules (incl. Remotion's headless Chrome) is restored from
+      # cache; npm install only runs when package.json changes.
+      - name: Cache node_modules
+        id: nodecache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package.json') }}-v1
+
       - name: Install Node.js Dependencies
+        if: steps.nodecache.outputs.cache-hit != 'true'
         run: npm install
 
       - name: Install System Dependencies (ffmpeg + fonts)
@@ -250,7 +299,17 @@ jobs:
         with:
           node-version: '24'
 
+      # node_modules (incl. Remotion's headless Chrome) is restored from
+      # cache; npm install only runs when package.json changes.
+      - name: Cache node_modules
+        id: nodecache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package.json') }}-v1
+
       - name: Install Node.js Dependencies
+        if: steps.nodecache.outputs.cache-hit != 'true'
         run: npm install
 
       - name: Install System Dependencies (ffmpeg + fonts)
@@ -266,12 +325,18 @@ jobs:
       - name: Render Thumbnail (background image + bold Hindi hook-text overlay)
         run: |
           npx remotion still ThumbnailComposition out/thumbnail.jpg --props=public/thumbnail_props.json
+          # A/B/C variants for YouTube "Test & Compare" (manual upload)
+          for v in b c; do
+            if [ -f "public/thumbnail_props_$v.json" ]; then
+              npx remotion still ThumbnailComposition "out/thumbnail_$v.jpg" --props="public/thumbnail_props_$v.json" || echo "::warning::thumbnail $v failed"
+            fi
+          done
 
       - name: Upload Thumbnail Artifact
         uses: actions/upload-artifact@v7
         with:
           name: devotional-thumbnail-${{ github.run_id }}
-          path: out/thumbnail.jpg
+          path: out/thumbnail*.jpg
           retention-days: 1
 
   # ---------------------------------------------------------------
@@ -293,7 +358,17 @@ jobs:
         with:
           node-version: '24'
 
+      # node_modules (incl. Remotion's headless Chrome) is restored from
+      # cache; npm install only runs when package.json changes.
+      - name: Cache node_modules
+        id: nodecache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package.json') }}-v1
+
       - name: Install Node.js Dependencies
+        if: steps.nodecache.outputs.cache-hit != 'true'
         run: npm install
 
       - name: Install System Dependencies (ffmpeg + fonts)
@@ -451,6 +526,14 @@ jobs:
           python scripts/canva_asset_bridge.py
           cat out/canva_notes.md >> "$GITHUB_STEP_SUMMARY" || true
 
+      - name: Build copy-paste YouTube upload pack
+        env:
+          PACK_METADATA_JSON: assets/out/metadata.json
+          PACK_OUTPUT: out/youtube_pack.md
+        run: |
+          python scripts/youtube_pack.py
+          cat out/youtube_pack.md >> "$GITHUB_STEP_SUMMARY" || true
+
       - name: Create GitHub Release with video + thumbnail assets
         id: release
         env:
@@ -459,15 +542,17 @@ jobs:
           set -e
           TAG="devotional-${{ github.run_id }}"
           {
-            echo "Automated release - source assets for the Make.com YouTube upload webhook."
+            cat out/youtube_pack.md 2>/dev/null || echo "_YouTube pack not generated._"
             echo
             cat out/canva_notes.md 2>/dev/null || echo "_Canva finishing not run._"
           } > release_notes.md
+          EXTRA_THUMBS=$(ls thumbnail_final/thumbnail_b.jpg thumbnail_final/thumbnail_c.jpg 2>/dev/null || true)
           gh release create "$TAG" \
             "video/final_video.mp4" \
             "shorts/final_video_shorts.mp4" \
             "thumbnail_final/thumbnail.jpg" \
             "thumbnail_shorts_final/thumbnail_shorts_final.jpg" \
+            $EXTRA_THUMBS \
             --repo "${{ github.repository }}" \
             --title "Devotional upload $TAG" \
             --notes-file release_notes.md

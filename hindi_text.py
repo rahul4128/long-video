@@ -117,3 +117,35 @@ def text_free_prompt(prompt: str) -> str:
     clean = _TEXT_TRIGGERS.sub("", (prompt or "").replace("\n", " "))
     clean = re.sub(r"\s{2,}", " ", clean).strip(" ,.")
     return NO_TEXT_PREFIX + clean
+
+def best_hindi_title(*candidates, min_len: int = 25, max_len: int = 100) -> str:
+    """Pick the best Devanagari-only title from the main title + variants.
+
+    Make's QC gate only checks that the title contains Hindi, so a title with
+    a stray Roman word ("katha", "vrat") is repaired here instead of the
+    whole day being skipped. Preference: already-clean titles of good length,
+    then repaired titles of good length, then the longest usable candidate.
+    """
+    flat = []
+    for cand in candidates:
+        if isinstance(cand, (list, tuple)):
+            flat.extend(str(c) for c in cand if c)
+        elif cand:
+            flat.append(str(cand))
+    scored = []
+    for order, raw in enumerate(flat):
+        raw = re.sub(r"\s+", " ", raw).strip()
+        if not raw:
+            continue
+        fixed = hindi_display_text(raw) if has_latin(raw) else raw
+        fixed = re.sub(r"\s+", " ", fixed).strip(" -|:")
+        if not fixed or devanagari_ratio(fixed) < 0.8:
+            continue
+        good_len = min_len <= len(fixed) <= max_len
+        was_clean = not has_latin(raw)
+        scored.append(((0 if good_len else 1), (0 if was_clean else 1), order, fixed))
+    if not scored:
+        return ""
+    scored.sort()
+    title = scored[0][3]
+    return title[:max_len].rstrip()

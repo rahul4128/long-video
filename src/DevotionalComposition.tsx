@@ -11,10 +11,12 @@ import {
 import { DevotionalVideoProps } from './types';
 import { Scene } from './Scene';
 import { Subtitles } from './Subtitles';
+import { HookOverlay } from './HookOverlay';
 
 export const DevotionalComposition: React.FC<DevotionalVideoProps> = ({
   scenes = [],
   bgmSwellSceneNumbers = [],
+  hookText = '',
 }) => {
   const { fps } = useVideoConfig();
   const frame = useCurrentFrame();
@@ -101,6 +103,9 @@ export const DevotionalComposition: React.FC<DevotionalVideoProps> = ({
           );
         })}
       </Series>
+
+      {/* First-1.8s on-screen Hindi hook (same promise as the thumbnail) */}
+      <HookOverlay text={hookText} format="long" />
     </AbsoluteFill>
   );
 };
