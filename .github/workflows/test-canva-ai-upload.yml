@@ -84,69 +84,47 @@ jobs:
               raise SystemExit("AI image generation failed or produced an invalid image.")
           PY
 
-      - name: Upload generated image to Canva
+      - name: Test existing Canva scene-asset bridge
         shell: bash
+        env:
+          CANVA_ACCESS_TOKEN: ${{ secrets.CANVA_ACCESS_TOKEN }}
+          CANVA_ASSET_BRIDGE_ENABLED: 'true'
+          CANVA_UPLOAD_SCENE_ASSETS: 'true'
         run: |
           set -euo pipefail
 
+          mkdir -p public/images out
+          cp test-output/ai-scene.png public/images/test_ai_scene.png
+
+          python scripts/canva_asset_bridge.py
+
+          echo "----- Canva bridge output -----"
+          cat out/canva_assets.json
+
           python3 - <<'PY'
-          import base64
           import json
-          import os
-          import time
           from pathlib import Path
-          import requests
 
-          path = Path("test-output/ai-scene.png")
-          token = os.environ["CANVA_ACCESS_TOKEN"]
+          path = Path("out/canva_assets.json")
+          if not path.exists():
+              raise SystemExit("Canva bridge did not create out/canva_assets.json")
 
-          headers = {
-              "Authorization": f"Bearer {token}",
-              "Content-Type": "application/octet-stream",
-              "Asset-Upload-Metadata": json.dumps({
-                  "name_base64": base64.b64encode(
-                      b"GitHub Canva Real AI Scene"
-                  ).decode("ascii")
-              }),
-          }
+          data = json.loads(path.read_text(encoding="utf-8"))
+          assets = data.get("assets", [])
 
-          response = requests.post(
-              "https://api.canva.com/rest/v1/asset-uploads",
-              headers=headers,
-              data=path.read_bytes(),
-              timeout=120,
-          )
-          response.raise_for_status()
+          scene_assets = [
+              item for item in assets
+              if item.get("path") == "public/images/test_ai_scene.png"
+          ]
 
-          job_id = response.json()["job"]["id"]
-          print(f"Upload job: {job_id}")
+          if not scene_assets:
+              raise SystemExit("Canva bridge did not upload the generated AI scene image")
 
-          for attempt in range(1, 31):
-              status_response = requests.get(
-                  f"https://api.canva.com/rest/v1/asset-uploads/{job_id}",
-                  headers={"Authorization": f"Bearer {token}"},
-                  timeout=30,
-              )
-              status_response.raise_for_status()
-
-              job = status_response.json()["job"]
-              status = job.get("status")
-              print(f"Poll {attempt}/30: {status}")
-
-              if status == "success":
-                  asset = job.get("asset", {})
-                  print("CANVA_UPLOAD_SUCCESS")
-                  print("asset_id:", asset.get("id"))
-                  print("asset_type:", asset.get("type"))
-                  print("asset_name:", asset.get("name"))
-                  break
-
-              if status == "failed":
-                  raise RuntimeError(job.get("error", {}))
-
-              time.sleep(3)
-          else:
-              raise TimeoutError("Canva upload did not finish.")
+          asset = scene_assets[0]
+          print("CANVA_BRIDGE_SUCCESS")
+          print("asset_id:", asset.get("assetId"))
+          print("asset_type:", asset.get("type"))
+          print("asset_name:", asset.get("name"))
           PY
 
       - name: Upload generated image artifact
