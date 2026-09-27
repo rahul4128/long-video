@@ -16,64 +16,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
-      CANVA_CLIENT_SECRET: ${{ secrets.CANVA_CLIENT_SECRET }}
-      CANVA_REFRESH_TOKEN: ${{ secrets.CANVA_REFRESH_TOKEN }}
+      CANVA_ACCESS_TOKEN: ${{ secrets.CANVA_ACCESS_TOKEN }}
       CANVA_DESIGN_ID: ${{ github.event.inputs.design_id }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate inputs and secrets
+      - name: Validate inputs and secret
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${CANVA_CLIENT_ID}" || { echo "Missing CANVA_CLIENT_ID"; exit 1; }
-          test -n "${CANVA_CLIENT_SECRET}" || { echo "Missing CANVA_CLIENT_SECRET"; exit 1; }
-          test -n "${CANVA_REFRESH_TOKEN}" || { echo "Missing CANVA_REFRESH_TOKEN"; exit 1; }
+          test -n "${CANVA_ACCESS_TOKEN}" || { echo "Missing CANVA_ACCESS_TOKEN GitHub secret."; exit 1; }
           test -n "${CANVA_DESIGN_ID}" || { echo "Missing design_id. Run this workflow with a Canva Design ID."; exit 1; }
           if [[ ! "${CANVA_DESIGN_ID}" =~ ^DA[A-Za-z0-9_-]+$ ]]; then
             echo "Invalid Canva Design ID format: ${CANVA_DESIGN_ID}"
             exit 1
           fi
           echo "Design ID: ${CANVA_DESIGN_ID}"
-          echo "Canva secrets are present."
+          echo "Canva access token is present."
 
-      - name: Refresh Canva access token
-        shell: bash
-        run: |
-          set -euo pipefail
-          basic_auth="$(printf '%s:%s' "${CANVA_CLIENT_ID}" "${CANVA_CLIENT_SECRET}" | base64 -w 0)"
-
-          response="$(curl --fail-with-body --silent --show-error \
-            --request POST \
-            --url "https://api.canva.com/rest/v1/oauth/token" \
-            --header "Authorization: Basic ${basic_auth}" \
-            --header "Content-Type: application/x-www-form-urlencoded" \
-            --data-urlencode "grant_type=refresh_token" \
-            --data-urlencode "refresh_token=${CANVA_REFRESH_TOKEN}")"
-
-          access_token="$(printf '%s' "${response}" | jq -r '.access_token // empty')"
-          new_refresh_token="$(printf '%s' "${response}" | jq -r '.refresh_token // empty')"
-          expires_in="$(printf '%s' "${response}" | jq -r '.expires_in // empty')"
-
-          test -n "${access_token}" || { echo "Canva token response did not contain an access token."; exit 1; }
-          test -n "${new_refresh_token}" || { echo "Canva token response did not contain a new refresh token."; exit 1; }
-
-          echo "::add-mask::${access_token}"
-          echo "::add-mask::${new_refresh_token}"
-
-          {
-            echo "CANVA_ACCESS_TOKEN=${access_token}"
-            echo "CANVA_NEW_REFRESH_TOKEN=${new_refresh_token}"
-            echo "CANVA_TOKEN_EXPIRES_IN=${expires_in}"
-          } >> "${GITHUB_ENV}"
-
-          echo "Canva access token generated successfully. expires_in=${expires_in}s"
-          echo "A new refresh token was returned and is masked; it is NOT written to logs or artifacts."
-
-      - name: Verify Canva design access
+      - name: Verify Canva export formats
         shell: bash
         run: |
           set -euo pipefail
@@ -82,27 +45,31 @@ jobs:
             --output "${response_file}" \
             --write-out '%{http_code}' \
             --request GET \
-            --url "https://api.canva.com/rest/v1/designs/${CANVA_DESIGN_ID}" \
+            --url "https://api.canva.com/rest/v1/designs/${CANVA_DESIGN_ID}/export-formats" \
             --header "Authorization: Bearer ${CANVA_ACCESS_TOKEN}")"
 
           if [[ "${http_code}" != "200" ]]; then
-            echo "Canva design metadata request failed with HTTP ${http_code}"
+            echo "Canva export-formats request failed with HTTP ${http_code}"
             cat "${response_file}"
             exit 1
           fi
 
-          jq '{
-            id: .design.id,
-            title: .design.title,
-            page_count: .design.page_count,
-            design_types: .design.design_types
-          }' "${response_file}"
+          echo "Canva API access confirmed."
+          jq '.formats' "${response_file}"
+
+          if [[ "$(jq -r '.formats.png // empty' "${response_file}")" == "" ]]; then
+            echo "PNG is not available for this Canva design."
+            exit 1
+          fi
 
       - name: Start Canva PNG export
         shell: bash
         run: |
           set -euo pipefail
           response_file="$(mktemp)"
+
+          payload="$(jq -n --arg design_id "${CANVA_DESIGN_ID}" '{design_id: $design_id, format: {type: "png"}}')"
+
           http_code="$(curl --silent --show-error \
             --output "${response_file}" \
             --write-out '%{http_code}' \
@@ -110,7 +77,7 @@ jobs:
             --url "https://api.canva.com/rest/v1/exports" \
             --header "Authorization: Bearer ${CANVA_ACCESS_TOKEN}" \
             --header "Content-Type: application/json" \
-            --data "{"design_id":"${CANVA_DESIGN_ID}","format":{"type":"png"}}")"
+            --data "${payload}")"
 
           if [[ "${http_code}" != "200" ]]; then
             echo "Canva export creation failed with HTTP ${http_code}"
@@ -120,7 +87,12 @@ jobs:
 
           export_id="$(jq -r '.job.id // empty' "${response_file}")"
           status="$(jq -r '.job.status // empty' "${response_file}")"
-          test -n "${export_id}" || { echo "No export job ID returned."; cat "${response_file}"; exit 1; }
+
+          test -n "${export_id}" || {
+            echo "No export job ID returned."
+            cat "${response_file}"
+            exit 1
+          }
 
           echo "CANVA_EXPORT_ID=${export_id}" >> "${GITHUB_ENV}"
           echo "Initial export status: ${status}"
@@ -151,10 +123,14 @@ jobs:
 
             if [[ "${status}" == "success" ]]; then
               export_url="$(jq -r '.job.urls[0] // empty' "${response_file}")"
-              test -n "${export_url}" || { echo "Export succeeded but no download URL was returned."; cat "${response_file}"; exit 1; }
+              test -n "${export_url}" || {
+                echo "Export succeeded but no download URL was returned."
+                exit 1
+              }
 
-              echo "Downloading exported Canva file..."
-              curl --fail --silent --show-error --location "${export_url}" --output downloads/canva-test.png
+              curl --fail --silent --show-error --location "${export_url}" \
+                --output downloads/canva-test.png
+              echo "Canva PNG downloaded successfully."
               break
             fi
 
