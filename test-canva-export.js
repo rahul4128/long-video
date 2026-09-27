@@ -1,21 +1,54 @@
 const fs = require("fs");
 
 const DESIGN_ID = "DAHWYLOY8G0";
-const TOKEN = process.env.CANVA_API_TOKEN;
+const CLIENT_ID = process.env.CANVA_CLIENT_ID;
+const CLIENT_SECRET = process.env.CANVA_CLIENT_SECRET;
+const REFRESH_TOKEN = process.env.CANVA_REFRESH_TOKEN;
 const BASE = "https://api.canva.com/rest/v1";
 
-if (!TOKEN) {
-  console.error("CANVA_API_TOKEN is missing.");
-  process.exit(1);
+for (const [name, value] of Object.entries({
+  CANVA_CLIENT_ID: CLIENT_ID,
+  CANVA_CLIENT_SECRET: CLIENT_SECRET,
+  CANVA_REFRESH_TOKEN: REFRESH_TOKEN
+})) {
+  if (!value) {
+    console.error(name + " is missing.");
+    process.exit(1);
+  }
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-async function request(path, options = {}) {
+async function getAccessToken() {
+  const credentials = Buffer.from(CLIENT_ID + ":" + CLIENT_SECRET).toString("base64");
+  const response = await fetch(BASE + "/oauth/token", {
+    method: "POST",
+    headers: {
+      Authorization: "Basic " + credentials,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: REFRESH_TOKEN
+    })
+  });
+
+  const text = await response.text();
+  if (!response.ok) throw new Error("Token refresh failed: " + response.status + " - " + text);
+
+  const data = JSON.parse(text);
+  if (!data.access_token) throw new Error("No access token returned from Canva.");
+
+  console.log("Canva access token obtained successfully.");
+  console.log("Granted scope:", data.scope || "(not returned)");
+  return data.access_token;
+}
+
+async function apiRequest(token, path, options = {}) {
   return fetch(BASE + path, {
     ...options,
     headers: {
-      Authorization: "Bearer " + TOKEN,
+      Authorization: "Bearer " + token,
       ...(options.body ? { "Content-Type": "application/json" } : {}),
       ...(options.headers || {})
     }
@@ -24,14 +57,15 @@ async function request(path, options = {}) {
 
 async function main() {
   fs.mkdirSync("downloads", { recursive: true });
+  const token = await getAccessToken();
 
   console.log("Creating Canva JPG export:", DESIGN_ID);
 
-  const create = await request("/exports", {
+  const create = await apiRequest(token, "/exports", {
     method: "POST",
     body: JSON.stringify({
       design_id: DESIGN_ID,
-      format: { type: "jpg", quality: 90 }
+      format: { type: "jpg" }
     })
   });
 
@@ -50,13 +84,10 @@ async function main() {
   for (let i = 1; i <= 12 && job.status === "in_progress"; i++) {
     await sleep(5000);
 
-    const poll = await request("/exports/" + encodeURIComponent(exportId));
+    const poll = await apiRequest(token, "/exports/" + encodeURIComponent(exportId));
     const pollText = await poll.text();
 
-    if (!poll.ok) {
-      console.log("Poll", i, "HTTP", poll.status);
-      continue;
-    }
+    if (!poll.ok) throw new Error("Poll failed: " + poll.status + " - " + pollText);
 
     job = JSON.parse(pollText).job || {};
     console.log("Poll", i, "status:", job.status);
