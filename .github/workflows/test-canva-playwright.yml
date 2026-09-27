@@ -1,0 +1,106 @@
+name: Test Canva Media Download
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - test/canva-playwright
+
+jobs:
+  canva-playwright:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
+      CANVA_CLIENT_SECRET: ${{ secrets.CANVA_CLIENT_SECRET }}
+      CANVA_REFRESH_TOKEN: ${{ secrets.CANVA_REFRESH_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm install playwright
+          npx playwright install --with-deps chromium
+
+      - name: Open Canva media page and extract image
+        env:
+          CANVA_MEDIA_URL: https://www.canva.com/M/MAHWYOi22z0
+        run: |
+          cat > canva-download.mjs <<'EOF'
+          import { chromium } from "playwright";
+          import fs from "node:fs/promises";
+
+          const url = process.env.CANVA_MEDIA_URL;
+          const browser = await chromium.launch({ headless: true });
+          const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+
+          const candidates = new Set();
+          page.on("response", async (response) => {
+            const u = response.url();
+            const type = response.headers()["content-type"] || "";
+            if (type.startsWith("image/") || /\.(png|jpe?g|webp)(\?|$)/i.test(u)) {
+              candidates.add(u);
+            }
+          });
+
+          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+          await page.waitForTimeout(8000);
+
+          for (const src of await page.locator("img").evaluateAll(imgs => imgs.map(i => i.currentSrc || i.src).filter(Boolean))) {
+            candidates.add(src);
+          }
+
+          console.log("Candidate image URLs:", [...candidates]);
+
+          let downloaded = false;
+          for (const candidate of candidates) {
+            try {
+              const res = await page.request.get(candidate, { timeout: 30000 });
+              const type = res.headers()["content-type"] || "";
+              const body = await res.body();
+              if (res.ok() && type.startsWith("image/") && body.length > 10000) {
+                const ext = type.includes("png") ? "png" : type.includes("webp") ? "webp" : "jpg";
+                await fs.writeFile(`canva-test.${ext}`, body);
+                console.log("Downloaded:", candidate);
+                console.log("Content-Type:", type);
+                console.log("Bytes:", body.length);
+                downloaded = true;
+                break;
+              }
+            } catch (e) {
+              console.log("Candidate failed:", candidate, e.message);
+            }
+          }
+
+          if (!downloaded) {
+            await page.screenshot({ path: "canva-page-screenshot.png", fullPage: true });
+            throw new Error("No raw Canva image URL could be downloaded.");
+          }
+
+          await browser.close();
+          EOF
+
+          node canva-download.mjs
+
+      - name: Validate image
+        run: |
+          file canva-test.* || true
+          identify canva-test.* || true
+          ls -lh canva-test.*
+
+      - name: Upload test artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: canva-playwright-test
+          path: |
+            canva-test.*
+            canva-page-screenshot.png
+          if-no-files-found: error

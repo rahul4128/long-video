@@ -1,0 +1,117 @@
+name: Test Hindi TTS 190M
+
+on:
+  workflow_dispatch:
+
+jobs:
+  hindi-tts-190m:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout test branch
+        uses: actions/checkout@v4
+
+      - name: Check reference files
+        run: |
+          test -f voice/ref.wav
+          test -f voice/ref.txt
+          ls -lh voice/ref.wav voice/ref.txt
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch torchaudio soundfile numpy huggingface_hub
+          pip install f5-tts vocos
+
+      - name: Download Hindi-TTS-190M inference code
+        run: |
+          git clone --depth 1 https://huggingface.co/spaces/5ivatej/hindi-tts-190M hindi-tts-space
+          test -f hindi-tts-space/infer_core.py
+          find hindi-tts-space -maxdepth 1 -type f -printf "%f\n"
+
+      - name: Prepare reference voice
+        run: |
+          cp voice/ref.wav hindi-tts-space/ref_audio.wav
+          cp voice/ref.txt hindi-tts-space/ref_text.txt
+          ls -lh hindi-tts-space/ref_audio.wav hindi-tts-space/ref_text.txt
+
+      - name: Generate Hindi voice test
+        env:
+          TEST_TEXT: "नमस्ते, यह मेरे अपने आवाज़ में हिंदी टेक्स्ट का एक छोटा परीक्षण है। हम इस मॉडल की गुणवत्ता और गति को GitHub Actions पर जांच रहे हैं।"
+        run: |
+          cat > run_test.py <<'PY'
+          import os
+          import sys
+          import time
+          from pathlib import Path
+          import soundfile as sf
+
+          sys.path.insert(0, str(Path("hindi-tts-space").resolve()))
+
+          from infer_core import HindiTTS
+
+          ref_audio = "hindi-tts-space/ref_audio.wav"
+          ref_text = Path("hindi-tts-space/ref_text.txt").read_text(encoding="utf-8").strip()
+          text = os.environ["TEST_TEXT"]
+
+          print("=== Hindi-TTS-190M GitHub CPU Test ===", flush=True)
+          print(f"Reference audio: {ref_audio}", flush=True)
+          print(f"Reference transcript chars: {len(ref_text)}", flush=True)
+          print(f"Test text chars: {len(text)}", flush=True)
+
+          start = time.perf_counter()
+          tts = HindiTTS(device="cpu")
+          init_time = time.perf_counter() - start
+          print(f"Model initialization: {init_time:.2f}s", flush=True)
+
+          start = time.perf_counter()
+          sr, wave = tts.synth(text)
+          synth_time = time.perf_counter() - start
+
+          output = "hindi-tts-190m-test.wav"
+          sf.write(output, wave, sr)
+
+          duration = len(wave) / sr
+          rtf = synth_time / duration if duration else 0
+
+          print(f"Audio duration: {duration:.2f}s", flush=True)
+          print(f"Synthesis time: {synth_time:.2f}s", flush=True)
+          print(f"RTF: {rtf:.3f}", flush=True)
+          print(f"Output: {output}", flush=True)
+
+          Path("tts_metrics.txt").write_text(
+              f"audio_duration_seconds={duration:.3f}\n"
+              f"synthesis_time_seconds={synth_time:.3f}\n"
+              f"rtf={rtf:.3f}\n"
+              f"model_init_seconds={init_time:.3f}\n",
+              encoding="utf-8",
+          )
+          PY
+
+          python -u run_test.py
+
+      - name: Verify output
+        run: |
+          test -s hindi-tts-190m-test.wav
+          ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1 hindi-tts-190m-test.wav
+          cat tts_metrics.txt
+
+      - name: Upload Hindi voice test
+        uses: actions/upload-artifact@v4
+        with:
+          name: hindi-tts-190m-test
+          path: |
+            hindi-tts-190m-test.wav
+            tts_metrics.txt
+          if-no-files-found: error
