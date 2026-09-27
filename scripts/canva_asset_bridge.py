@@ -136,8 +136,9 @@ def main():
     # with intermediate scene visuals.
     upload_scene_assets = os.getenv("CANVA_UPLOAD_SCENE_ASSETS", "false").lower() == "true"
     if upload_scene_assets:
+        scene_dir = Path(os.getenv("CANVA_SCENE_ASSET_DIR", "public/images"))
         scene_paths = [
-            p for p in sorted(Path("public/images").glob("*"))
+            p for p in sorted(scene_dir.glob("*"))
             if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".webm")
         ][:3]
         for p in scene_paths:
