@@ -48,7 +48,8 @@ jobs:
 
           python3 - <<'PY'
           from pathlib import Path
-          from generate_assets import generate_ai_image, _valid_generated_image
+          from generate_assets import generate_ai_image
+          from PIL import Image
 
           path = Path("test-output/ai-scene.png")
 
@@ -66,9 +67,18 @@ jobs:
               pollinations_height=720,
           )
 
-          ok = _valid_generated_image(str(path))
+          ok = False
+          if path.exists() and path.stat().st_size > 1024:
+              try:
+                  with Image.open(path) as image:
+                      image.verify()
+                  ok = True
+              except Exception as exc:
+                  print("AI_IMAGE_VALIDATION_ERROR:", exc)
+
           print("AI_IMAGE_VALID:", ok)
           print("AI_IMAGE_PATH:", path)
+          print("AI_IMAGE_BYTES:", path.stat().st_size if path.exists() else 0)
 
           if not ok:
               raise SystemExit("AI image generation failed or produced an invalid image.")
