@@ -1,0 +1,136 @@
+name: Test Canva AI Image Upload
+
+on:
+  workflow_dispatch:
+
+jobs:
+  canva-ai-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      CANVA_ACCESS_TOKEN: ${{ secrets.CANVA_ACCESS_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CANVA_ACCESS_TOKEN}" || { echo "Missing CANVA_ACCESS_TOKEN"; exit 1; }
+          echo "Canva access token is present."
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg espeak-ng
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install requests pillow
+
+      - name: Generate real AI scene image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-output
+
+          python3 - <<'PY'
+          from pathlib import Path
+          from generate_assets import generate_ai_image
+          from PIL import Image
+
+          path = Path("test-output/ai-scene.png")
+
+          prompt = (
+              "Ancient Vishnupad Temple in Gaya, Bihar, sacred Hindu pilgrimage site, "
+              "devotees praying, cinematic devotional atmosphere, detailed architecture, "
+              "warm divine lighting, 16:9 composition"
+          )
+
+          generate_ai_image(
+              prompt,
+              str(path),
+              aspect_ratio="16:9",
+              pollinations_width=1280,
+              pollinations_height=720,
+          )
+
+          ok = False
+          if path.exists() and path.stat().st_size > 1024:
+              try:
+                  with Image.open(path) as image:
+                      image.verify()
+                  ok = True
+              except Exception as exc:
+                  print("AI_IMAGE_VALIDATION_ERROR:", exc)
+
+          print("AI_IMAGE_VALID:", ok)
+          print("AI_IMAGE_PATH:", path)
+          print("AI_IMAGE_BYTES:", path.stat().st_size if path.exists() else 0)
+
+          if not ok:
+              raise SystemExit("AI image generation failed or produced an invalid image.")
+          PY
+
+      - name: Test existing Canva scene-asset bridge
+        shell: bash
+        env:
+          CANVA_ACCESS_TOKEN: ${{ secrets.CANVA_ACCESS_TOKEN }}
+          CANVA_ASSET_BRIDGE_ENABLED: 'true'
+          CANVA_UPLOAD_SCENE_ASSETS: 'true'
+        run: |
+          set -euo pipefail
+
+          mkdir -p public/images out
+          cp test-output/ai-scene.png public/images/test_ai_scene.png
+
+          python scripts/canva_asset_bridge.py
+
+          echo "----- Canva bridge output -----"
+          cat out/canva_assets.json
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("out/canva_assets.json")
+          if not path.exists():
+              raise SystemExit("Canva bridge did not create out/canva_assets.json")
+
+          data = json.loads(path.read_text(encoding="utf-8"))
+          assets = data.get("assets", [])
+
+          scene_assets = [
+              item for item in assets
+              if item.get("path") == "public/images/test_ai_scene.png"
+          ]
+
+          if not scene_assets:
+              raise SystemExit("Canva bridge did not upload the generated AI scene image")
+
+          asset = scene_assets[0]
+          print("CANVA_BRIDGE_SUCCESS")
+          print("asset_id:", asset.get("assetId"))
+          print("asset_type:", asset.get("type"))
+          print("asset_name:", asset.get("name"))
+          PY
+
+      - name: Upload generated image artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canva-ai-generated-image
+          path: test-output/ai-scene.png
+          if-no-files-found: warn
