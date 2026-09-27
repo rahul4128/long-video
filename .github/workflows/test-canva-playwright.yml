@@ -2,6 +2,9 @@ name: Test Canva Media Download
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - test/canva-playwright
 
 jobs:
   canva-playwright:
