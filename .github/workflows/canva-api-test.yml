@@ -1,0 +1,37 @@
+name: Canva Official API Export Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  export-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          package-manager-cache: false
+
+      - name: Run Canva export test
+        env:
+          CANVA_API_TOKEN: ${{ secrets.CANVA_API_TOKEN }}
+        run: node test-canva-export.js
+
+      - name: Validate image
+        if: success()
+        run: |
+          file downloads/official-thumbnail.jpg
+          identify downloads/official-thumbnail.jpg
+          ls -lh downloads/official-thumbnail.jpg
+
+      - name: Upload artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canva-official-api-thumbnail
+          path: downloads/official-thumbnail.jpg
