@@ -7,6 +7,7 @@ const { fontFamily } = loadFont();
 export interface ThumbnailProps {
   backgroundImage: string;
   hookText: string;
+  textPosition?: string;
 }
 
 // Renders the final YouTube thumbnail: the AI-generated background image
@@ -33,28 +34,22 @@ export const ThumbnailComposition: React.FC<ThumbnailProps> = ({
         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
       />
 
-      {/* Darkening gradient behind the text band so bold hook text stays
-          readable over any background image, without hiding the whole
-          frame - the subject still needs to read clearly at thumbnail
-          scale. */}
+      {/* Subtle adaptive vignette; text is not forced to the bottom. */}
       <AbsoluteFill
         style={{
           background:
-            'linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.55) 30%, rgba(0,0,0,0) 58%)',
+            'radial-gradient(ellipse at center, rgba(0,0,0,0) 38%, rgba(0,0,0,0.34) 100%)',
         }}
       />
 
       {hookText && (
         <AbsoluteFill
           style={{
-            justifyContent: 'flex-end',
-            alignItems: 'center',
-            paddingBottom: 64,
-            paddingLeft: 60,
-            paddingRight: 60,
+            ...placement,
+            padding: 48,
           }}
         >
-          <div style={{ maxWidth: '94%', textAlign: 'center' }}>
+          <div style={{ maxWidth: '58%', textAlign: placement.textAlign as React.CSSProperties['textAlign'] }}>
             <span
               style={{
                 fontFamily,
