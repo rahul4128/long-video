@@ -137,10 +137,23 @@ def main():
     upload_scene_assets = os.getenv("CANVA_UPLOAD_SCENE_ASSETS", "false").lower() == "true"
     if upload_scene_assets:
         scene_dir = Path(os.getenv("CANVA_SCENE_ASSET_DIR", "public/images"))
+        try:
+            scene_limit = max(1, min(10, int(os.getenv("CANVA_SCENE_ASSET_LIMIT", "3"))))
+        except ValueError:
+            scene_limit = 3
+
+        # Upload real generated scene visuals only. Do not accidentally count
+        # thumbnails, generic recovery placeholders, audio, or unrelated files
+        # toward the scene limit.
+        supported = {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".webm"}
         scene_paths = [
             p for p in sorted(scene_dir.glob("*"))
-            if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".webm")
-        ][:3]
+            if p.is_file()
+            and p.suffix.lower() in supported
+            and (p.stem.startswith("scene_") or p.stem.startswith("shorts_scene_"))
+            and not p.stem.startswith("recovery_")
+        ][:scene_limit]
+
         for p in scene_paths:
             items.append((
                 "",
