@@ -153,7 +153,19 @@ jobs:
         run: |
           set -euo pipefail
           file downloads/canva-test.png
-          identify downloads/canva-test.png
+          python3 - <<'PY'
+          import struct
+          from pathlib import Path
+
+          p = Path("downloads/canva-test.png")
+          data = p.read_bytes()
+
+          if data[:8] != b"\x89PNG\r\n\x1a\n":
+              raise SystemExit("Downloaded file is not a valid PNG.")
+
+          width, height = struct.unpack(">II", data[16:24])
+          print(f"PNG validated: {width}x{height}, {len(data)} bytes")
+          PY
           ls -lh downloads/canva-test.png
 
       - name: Upload Canva export artifact
