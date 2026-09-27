@@ -26,7 +26,19 @@ export interface ThumbnailProps {
 export const ThumbnailComposition: React.FC<ThumbnailProps> = ({
   backgroundImage,
   hookText,
+  textPosition = 'centerRight',
 }) => {
+  const positionStyles: Record<string, React.CSSProperties> = {
+    topLeft: { top: 70, left: 48, right: 'auto', bottom: 'auto', alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left' },
+    topRight: { top: 70, left: 'auto', right: 48, bottom: 'auto', alignItems: 'flex-end', justifyContent: 'flex-start', textAlign: 'right' },
+    centerLeft: { top: 0, left: 48, right: 'auto', bottom: 0, alignItems: 'flex-start', justifyContent: 'center', textAlign: 'left' },
+    centerRight: { top: 0, left: 'auto', right: 48, bottom: 0, alignItems: 'flex-end', justifyContent: 'center', textAlign: 'right' },
+    bottomLeft: { top: 'auto', left: 48, right: 'auto', bottom: 70, alignItems: 'flex-start', justifyContent: 'flex-end', textAlign: 'left' },
+    bottomRight: { top: 'auto', left: 'auto', right: 48, bottom: 70, alignItems: 'flex-end', justifyContent: 'flex-end', textAlign: 'right' },
+    center: { top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', textAlign: 'center' },
+  };
+  const placement = positionStyles[textPosition] || positionStyles.centerRight;
+
   return (
     <AbsoluteFill style={{ backgroundColor: '#000000' }}>
       <Img
