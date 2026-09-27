@@ -19,7 +19,9 @@ jobs:
 
       - name: Run Canva export test
         env:
-          CANVA_API_TOKEN: ${{ secrets.CANVA_API_TOKEN }}
+          CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
+          CANVA_CLIENT_SECRET: ${{ secrets.CANVA_CLIENT_SECRET }}
+          CANVA_REFRESH_TOKEN: ${{ secrets.CANVA_REFRESH_TOKEN }}
         run: node test-canva-export.js
 
       - name: Validate image
