@@ -2,198 +2,188 @@ name: Test Canva Media Download
 
 on:
   workflow_dispatch:
+    inputs:
+      design_id:
+        description: "Canva Design ID (for example DAHWYLFWoRw)"
+        required: true
+        type: string
   push:
     branches:
       - test/canva-playwright
 
 jobs:
-  canva-playwright:
+  canva-rest-export:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
+      CANVA_CLIENT_SECRET: ${{ secrets.CANVA_CLIENT_SECRET }}
+      CANVA_REFRESH_TOKEN: ${{ secrets.CANVA_REFRESH_TOKEN }}
+      CANVA_DESIGN_ID: ${{ github.event.inputs.design_id }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          package-manager-cache: false
-
-      - name: Install Playwright
+      - name: Validate inputs and secrets
+        shell: bash
         run: |
-          npm init -y
-          npm install playwright
-          npx playwright install --with-deps chromium
+          set -euo pipefail
+          test -n "${CANVA_CLIENT_ID}" || { echo "Missing CANVA_CLIENT_ID"; exit 1; }
+          test -n "${CANVA_CLIENT_SECRET}" || { echo "Missing CANVA_CLIENT_SECRET"; exit 1; }
+          test -n "${CANVA_REFRESH_TOKEN}" || { echo "Missing CANVA_REFRESH_TOKEN"; exit 1; }
+          test -n "${CANVA_DESIGN_ID}" || { echo "Missing design_id. Run this workflow with a Canva Design ID."; exit 1; }
+          if [[ ! "${CANVA_DESIGN_ID}" =~ ^DA[A-Za-z0-9_-]+$ ]]; then
+            echo "Invalid Canva Design ID format: ${CANVA_DESIGN_ID}"
+            exit 1
+          fi
+          echo "Design ID: ${CANVA_DESIGN_ID}"
+          echo "Canva secrets are present."
+
+      - name: Refresh Canva access token
+        shell: bash
+        run: |
+          set -euo pipefail
+          basic_auth="$(printf '%s:%s' "${CANVA_CLIENT_ID}" "${CANVA_CLIENT_SECRET}" | base64 -w 0)"
+
+          response="$(curl --fail-with-body --silent --show-error \
+            --request POST \
+            --url "https://api.canva.com/rest/v1/oauth/token" \
+            --header "Authorization: Basic ${basic_auth}" \
+            --header "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "grant_type=refresh_token" \
+            --data-urlencode "refresh_token=${CANVA_REFRESH_TOKEN}")"
+
+          access_token="$(printf '%s' "${response}" | jq -r '.access_token // empty')"
+          new_refresh_token="$(printf '%s' "${response}" | jq -r '.refresh_token // empty')"
+          expires_in="$(printf '%s' "${response}" | jq -r '.expires_in // empty')"
+
+          test -n "${access_token}" || { echo "Canva token response did not contain an access token."; exit 1; }
+          test -n "${new_refresh_token}" || { echo "Canva token response did not contain a new refresh token."; exit 1; }
+
+          echo "::add-mask::${access_token}"
+          echo "::add-mask::${new_refresh_token}"
+
+          {
+            echo "CANVA_ACCESS_TOKEN=${access_token}"
+            echo "CANVA_NEW_REFRESH_TOKEN=${new_refresh_token}"
+            echo "CANVA_TOKEN_EXPIRES_IN=${expires_in}"
+          } >> "${GITHUB_ENV}"
+
+          echo "Canva access token generated successfully. expires_in=${expires_in}s"
+          echo "A new refresh token was returned and is masked; it is NOT written to logs or artifacts."
+
+      - name: Verify Canva design access
+        shell: bash
+        run: |
+          set -euo pipefail
+          response_file="$(mktemp)"
+          http_code="$(curl --silent --show-error \
+            --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --request GET \
+            --url "https://api.canva.com/rest/v1/designs/${CANVA_DESIGN_ID}" \
+            --header "Authorization: Bearer ${CANVA_ACCESS_TOKEN}")"
+
+          if [[ "${http_code}" != "200" ]]; then
+            echo "Canva design metadata request failed with HTTP ${http_code}"
+            cat "${response_file}"
+            exit 1
+          fi
+
+          jq '{
+            id: .design.id,
+            title: .design.title,
+            page_count: .design.page_count,
+            design_types: .design.design_types
+          }' "${response_file}"
+
+      - name: Start Canva PNG export
+        shell: bash
+        run: |
+          set -euo pipefail
+          response_file="$(mktemp)"
+          http_code="$(curl --silent --show-error \
+            --output "${response_file}" \
+            --write-out '%{http_code}' \
+            --request POST \
+            --url "https://api.canva.com/rest/v1/exports" \
+            --header "Authorization: Bearer ${CANVA_ACCESS_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data "{"design_id":"${CANVA_DESIGN_ID}","format":{"type":"png"}}")"
+
+          if [[ "${http_code}" != "200" ]]; then
+            echo "Canva export creation failed with HTTP ${http_code}"
+            cat "${response_file}"
+            exit 1
+          fi
+
+          export_id="$(jq -r '.job.id // empty' "${response_file}")"
+          status="$(jq -r '.job.status // empty' "${response_file}")"
+          test -n "${export_id}" || { echo "No export job ID returned."; cat "${response_file}"; exit 1; }
+
+          echo "CANVA_EXPORT_ID=${export_id}" >> "${GITHUB_ENV}"
+          echo "Initial export status: ${status}"
+
+      - name: Poll Canva export job
+        shell: bash
+        run: |
+          set -euo pipefail
           mkdir -p downloads
 
-      - name: Open Canva media page and capture diagnostics
-        env:
-          CANVA_MEDIA_URL: https://www.canva.com/M/MAHWYOi22z0
-        run: |
-          cat > canva-download.mjs <<'EOF'
-          import { chromium } from "playwright";
-          import fs from "node:fs/promises";
+          for attempt in {1..30}; do
+            response_file="$(mktemp)"
+            http_code="$(curl --silent --show-error \
+              --output "${response_file}" \
+              --write-out '%{http_code}' \
+              --request GET \
+              --url "https://api.canva.com/rest/v1/exports/${CANVA_EXPORT_ID}" \
+              --header "Authorization: Bearer ${CANVA_ACCESS_TOKEN}")"
 
-          const targetUrl = process.env.CANVA_MEDIA_URL;
-          const browser = await chromium.launch({ headless: true });
-          const context = await browser.newContext({
-            viewport: { width: 1440, height: 900 }
-          });
-          const page = await context.newPage();
-          const candidates = new Set();
-          const resources = [];
+            if [[ "${http_code}" != "200" ]]; then
+              echo "Canva export status request failed with HTTP ${http_code}"
+              cat "${response_file}"
+              exit 1
+            fi
 
-          const blocked = (u) => {
-            try {
-              const host = new URL(u).hostname.toLowerCase();
-              return host === "status.canva.com" ||
-                     host.endsWith(".status.canva.com") ||
-                     host === "cloudflare.com" ||
-                     host.endsWith(".cloudflare.com") ||
-                     host === "challenges.cloudflare.com" ||
-                     host.endsWith(".challenges.cloudflare.com");
-            } catch {
-              return true;
-            }
-          };
+            status="$(jq -r '.job.status // empty' "${response_file}")"
+            echo "Poll ${attempt}/30: status=${status}"
 
-          page.on("response", (response) => {
-            const u = response.url();
-            const type = response.headers()["content-type"] || "";
-            resources.push({
-              url: u,
-              status: response.status(),
-              contentType: type
-            });
-            if (!blocked(u) && (type.startsWith("image/") || /\\.(png|jpe?g|webp)(\\?|$)/i.test(u))) {
-              candidates.add(u);
-            }
-          });
+            if [[ "${status}" == "success" ]]; then
+              export_url="$(jq -r '.job.urls[0] // empty' "${response_file}")"
+              test -n "${export_url}" || { echo "Export succeeded but no download URL was returned."; cat "${response_file}"; exit 1; }
 
-          let failed = false;
+              echo "Downloading exported Canva file..."
+              curl --fail --silent --show-error --location "${export_url}" --output downloads/canva-test.png
+              break
+            fi
 
-          try {
-            console.log("Opening Canva page:", targetUrl);
-            const response = await page.goto(targetUrl, {
-              waitUntil: "domcontentloaded",
-              timeout: 60000
-            });
+            if [[ "${status}" == "failed" ]]; then
+              echo "Canva export job failed:"
+              jq '.job.error // .job' "${response_file}"
+              exit 1
+            fi
 
-            const finalUrl = page.url();
-            console.log("Initial response:", response?.status(), response?.url());
-            console.log("Final page URL:", finalUrl);
+            sleep 5
+          done
 
-            await page.waitForTimeout(3000);
-
-            const imgSources = await page.locator("img").evaluateAll(imgs =>
-              imgs.map(i => i.currentSrc || i.src).filter(Boolean)
-            );
-
-            for (const src of imgSources) {
-              if (!blocked(src)) candidates.add(src);
-            }
-
-            const performanceUrls = await page.evaluate(() =>
-              performance.getEntriesByType("resource").map(e => e.name)
-            );
-            for (const u of performanceUrls) {
-              if (!blocked(u) && /\\.(png|jpe?g|webp)(\\?|$)/i.test(u)) {
-                candidates.add(u);
-              }
-            }
-
-            await fs.writeFile("downloads/debug-source.html", await page.content());
-            await page.screenshot({
-              path: "downloads/debug-screenshot.png",
-              fullPage: true
-            });
-            await fs.writeFile(
-              "downloads/canva-resources.json",
-              JSON.stringify(resources, null, 2)
-            );
-
-            console.log("Candidate image URLs:", [...candidates]);
-
-            const finalHost = new URL(finalUrl).hostname.toLowerCase();
-            if (
-              blocked(finalUrl) ||
-              finalHost !== "www.canva.com" ||
-              !finalUrl.startsWith("https://www.canva.com/")
-            ) {
-              throw new Error("Canva page did not remain on an allowed Canva URL; possible block/challenge/redirect.");
-            }
-
-            if (candidates.size === 0) {
-              throw new Error("No non-blocked Canva image candidates were found.");
-            }
-
-            let downloaded = false;
-            for (const candidate of candidates) {
-              try {
-                const res = await page.request.get(candidate, { timeout: 30000 });
-                const type = res.headers()["content-type"] || "";
-                const body = await res.body();
-
-                if (
-                  res.ok() &&
-                  type.startsWith("image/") &&
-                  body.length > 10000 &&
-                  !blocked(candidate)
-                ) {
-                  const ext = type.includes("png")
-                    ? "png"
-                    : type.includes("webp")
-                      ? "webp"
-                      : "jpg";
-                  await fs.writeFile(`downloads/canva-test.${ext}`, body);
-                  console.log("Downloaded verified Canva candidate:", candidate);
-                  console.log("Content-Type:", type);
-                  console.log("Bytes:", body.length);
-                  downloaded = true;
-                  break;
-                }
-              } catch (e) {
-                console.log("Candidate failed:", candidate, e.message);
-              }
-            }
-
-            if (!downloaded) {
-              throw new Error("No verified Canva image could be downloaded.");
-            }
-          } catch (error) {
-            failed = true;
-            console.error("TEST FAILED:", error.message);
-            process.exitCode = 1;
-          } finally {
-            try {
-              await fs.writeFile(
-                "downloads/diagnostic-summary.txt",
-                [
-                  `targetUrl=${targetUrl}`,
-                  `finalUrl=${page.url()}`,
-                  `failed=${failed}`,
-                  `candidateCount=${candidates.size}`
-                ].join("\\n") + "\\n"
-              );
-            } catch {}
-            await browser.close();
+          test -s downloads/canva-test.png || {
+            echo "Canva export did not finish within the polling window."
+            exit 1
           }
-          EOF
 
-          node canva-download.mjs
-
-      - name: Validate verified image
+      - name: Validate exported image
         if: success()
         run: |
-          file downloads/canva-test.* 
-          identify downloads/canva-test.*
-          ls -lh downloads/canva-test.*
+          set -euo pipefail
+          file downloads/canva-test.png
+          identify downloads/canva-test.png
+          ls -lh downloads/canva-test.png
 
-      - name: Upload Canva diagnostics
+      - name: Upload Canva export artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: canva-debug-payload
-          path: downloads/
+          name: canva-rest-export-test
+          path: downloads/canva-test.png
           if-no-files-found: warn
