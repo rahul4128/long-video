@@ -30,6 +30,11 @@ on:
         description: 'YouTube privacy for this run: public, unlisted or private (use private/unlisted when you want to polish in Canva first)'
         required: false
         type: string
+      recovery_source_run_id:
+        description: 'Optional: reuse artifacts from this prior run ID and rerun only recovery/publish stages'
+        required: false
+        default: ''
+        type: string
 
 concurrency:
   group: canva-token-rotation
@@ -42,6 +47,7 @@ jobs:
   # so this job no longer wastes time installing Node/npm at all.
   # ---------------------------------------------------------------
   generate-assets:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.recovery_source_run_id == '' }}
     runs-on: ubuntu-latest
     # Own-voice IndicF5 on a CPU runner is slow; keep a generous ceiling.
     timeout-minutes: 90
@@ -186,6 +192,7 @@ jobs:
   # after another - this is the main speed win for render time.
   # ---------------------------------------------------------------
   render-long:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.recovery_source_run_id == '' }}
     needs: generate-assets
     runs-on: ubuntu-latest
     steps:
@@ -234,6 +241,7 @@ jobs:
           retention-days: 14
 
   render-shorts:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.recovery_source_run_id == '' }}
     needs: generate-assets
     runs-on: ubuntu-latest
     steps:
@@ -290,6 +298,7 @@ jobs:
   # video render jobs above rather than adding to the critical path.
   # ---------------------------------------------------------------
   render-thumbnail:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.recovery_source_run_id == '' }}
     needs: generate-assets
     runs-on: ubuntu-latest
     steps:
@@ -343,6 +352,7 @@ jobs:
   # thumbnail render at all. Runs in parallel with everything else.
   # ---------------------------------------------------------------
   render-thumbnail-shorts:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.recovery_source_run_id == '' }}
     needs: generate-assets
     runs-on: ubuntu-latest
     steps:
@@ -393,6 +403,7 @@ jobs:
   # generated narration/effect file with ffprobe before publishing.
   # ---------------------------------------------------------------
   media-qc:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.recovery_source_run_id == '' }}
     needs: [generate-assets, render-long, render-shorts, render-thumbnail, render-thumbnail-shorts]
     runs-on: ubuntu-latest
     steps:
@@ -444,6 +455,7 @@ jobs:
   # title/description/thumbnail and files each into its playlist.
   # ---------------------------------------------------------------
   publish-and-notify:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.recovery_source_run_id == '' }}
     needs: [generate-assets, render-long, render-shorts, render-thumbnail, render-thumbnail-shorts, media-qc]
     runs-on: ubuntu-latest
     permissions:
@@ -593,6 +605,230 @@ jobs:
             --arg shortsUrl "${{ steps.assets.outputs.shorts_url }}" \
             --arg thumbUrl "${{ steps.assets.outputs.thumb_url }}" \
             --arg shortsThumbUrl "${{ steps.assets.outputs.shorts_thumb_url }}" \
+            --slurpfile meta "assets/out/metadata.json" \
+            '{
+              releaseTag: $releaseTag,
+              privacyStatus: $privacy,
+              canva: {
+                designs: [($canva.designs // [])[] | {label, edit_url}],
+                assets: [($canva.assets // [])[] | {name, assetId, type}]
+              },
+              long_video: {
+                downloadUrl: $longUrl,
+                title: $meta[0].long_video_title,
+                description: $meta[0].long_video_description,
+                tags: $meta[0].tags
+              },
+              shorts: {
+                downloadUrl: $shortsUrl,
+                title: $meta[0].shorts_title,
+                description: $meta[0].shorts_description,
+                tags: $meta[0].hashtags,
+                thumbnailUrl: $shortsThumbUrl
+              },
+              thumbnail: {
+                downloadUrl: $thumbUrl
+              }
+            }' > payload.json
+          curl -sS -f -X POST -H "Content-Type: application/json" \
+            --data @payload.json "$MAKE_WEBHOOK_URL"
+
+  # ---------------------------------------------------------------
+  # RECOVERY MODE: reuse successful artifacts from an earlier run,
+  # rerender only the long thumbnail with current branch code, then
+  # continue QC -> Canva -> Release -> Office Make callback.
+  # ---------------------------------------------------------------
+  recover-existing-run:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.recovery_source_run_id != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Checkout current fixed branch
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Cache node_modules
+        id: recovery-nodecache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles('package.json') }}-v1
+
+      - name: Install Node.js dependencies
+        if: steps.recovery-nodecache.outputs.cache-hit != 'true'
+        run: npm install
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Install recovery dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-core fonts-deva
+          pip install requests pynacl
+
+      - name: Download generated assets from source run
+        uses: actions/download-artifact@v7
+        with:
+          name: generated-assets-${{ inputs.recovery_source_run_id }}
+          run-id: ${{ inputs.recovery_source_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Render recovered long thumbnail with current code
+        run: npx remotion still ThumbnailComposition out/thumbnail.jpg --props=public/thumbnail_props.json
+
+      - name: Preserve recovered thumbnail
+        run: |
+          mkdir -p thumbnail_final
+          cp out/thumbnail.jpg thumbnail_final/thumbnail.jpg
+
+      - name: Download long video from source run
+        uses: actions/download-artifact@v7
+        with:
+          name: devotional-video-${{ inputs.recovery_source_run_id }}
+          run-id: ${{ inputs.recovery_source_run_id }}
+          github-token: ${{ github.token }}
+          path: video
+
+      - name: Download Shorts video from source run
+        uses: actions/download-artifact@v7
+        with:
+          name: devotional-shorts-${{ inputs.recovery_source_run_id }}
+          run-id: ${{ inputs.recovery_source_run_id }}
+          github-token: ${{ github.token }}
+          path: shorts
+
+      - name: Download Shorts thumbnail from source run
+        uses: actions/download-artifact@v7
+        with:
+          name: devotional-thumbnail-shorts-${{ inputs.recovery_source_run_id }}
+          run-id: ${{ inputs.recovery_source_run_id }}
+          github-token: ${{ github.token }}
+          path: thumbnail_shorts_final
+
+      - name: Assemble QC inputs
+        run: |
+          mkdir -p out
+          cp video/final_video.mp4 out/final_video.mp4
+          cp shorts/final_video_shorts.mp4 out/final_video_shorts.mp4
+          cp thumbnail_final/thumbnail.jpg out/thumbnail.jpg
+          cp thumbnail_shorts_final/thumbnail_shorts_final.jpg out/thumbnail_shorts_final.jpg
+
+      - name: Run automated media QC
+        run: python qc.py
+
+      - name: Upload recovery QC report
+        uses: actions/upload-artifact@v7
+        with:
+          name: media-qc-recovery-${{ github.run_id }}
+          path: out/qc_report.json
+          retention-days: 14
+
+      - name: Prepare source assets for Canva and metadata
+        run: |
+          mkdir -p assets
+          cp -R public assets/public
+          mkdir -p assets/out
+          cp out/metadata.json assets/out/metadata.json
+
+      - name: Authenticate Canva and rotate refresh token
+        id: recovery_canva_auth
+        continue-on-error: true
+        env:
+          CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
+          CANVA_CLIENT_SECRET: ${{ secrets.CANVA_CLIENT_SECRET }}
+          CANVA_REFRESH_TOKEN: ${{ secrets.CANVA_REFRESH_TOKEN }}
+          REPO_SECRETS_TOKEN: ${{ secrets.REPO_SECRETS_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/refresh_canva_token.py
+
+      - name: Canva finishing using recovered outputs
+        continue-on-error: true
+        env:
+          CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
+          CANVA_ASSET_BRIDGE_ENABLED: ${{ vars.CANVA_FINISHING_ENABLED || 'true' }}
+          CANVA_UPLOAD_VIDEOS: ${{ vars.CANVA_UPLOAD_VIDEOS || 'true' }}
+          CANVA_UPLOAD_SCENE_ASSETS: ${{ vars.CANVA_UPLOAD_SCENE_ASSETS || 'true' }}
+          CANVA_SCENE_ASSET_DIR: assets/public/images
+          CANVA_METADATA_JSON: assets/out/metadata.json
+          CANVA_THUMB_PATH: thumbnail_final/thumbnail.jpg
+          CANVA_SHORTS_THUMB_PATH: thumbnail_shorts_final/thumbnail_shorts_final.jpg
+          CANVA_LONG_VIDEO_PATH: video/final_video.mp4
+          CANVA_SHORTS_VIDEO_PATH: shorts/final_video_shorts.mp4
+        run: |
+          python scripts/canva_asset_bridge.py
+          cat out/canva_notes.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Build YouTube upload pack
+        env:
+          PACK_METADATA_JSON: assets/out/metadata.json
+          PACK_OUTPUT: out/youtube_pack.md
+        run: python scripts/youtube_pack.py
+
+      - name: Create recovered GitHub Release
+        id: recovery_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG="devotional-${{ inputs.recovery_source_run_id }}"
+          gh release delete "$TAG" --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
+          {
+            cat out/youtube_pack.md 2>/dev/null || echo "_YouTube pack not generated._"
+            echo
+            cat out/canva_notes.md 2>/dev/null || echo "_Canva finishing not run._"
+          } > release_notes.md
+          gh release create "$TAG" \
+            "video/final_video.mp4" \
+            "shorts/final_video_shorts.mp4" \
+            "thumbnail_final/thumbnail.jpg" \
+            "thumbnail_shorts_final/thumbnail_shorts_final.jpg" \
+            --repo "${{ github.repository }}" \
+            --title "Devotional recovered upload $TAG" \
+            --notes-file release_notes.md
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Look up recovered release URLs
+        id: recovery_assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG="${{ steps.recovery_release.outputs.tag }}"
+          JSON=$(gh api "repos/${{ github.repository }}/releases/tags/$TAG")
+          echo "long_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="final_video.mp4") | .browser_download_url')" >> "$GITHUB_OUTPUT"
+          echo "shorts_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="final_video_shorts.mp4") | .browser_download_url')" >> "$GITHUB_OUTPUT"
+          echo "thumb_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="thumbnail.jpg") | .browser_download_url')" >> "$GITHUB_OUTPUT"
+          echo "shorts_thumb_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="thumbnail_shorts_final.jpg") | .browser_download_url')" >> "$GITHUB_OUTPUT"
+
+      - name: Notify Office Make callback
+        continue-on-error: true
+        env:
+          MAKE_WEBHOOK_URL: ${{ secrets.MAKE_YOUTUBE_WEBHOOK_URL }}
+          YOUTUBE_PRIVACY: ${{ inputs.privacy || vars.YOUTUBE_PRIVACY || 'public' }}
+        run: |
+          set -e
+          if [ -z "$MAKE_WEBHOOK_URL" ]; then
+            echo "::warning::MAKE_YOUTUBE_WEBHOOK_URL is not set - recovered videos were not sent to YouTube."
+            exit 0
+          fi
+          CANVA_JSON=$( [ -f out/canva_assets.json ] && cat out/canva_assets.json || echo '{}' )
+          jq -n \
+            --arg privacy "$YOUTUBE_PRIVACY" \
+            --argjson canva "$CANVA_JSON" \
+            --arg releaseTag "${{ steps.recovery_release.outputs.tag }}" \
+            --arg longUrl "${{ steps.recovery_assets.outputs.long_url }}" \
+            --arg shortsUrl "${{ steps.recovery_assets.outputs.shorts_url }}" \
+            --arg thumbUrl "${{ steps.recovery_assets.outputs.thumb_url }}" \
+            --arg shortsThumbUrl "${{ steps.recovery_assets.outputs.shorts_thumb_url }}" \
             --slurpfile meta "assets/out/metadata.json" \
             '{
               releaseTag: $releaseTag,
