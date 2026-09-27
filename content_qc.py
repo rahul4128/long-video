@@ -175,7 +175,9 @@ def validate_payload(payload):
         words = all_scene_text.split()
         if len(words) > 520:
             warnings.append("narration_over_520_words")
-        if len(words) < 280:
+        if len(words) < 250:
+            issues.append(f"long_narration_too_short:{len(words)}_words_minimum_250")
+        elif len(words) < 280:
             warnings.append("narration_under_280_words")
         # Repeated long phrases are a useful proxy for templated/mass-produced narration.
         ngrams = {}
