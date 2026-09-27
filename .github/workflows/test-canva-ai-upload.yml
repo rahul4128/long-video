@@ -6,23 +6,23 @@ on:
 jobs:
   canva-ai-upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     env:
       CANVA_ACCESS_TOKEN: ${{ secrets.CANVA_ACCESS_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate Canva secret
+      - name: Validate required secrets
         shell: bash
         run: |
           set -euo pipefail
-          test -n "${CANVA_ACCESS_TOKEN}" || {
-            echo "Missing CANVA_ACCESS_TOKEN GitHub secret."
-            exit 1
-          }
+          test -n "${CANVA_ACCESS_TOKEN}" || { echo "Missing CANVA_ACCESS_TOKEN"; exit 1; }
           echo "Canva access token is present."
 
       - name: Set up Python
@@ -30,35 +30,51 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Canva dependency
-        run: pip install requests pillow
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg espeak-ng
 
-      - name: Create Canva upload test
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install requests
+
+      - name: Generate real AI scene image
         shell: bash
         run: |
           set -euo pipefail
-
           mkdir -p test-output
 
           python3 - <<'PY'
           from pathlib import Path
-          from PIL import Image, ImageDraw
+          from generate_assets import generate_ai_image, _valid_generated_image
 
-          path = Path("test-output/canva-ai-test.png")
+          path = Path("test-output/ai-scene.png")
 
-          image = Image.new("RGB", (1920, 1080), "white")
-          draw = ImageDraw.Draw(image)
-          draw.text(
-              (80, 80),
-              "Canva AI Upload Test",
-              fill="black",
+          prompt = (
+              "Ancient Vishnupad Temple in Gaya, Bihar, sacred Hindu pilgrimage site, "
+              "devotees praying, cinematic devotional atmosphere, detailed architecture, "
+              "warm divine lighting, 16:9 composition"
           )
 
-          image.save(path)
-          print(f"Created {path}")
+          generate_ai_image(
+              prompt,
+              str(path),
+              aspect_ratio="16:9",
+              pollinations_width=1280,
+              pollinations_height=720,
+          )
+
+          ok = _valid_generated_image(str(path))
+          print("AI_IMAGE_VALID:", ok)
+          print("AI_IMAGE_PATH:", path)
+
+          if not ok:
+              raise SystemExit("AI image generation failed or produced an invalid image.")
           PY
 
-      - name: Upload image to Canva
+      - name: Upload generated image to Canva
         shell: bash
         run: |
           set -euo pipefail
@@ -71,7 +87,7 @@ jobs:
           from pathlib import Path
           import requests
 
-          path = Path("test-output/canva-ai-test.png")
+          path = Path("test-output/ai-scene.png")
           token = os.environ["CANVA_ACCESS_TOKEN"]
 
           headers = {
@@ -79,7 +95,7 @@ jobs:
               "Content-Type": "application/octet-stream",
               "Asset-Upload-Metadata": json.dumps({
                   "name_base64": base64.b64encode(
-                      b"GitHub Canva AI Test"
+                      b"GitHub Canva Real AI Scene"
                   ).decode("ascii")
               }),
           }
@@ -122,3 +138,11 @@ jobs:
           else:
               raise TimeoutError("Canva upload did not finish.")
           PY
+
+      - name: Upload generated image artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canva-ai-generated-image
+          path: test-output/ai-scene.png
+          if-no-files-found: warn
