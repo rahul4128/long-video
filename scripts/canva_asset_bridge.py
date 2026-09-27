@@ -131,6 +131,23 @@ def main():
             ("CANVA_SHORTS_VIDEO_PATH", "shorts/final_video_shorts.mp4", f"Short | {title}", None),
         ]
 
+    # Optional scene-asset upload for controlled Canva testing/integration.
+    # Disabled by default so normal production runs do not fill Canva Uploads
+    # with intermediate scene visuals.
+    upload_scene_assets = os.getenv("CANVA_UPLOAD_SCENE_ASSETS", "false").lower() == "true"
+    if upload_scene_assets:
+        scene_paths = [
+            p for p in sorted(Path("public/images").glob("*"))
+            if p.is_file() and p.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".webm")
+        ][:3]
+        for p in scene_paths:
+            items.append((
+                "",
+                str(p),
+                f"Scene Visual | {p.stem}"[:50],
+                None,
+            ))
+
     for env_name, default, asset_name, design_spec in items:
         path = _env_path(env_name, default)
         if not path.exists():
