@@ -26,6 +26,11 @@ on:
         description: 'Live scout note'
         required: false
         type: string
+      canva_upload_scene_assets:
+        description: 'Upload up to 3 generated scene assets to Canva during this manual test run'
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: canva-token-rotation
@@ -98,6 +103,7 @@ jobs:
         env:
           CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
           CANVA_ASSET_BRIDGE_ENABLED: 'true'
+          CANVA_UPLOAD_SCENE_ASSETS: ${{ github.event_name == 'workflow_dispatch' && inputs.canva_upload_scene_assets && 'true' || 'false' }}
         run: python scripts/canva_asset_bridge.py
 
       - name: Upload content QC report
