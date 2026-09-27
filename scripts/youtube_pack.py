@@ -91,8 +91,8 @@ def build(meta: dict) -> str:
         lines += [f"- {v}" for v in variants[:2]]
     lines += ["", "**Description** (chapters included)", _block(long_desc)]
     lines += ["", "**Tags** (paste into *Tags*, under the 500-character limit)", _block(", ".join(tags))]
-    lines += ["", "**Thumbnail** — *Test & Compare*: upload all of these, YouTube picks the winner by watch time:"]
-    lines += [f"- `{t.get('file')}` — {t.get('hookText', '')}" for t in thumbs]
+    lines += ["", "**Thumbnail** — one final creator-style thumbnail:"]
+    lines += [f"- `{t.get('file')}` — {t.get('hookText', '')}" for t in thumbs[:1]]
     lines += ["", "**Settings checklist**",
               "- Language: Hindi · Caption language: Hindi · Category: Education (or Entertainment)",
               "- *Altered or synthetic content*: **Yes** (AI voice / AI images) — protects monetization",
