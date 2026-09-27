@@ -913,13 +913,93 @@ def generate_huggingface_image(prompt: str, dest_path: str, aspect_ratio: str = 
         print(f"Hugging Face notice: {e}", flush=True)
     return False
 
+def _valid_generated_image(path: str, min_bytes: int = 8000) -> bool:
+    """Reject missing, corrupt, tiny, or near-solid images before Remotion sees them."""
+    if not path or not os.path.exists(path) or os.path.getsize(path) < min_bytes:
+        return False
+    try:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height,codec_name",
+             "-of", "json", path],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=10,
+        )
+        info = json.loads(probe.stdout or "{}").get("streams", [])
+        if not info or int(info[0].get("width", 0)) < 256 or int(info[0].get("height", 0)) < 256:
+            return False
+    except Exception:
+        return False
+
+    # Detect the exact class of placeholder that caused the recent black screens:
+    # a tiny-variance, very-dark image. Sample a downscaled frame with ffmpeg.
+    try:
+        sample = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", path, "-vf", "scale=32:32,format=gray",
+             "-frames:v", "1", "-f", "rawvideo", "pipe:1"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=10,
+        )
+        pixels = list(sample.stdout)
+        if len(pixels) < 512:
+            return False
+        avg = sum(pixels) / len(pixels)
+        variance = sum((p - avg) ** 2 for p in pixels) / len(pixels)
+        if avg < 18 and variance < 25:
+            print(f"  ⚠️ Rejected near-black/flat image: avg={avg:.1f}, variance={variance:.1f}", flush=True)
+            return False
+    except Exception:
+        return False
+    return True
+
+
+def generate_hf_fallback_model(prompt: str, dest_path: str, model_id: str,
+                               aspect_ratio: str = "16:9") -> bool:
+    """Try an alternate Hugging Face text-to-image model when the primary FLUX route fails.
+
+    This is optional: it only runs when HUGGINGFACE_API_KEY is configured.
+    Public models can still fail if the provider does not currently expose them.
+    """
+    if not HUGGINGFACE_API_KEY or not prompt or not model_id:
+        return False
+    url = f"https://router.huggingface.co/hf-inference/models/{model_id}"
+    width, height = (1024, 576) if aspect_ratio == "16:9" else (576, 1024)
+    clean_text = text_free_prompt(prompt).replace("\"", "").strip()
+    final_prompt = f"{clean_text}, Indian mythological devotional painting, {aspect_ratio} composition, warm divine lighting, highly detailed"
+    try:
+        res = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {HUGGINGFACE_API_KEY}", "Content-Type": "application/json"},
+            timeout=60,
+            json={"inputs": final_prompt[:450], "parameters": {"width": width, "height": height}},
+        )
+        if res.status_code == 200 and res.headers.get("content-type", "").startswith("image/"):
+            with open(dest_path, "wb") as f:
+                f.write(res.content)
+            if _valid_generated_image(dest_path):
+                print(f"  ✅ Image fetched from Hugging Face ({model_id})", flush=True)
+                return True
+            try:
+                os.remove(dest_path)
+            except OSError:
+                pass
+        else:
+            print(f"Hugging Face fallback notice ({model_id}): HTTP {res.status_code}", flush=True)
+    except Exception as e:
+        print(f"Hugging Face fallback notice ({model_id}): {e}", flush=True)
+    return False
+
+
 def generate_ai_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9",
                        pollinations_width: int = 1920, pollinations_height: int = 1080) -> None:
-    """Single entry point for AI visuals with an in-run deterministic cache.
+    """Single entry point for AI visuals with resilient, validated fallbacks.
 
-    The cache avoids regenerating the same prompt multiple times inside one
-    production run (especially thumbnails/Shorts variants) while keeping heavy
-    media out of Make.com and out of Git history.
+    Order:
+      1. Cloudflare FLUX
+      2. Hugging Face FLUX.1-schnell
+      3. Optional HF SDXL
+      4. Optional HF Qwen-Image
+      5. Optional HF SD 3.5 Medium
+      6. Pollinations
+      7. No dark placeholder: caller will fall through to stock/local assets
     """
     import hashlib
     cache_key = hashlib.sha256(
@@ -927,25 +1007,43 @@ def generate_ai_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9",
     ).hexdigest()[:24]
     cache_dir = os.path.join("out", "visual_cache")
     os.makedirs(cache_dir, exist_ok=True)
-    ext = ".png"
-    cache_path = os.path.join(cache_dir, cache_key + ext)
-    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 1024:
+    cache_path = os.path.join(cache_dir, cache_key + ".png")
+    if _valid_generated_image(cache_path):
         shutil.copyfile(cache_path, dest_path)
         print(f"  ♻️ AI visual cache hit: {cache_key}", flush=True)
         return
 
-    if generate_cloudflare_flux(prompt, dest_path, aspect_ratio=aspect_ratio):
-        pass
-    elif generate_huggingface_image(prompt, dest_path, aspect_ratio=aspect_ratio):
+    if generate_cloudflare_flux(prompt, dest_path, aspect_ratio=aspect_ratio) and _valid_generated_image(dest_path):
+        print("  ✅ Image fetched from Cloudflare FLUX", flush=True)
+    elif generate_huggingface_image(prompt, dest_path, aspect_ratio=aspect_ratio) and _valid_generated_image(dest_path):
         print("  ✅ Image fetched from Hugging Face (FLUX.1-schnell)", flush=True)
     else:
-        download_pollinations_fallback(prompt, dest_path, width=pollinations_width, height=pollinations_height)
+        fallback_models = [
+            ("stabilityai/stable-diffusion-xl-base-1.0", "SDXL"),
+            ("Qwen/Qwen-Image-2512", "Qwen-Image"),
+            ("stabilityai/stable-diffusion-3.5-medium", "SD 3.5 Medium"),
+        ]
+        generated = False
+        for model_id, label in fallback_models:
+            if generate_hf_fallback_model(prompt, dest_path, model_id, aspect_ratio=aspect_ratio):
+                generated = True
+                break
+        if not generated:
+            generated = download_pollinations_fallback(
+                prompt, dest_path, width=pollinations_width, height=pollinations_height
+            )
+        if generated and not _valid_generated_image(dest_path):
+            try:
+                os.remove(dest_path)
+            except OSError:
+                pass
 
-    if os.path.exists(dest_path) and os.path.getsize(dest_path) > 1024:
+    if _valid_generated_image(dest_path):
         try:
             shutil.copyfile(dest_path, cache_path)
         except Exception:
             pass
+
 
 def download_pollinations_fallback(prompt: str, img_dest: str, width: int = 1920, height: int = 1080) -> bool:
     clean_text = text_free_prompt(prompt).replace("\"", "").strip()[:220]
@@ -959,15 +1057,18 @@ def download_pollinations_fallback(prompt: str, img_dest: str, width: int = 1920
             if res.status_code == 200 and len(res.content) > 8000:
                 with open(img_dest, "wb") as f:
                     f.write(res.content)
-                return True
+                if _valid_generated_image(img_dest):
+                    return True
+                try:
+                    os.remove(img_dest)
+                except OSError:
+                    pass
         except Exception:
             pass
         time.sleep(1)
 
-    subprocess.run([
-        "ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=0x150a00:s={width}x{height}",
-        "-vframes", "1", img_dest
-    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Never manufacture a dark placeholder. Returning False lets the caller
+    # continue to its real-stock/local-library fallback instead.
     return False
 
 # -------------------------------------------------------------
