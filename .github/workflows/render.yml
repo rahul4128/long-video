@@ -513,6 +513,8 @@ jobs:
           CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
           CANVA_ASSET_BRIDGE_ENABLED: ${{ vars.CANVA_FINISHING_ENABLED || 'true' }}
           CANVA_UPLOAD_VIDEOS: ${{ vars.CANVA_UPLOAD_VIDEOS || 'true' }}
+          CANVA_UPLOAD_SCENE_ASSETS: ${{ vars.CANVA_UPLOAD_SCENE_ASSETS || 'true' }}
+          CANVA_SCENE_ASSET_DIR: assets/public/images
           CANVA_METADATA_JSON: assets/out/metadata.json
           CANVA_THUMB_PATH: thumbnail_final/thumbnail.jpg
           CANVA_SHORTS_THUMB_PATH: thumbnail_shorts_final/thumbnail_shorts_final.jpg
