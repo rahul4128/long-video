@@ -12,7 +12,7 @@ on:
       pipeline:
         description: 'Pipeline label'
         required: false
-        default: 'office-make-clone'
+        default: 'canva-updated-flow'
         type: string
       qc_verdict:
         description: 'Agent QC verdict'
