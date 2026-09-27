@@ -21,7 +21,18 @@ const { fontFamily } = loadFont();
 export const ShortsThumbnailComposition: React.FC<ThumbnailProps> = ({
   backgroundImage,
   hookText,
+  textPosition = 'centerRight',
 }) => {
+  const positionStyles: Record<string, React.CSSProperties> = {
+    topLeft: { top: 70, left: 36, right: 'auto', bottom: 'auto', alignItems: 'flex-start', justifyContent: 'flex-start', textAlign: 'left' },
+    topRight: { top: 70, left: 'auto', right: 36, bottom: 'auto', alignItems: 'flex-end', justifyContent: 'flex-start', textAlign: 'right' },
+    centerLeft: { top: 0, left: 36, right: 'auto', bottom: 0, alignItems: 'flex-start', justifyContent: 'center', textAlign: 'left' },
+    centerRight: { top: 0, left: 'auto', right: 36, bottom: 0, alignItems: 'flex-end', justifyContent: 'center', textAlign: 'right' },
+    bottomLeft: { top: 'auto', left: 36, right: 'auto', bottom: 70, alignItems: 'flex-start', justifyContent: 'flex-end', textAlign: 'left' },
+    bottomRight: { top: 'auto', left: 'auto', right: 36, bottom: 70, alignItems: 'flex-end', justifyContent: 'flex-end', textAlign: 'right' },
+    center: { top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', textAlign: 'center' },
+  };
+  const placement = positionStyles[textPosition] || positionStyles.centerRight;
   return (
     <AbsoluteFill style={{ backgroundColor: '#000000' }}>
       <Img
@@ -32,21 +43,18 @@ export const ShortsThumbnailComposition: React.FC<ThumbnailProps> = ({
       <AbsoluteFill
         style={{
           background:
-            'linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.55) 34%, rgba(0,0,0,0) 62%)',
+            'radial-gradient(ellipse at center, rgba(0,0,0,0) 34%, rgba(0,0,0,0.38) 100%)',
         }}
       />
 
       {hookText && (
         <AbsoluteFill
           style={{
-            justifyContent: 'flex-end',
-            alignItems: 'center',
-            paddingBottom: 90,
-            paddingLeft: 48,
-            paddingRight: 48,
+            ...placement,
+            padding: 34,
           }}
         >
-          <div style={{ maxWidth: '96%', textAlign: 'center' }}>
+          <div style={{ maxWidth: '72%', textAlign: placement.textAlign as React.CSSProperties['textAlign'] }}>
             <span
               style={{
                 fontFamily,
