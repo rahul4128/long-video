@@ -40,6 +40,12 @@ jobs:
           test -f hindi-tts-space/infer_core.py
           find hindi-tts-space -maxdepth 1 -type f -printf "%f\n"
 
+      - name: Prepare reference voice
+        run: |
+          cp voice/ref.wav hindi-tts-space/ref_audio.wav
+          cp voice/ref.txt hindi-tts-space/ref_text.txt
+          ls -lh hindi-tts-space/ref_audio.wav hindi-tts-space/ref_text.txt
+
       - name: Generate Hindi voice test
         env:
           TEST_TEXT: "नमस्ते, यह मेरे अपने आवाज़ में हिंदी टेक्स्ट का एक छोटा परीक्षण है। हम इस मॉडल की गुणवत्ता और गति को GitHub Actions पर जांच रहे हैं।"
@@ -55,8 +61,8 @@ jobs:
 
           from infer_core import HindiTTS
 
-          ref_audio = "voice/ref.wav"
-          ref_text = Path("voice/ref.txt").read_text(encoding="utf-8").strip()
+          ref_audio = "hindi-tts-space/ref_audio.wav"
+          ref_text = Path("hindi-tts-space/ref_text.txt").read_text(encoding="utf-8").strip()
           text = os.environ["TEST_TEXT"]
 
           print("=== Hindi-TTS-190M GitHub CPU Test ===", flush=True)
@@ -70,11 +76,7 @@ jobs:
           print(f"Model initialization: {init_time:.2f}s", flush=True)
 
           start = time.perf_counter()
-          sr, wave = tts.synth(
-              text,
-              ref_audio=ref_audio,
-              ref_text=ref_text,
-          )
+          sr, wave = tts.synth(text)
           synth_time = time.perf_counter() - start
 
           output = "hindi-tts-190m-test.wav"
