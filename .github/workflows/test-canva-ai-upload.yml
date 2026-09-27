@@ -1,0 +1,124 @@
+name: Test Canva AI Image Upload
+
+on:
+  workflow_dispatch:
+
+jobs:
+  canva-ai-upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      CANVA_ACCESS_TOKEN: ${{ secrets.CANVA_ACCESS_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Canva secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CANVA_ACCESS_TOKEN}" || {
+            echo "Missing CANVA_ACCESS_TOKEN GitHub secret."
+            exit 1
+          }
+          echo "Canva access token is present."
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Canva dependency
+        run: pip install requests
+
+      - name: Create Canva upload test
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p test-output
+
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageDraw
+
+          path = Path("test-output/canva-ai-test.png")
+
+          image = Image.new("RGB", (1920, 1080), "white")
+          draw = ImageDraw.Draw(image)
+          draw.text(
+              (80, 80),
+              "Canva AI Upload Test",
+              fill="black",
+          )
+
+          image.save(path)
+          print(f"Created {path}")
+          PY
+
+      - name: Upload image to Canva
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import time
+          from pathlib import Path
+          import requests
+
+          path = Path("test-output/canva-ai-test.png")
+          token = os.environ["CANVA_ACCESS_TOKEN"]
+
+          headers = {
+              "Authorization": f"Bearer {token}",
+              "Content-Type": "application/octet-stream",
+              "Asset-Upload-Metadata": json.dumps({
+                  "name_base64": base64.b64encode(
+                      b"GitHub Canva AI Test"
+                  ).decode("ascii")
+              }),
+          }
+
+          response = requests.post(
+              "https://api.canva.com/rest/v1/asset-uploads",
+              headers=headers,
+              data=path.read_bytes(),
+              timeout=120,
+          )
+          response.raise_for_status()
+
+          job_id = response.json()["job"]["id"]
+          print(f"Upload job: {job_id}")
+
+          for attempt in range(1, 31):
+              status_response = requests.get(
+                  f"https://api.canva.com/rest/v1/asset-uploads/{job_id}",
+                  headers={"Authorization": f"Bearer {token}"},
+                  timeout=30,
+              )
+              status_response.raise_for_status()
+
+              job = status_response.json()["job"]
+              status = job.get("status")
+              print(f"Poll {attempt}/30: {status}")
+
+              if status == "success":
+                  asset = job.get("asset", {})
+                  print("CANVA_UPLOAD_SUCCESS")
+                  print("asset_id:", asset.get("id"))
+                  print("asset_type:", asset.get("type"))
+                  print("asset_name:", asset.get("name"))
+                  break
+
+              if status == "failed":
+                  raise RuntimeError(job.get("error", {}))
+
+              time.sleep(3)
+          else:
+              raise TimeoutError("Canva upload did not finish.")
+          PY
