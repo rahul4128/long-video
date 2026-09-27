@@ -31,7 +31,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install Canva dependency
-        run: pip install requests
+        run: pip install requests pillow
 
       - name: Create Canva upload test
         shell: bash
