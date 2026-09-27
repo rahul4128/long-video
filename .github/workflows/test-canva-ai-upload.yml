@@ -38,7 +38,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install -r requirements.txt
-          pip install requests
+          pip install requests pillow
 
       - name: Generate real AI scene image
         shell: bash
