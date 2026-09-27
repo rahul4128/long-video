@@ -76,7 +76,7 @@ jobs:
           try {
             console.log("Opening Canva page:", targetUrl);
             const response = await page.goto(targetUrl, {
-              waitUntil: "networkidle",
+              waitUntil: "domcontentloaded",
               timeout: 60000
             });
 
