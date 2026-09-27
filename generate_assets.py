@@ -1114,7 +1114,7 @@ def generate_multi_shot_ai_images(
                 pollinations_width=pollinations_width,
                 pollinations_height=pollinations_height,
             )
-            if os.path.exists(dest) and os.path.getsize(dest) > 1024:
+            if _valid_generated_image(dest):
                 filenames.append(filename)
                 print(
                     f"    🎨 AI sub-shot {shot_index + 1}/{count}: {filename}",
@@ -1555,7 +1555,7 @@ def process_long_scene_visual(scene_info):
         basis = remaining if shots else target_seconds
         num_image_shots = max(1, min(4, round(basis / SUB_SHOT_SECONDS)))
         verb = "Topping up with" if shots else "Generating"
-        print(f"🎨 [Long Scene {idx}] {verb} {num_image_shots} FLUX.1 visual sub-shot(s): {prompt[:40]}...", flush=True)
+        print(f"🎨 [Long Scene {idx}] {verb} {num_image_shots} AI visual sub-shot(s): {prompt[:40]}...", flush=True)
         filenames = generate_multi_shot_ai_images(
             prompt, f"scene_{idx}_img", "16:9", num_image_shots,
             pollinations_width=1920, pollinations_height=1080,
@@ -1565,21 +1565,20 @@ def process_long_scene_visual(scene_info):
     return shots
 
 def recover_shots(shots, scene_idx, aspect="16:9") -> list:
-    """Drop missing assets and create a deterministic visual placeholder only
-    when every provider failed. This prevents a broken path from reaching
-    Remotion and turning into a black/frozen scene."""
+    """Drop invalid assets; never create a black placeholder frame."""
     valid = []
     for shot in shots or []:
-        path = os.path.join("public/images", shot.get("file",""))
-        if shot.get("file") and os.path.exists(path) and os.path.getsize(path) > 1024:
+        path = os.path.join("public/images", shot.get("file", ""))
+        if shot.get("file") and _valid_generated_image(path):
             valid.append(shot)
     if valid:
         return valid
-    name = f"recovery_{scene_idx}.png"
-    dest = os.path.join("public/images", name)
-    size = "1080x1920" if aspect == "9:16" else "1920x1080"
-    subprocess.run(["ffmpeg","-y","-f","lavfi","-i",f"color=c=black:s={size}:d=1","-frames:v","1",dest],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-    return [{"type":"image","file":name}] if os.path.exists(dest) else []
+    print(
+        f"⚠️ No valid visual asset survived for scene {scene_idx}; "
+        "no black placeholder will be created.",
+        flush=True,
+    )
+    return []
 
 # -------------------------------------------------------------
 # 5. PROCESS SHORTS SCENES (9:16 Vertical)
@@ -1637,7 +1636,7 @@ def process_shorts_scene_visual(scene_info):
         num_image_shots = max(1, min(2, round(basis / SUB_SHOT_SECONDS)))
         framing_hints = SUB_SHOT_FRAMING_HINTS
         verb = "Topping up with" if shots else "Generating"
-        print(f"🎨 [Shorts Scene {idx}] {verb} {num_image_shots} 9:16 FLUX.1 visual sub-shot(s)...", flush=True)
+        print(f"🎨 [Shorts Scene {idx}] {verb} {num_image_shots} 9:16 AI visual sub-shot(s)...", flush=True)
 
     filenames = generate_multi_shot_ai_images(
         f"{prompt}, vertical 9:16 composition", f"shorts_scene_{idx}_img", "9:16", num_image_shots,
