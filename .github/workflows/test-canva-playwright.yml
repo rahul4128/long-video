@@ -2,152 +2,105 @@ name: Test Canva Media Download
 
 on:
   workflow_dispatch:
-    inputs:
-      design_id:
-        description: "Canva Design ID (for example: DAHWYLFWoRw)"
-        required: true
-        type: string
+  push:
+    branches:
+      - test/canva-playwright
 
 jobs:
-  canva-api:
+  canva-playwright:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      CANVA_CLIENT_ID: ${{{ secrets.CANVA_CLIENT_ID }}
-      CANVA_CLIENT_SECRET: ${{{ secrets.CANVA_CLIENT_SECRET }}
-      CANVA_REFRESH_TOKEN: ${{{ secrets.CANVA_REFRESH_TOKEN }}
-      CANVA_DESIGN_ID: ${{{ inputs.design_id }}
-
+      CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
+      CANVA_CLIENT_SECRET: ${{ secrets.CANVA_CLIENT_SECRET }}
+      CANVA_REFRESH_TOKEN: ${{ secrets.CANVA_REFRESH_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Verify Canva configuration
-        shell: bash
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Install Playwright
         run: |
-          test -n "$CANVA_CLIENT_ID" || { echo "CANVA_CLIENT_ID is missing"; exit 1; }
-          test -n "$CANVA_CLIENT_SECRET" || { echo "CANVA_CLIENT_SECRET is missing"; exit 1; }
-          test -n "$CANVA_REFRESH_TOKEN" || { echo "CANVA_REFRESH_TOKEN is missing"; exit 1; }
-          test -n "$CANVA_DESIGN_ID" || { echo "design_id input is missing"; exit 1; }
-          echo "Canva credentials are mapped."
-          echo "Testing design: $CANVA_DESIGN_ID"
+          npm init -y
+          npm install playwright
+          npx playwright install --with-deps chromium
 
-      - name: Export Canva design through REST API
-        shell: bash
+      - name: Open Canva media page and extract image
+        env:
+          CANVA_MEDIA_URL: https://www.canva.com/M/MAHWYOi22z0
         run: |
-          set -euo pipefail
+          cat > canva-download.mjs <<'EOF'
+          import { chromium } from "playwright";
+          import fs from "node:fs/promises";
 
-          node <<'NODE'
-          const fs = require("fs");
+          const url = process.env.CANVA_MEDIA_URL;
+          const browser = await chromium.launch({ headless: true });
+          const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 
-          const clientId = process.env.CANVA_CLIENT_ID;
-          const clientSecret = process.env.CANVA_CLIENT_SECRET;
-          const refreshToken = process.env.CANVA_REFRESH_TOKEN;
-          const designId = process.env.CANVA_DESIGN_ID;
-
-          const basic = Buffer.from(clientId + ":" + clientSecret).toString("base64");
-
-          async function request(url, options = {}) {
-            const response = await fetch(url, options);
-            const text = await response.text();
-            let data;
-            try { data = JSON.parse(text); } catch { data = { raw: text }; }
-            if (!response.ok) {
-              throw new Error("HTTP " + response.status + ": " + JSON.stringify(data));
+          const candidates = new Set();
+          page.on("response", async (response) => {
+            const u = response.url();
+            const type = response.headers()["content-type"] || "";
+            if (type.startsWith("image/") || /\.(png|jpe?g|webp)(\?|$)/i.test(u)) {
+              candidates.add(u);
             }
-            return data;
+          });
+
+          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+          await page.waitForTimeout(8000);
+
+          for (const src of await page.locator("img").evaluateAll(imgs => imgs.map(i => i.currentSrc || i.src).filter(Boolean))) {
+            candidates.add(src);
           }
 
-          (async () => {
-            // Canva rotates the refresh token when this exchange succeeds.
-            // The new token must replace the GitHub secret before the next run.
-            const token = await request("https://api.canva.com/rest/v1/oauth/token", {
-              method: "POST",
-              headers: {
-                "Authorization": "Basic " + basic,
-                "Content-Type": "application/x-www-form-urlencoded"
-              },
-              body: new URLSearchParams({
-                grant_type: "refresh_token",
-                refresh_token: refreshToken
-              })
-            });
+          console.log("Candidate image URLs:", [...candidates]);
 
-            if (!token.access_token) throw new Error("Canva did not return an access token.");
-
-            if (token.refresh_token) {
-              fs.writeFileSync("canva-new-refresh-token.txt", token.refresh_token, { mode: 0o600 });
-              console.log("Canva returned a rotated refresh token. It is stored only in the artifact.");
-            }
-
-            const exportJob = await request("https://api.canva.com/rest/v1/exports", {
-              method: "POST",
-              headers: {
-                "Authorization": "Bearer " + token.access_token,
-                "Content-Type": "application/json"
-              },
-              body: JSON.stringify({
-                design_id: designId,
-                format: { type: "png" }
-              })
-            });
-
-            if (!exportJob.job?.id) {
-              throw new Error("Canva export job was not created: " + JSON.stringify(exportJob));
-            }
-
-            const jobId = exportJob.job.id;
-            console.log("Export job created:", jobId);
-
-            let result;
-            for (let attempt = 1; attempt <= 30; attempt++) {
-              await new Promise(resolve => setTimeout(resolve, 2000));
-
-              result = await request(
-                "https://api.canva.com/rest/v1/exports/" + encodeURIComponent(jobId),
-                { headers: { "Authorization": "Bearer " + token.access_token } }
-              );
-
-              const status = result.job?.status;
-              console.log("Export status (attempt " + attempt + "):", status);
-
-              if (status === "success") break;
-              if (status === "failed") {
-                throw new Error("Canva export failed: " + JSON.stringify(result));
+          let downloaded = false;
+          for (const candidate of candidates) {
+            try {
+              const res = await page.request.get(candidate, { timeout: 30000 });
+              const type = res.headers()["content-type"] || "";
+              const body = await res.body();
+              if (res.ok() && type.startsWith("image/") && body.length > 10000) {
+                const ext = type.includes("png") ? "png" : type.includes("webp") ? "webp" : "jpg";
+                await fs.writeFile(`canva-test.${ext}`, body);
+                console.log("Downloaded:", candidate);
+                console.log("Content-Type:", type);
+                console.log("Bytes:", body.length);
+                downloaded = true;
+                break;
               }
+            } catch (e) {
+              console.log("Candidate failed:", candidate, e.message);
             }
+          }
 
-            if (result?.job?.status !== "success" || !result.job.urls?.length) {
-              throw new Error("Canva export did not complete successfully: " + JSON.stringify(result));
-            }
+          if (!downloaded) {
+            await page.screenshot({ path: "canva-page-screenshot.png", fullPage: true });
+            throw new Error("No raw Canva image URL could be downloaded.");
+          }
 
-            const imageResponse = await fetch(result.job.urls[0]);
-            if (!imageResponse.ok) {
-              throw new Error("Failed to download Canva export: HTTP " + imageResponse.status);
-            }
+          await browser.close();
+          EOF
 
-            const buffer = Buffer.from(await imageResponse.arrayBuffer());
-            fs.writeFileSync("canva-test.png", buffer);
-            console.log("Canva export downloaded.");
-            console.log("Bytes:", buffer.length);
-            console.log("Design ID:", designId);
-          })().catch(error => {
-            console.error(error.message);
-            process.exit(1);
-          });
-          NODE
+          node canva-download.mjs
 
-      - name: Validate exported image
+      - name: Validate image
         run: |
-          file canva-test.png
-          identify canva-test.png || true
-          ls -lh canva-test.png
+          file canva-test.* || true
+          identify canva-test.* || true
+          ls -lh canva-test.*
 
-      - name: Upload test artifacts
+      - name: Upload test artifact
         uses: actions/upload-artifact@v4
         with:
-          name: canva-api-test
+          name: canva-playwright-test
           path: |
-            canva-test.png
-            canva-new-refresh-token.txt
+            canva-test.*
+            canva-page-screenshot.png
           if-no-files-found: error
