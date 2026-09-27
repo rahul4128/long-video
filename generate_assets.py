@@ -10,6 +10,7 @@ import datetime
 import threading
 import subprocess
 import urllib.parse
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 import requests
 import edge_tts
@@ -1706,23 +1707,56 @@ async def process():
     os.makedirs("public/audio/sfx", exist_ok=True)
     resolve_sound_effect_audio("transition_whoosh", "public/audio/sfx/whoosh.mp3")
 
-    # 2. Render High-CTR 16:9 Thumbnail Image
+    # 2. Render ONE final high-CTR 16:9 thumbnail.
+    # The pipeline intentionally keeps only one long-video thumbnail and one
+    # Shorts thumbnail. thumbnailConcepts may still arrive from Make for
+    # creative planning, but they are not rendered into extra files.
     thumb_prompt = thumbnail_data.get("imagePrompt") or "Lord Krishna radiant divine aura with glowing Sudarshan Chakra, dramatic 8k thumbnail"
-    print("🖼️ Generating High-CTR Thumbnail...", flush=True)
+
+    def _thumb_layout(base_prompt: str, title: str, vertical: bool = False):
+        source = shorts_thumbnail_data if vertical else thumbnail_data
+        raw = str(source.get("textPosition", "")).strip().lower()
+        aliases = {
+            "top-left": "topLeft", "topleft": "topLeft", "upper-left": "topLeft",
+            "top-right": "topRight", "topright": "topRight", "upper-right": "topRight",
+            "center-left": "centerLeft", "centerleft": "centerLeft",
+            "center-right": "centerRight", "centerright": "centerRight",
+            "bottom-left": "bottomLeft", "bottomleft": "bottomLeft",
+            "bottom-right": "bottomRight", "bottomright": "bottomRight",
+            "center": "center",
+        }
+        if raw in aliases:
+            return aliases[raw]
+        choices = ["topLeft", "topRight", "centerLeft", "centerRight", "bottomLeft", "bottomRight"]
+        seed = hashlib.sha256(f"{base_prompt}|{title}|{'short' if vertical else 'long'}".encode("utf-8")).digest()[0]
+        return choices[seed % len(choices)]
+
+    def _opposite_side(layout: str):
+        return {
+            "topLeft": "right side",
+            "topRight": "left side",
+            "centerLeft": "right side",
+            "centerRight": "left side",
+            "bottomLeft": "upper-right area",
+            "bottomRight": "upper-left area",
+            "center": "upper area",
+        }.get(layout, "one side")
+
+    thumbnail_text_position = _thumb_layout(thumb_prompt, seo_metadata.get("long_video_title", ""), False)
+    thumb_prompt = (
+        f"{thumb_prompt}. YouTube creator thumbnail art direction: ONE dominant focal subject, "
+        f"dramatic emotion/action, strong contrast, cinematic lighting, clean uncluttered composition, "
+        f"no text, no watermark, no collage, no split screen. Keep the main subject unobstructed and "
+        f"leave intentional clean negative space on the {_opposite_side(thumbnail_text_position)} "
+        f"for a short Hindi hook."
+    )
+    print(f"🖼️ Generating ONE High-CTR Long Thumbnail ({thumbnail_text_position})...", flush=True)
     thumb_dest = "public/images/thumbnail.jpg"
     generate_ai_image(thumb_prompt, thumb_dest, aspect_ratio="16:9", pollinations_width=1920, pollinations_height=1080)
     subprocess.run(["cp", thumb_dest, "out/thumbnail.jpg"], check=False)
 
-    # 2b. Thumbnail hook-text props, for the Remotion ThumbnailComposition
-    # still-render in the GitHub Actions workflow (see render.yml's
-    # render-thumbnail job) that overlays bold Hindi hook text on top of the
-    # background image generated just above. Rendered through Remotion/
-    # Chromium - the same pipeline that already renders Devanagari captions
-    # correctly in Subtitles.tsx - rather than a naive image-library text
-    # overlay, which risks garbled conjuncts/matra-reordering for Hindi
-    # script. out/thumbnail.jpg above stays as the plain background image;
-    # the render-thumbnail job produces the final text-overlaid version that
-    # publish-and-notify actually releases and sends to YouTube.
+    # 2b. Remotion hook-text props. The text position is dynamic instead of
+    # forcing every thumbnail into a bottom-only text band.
     thumbnail_hook_text = pick_hindi(
         thumbnail_data.get("thumbnailText"),
         seo_metadata.get("thumbnailText"),
@@ -1730,28 +1764,29 @@ async def process():
         max_words=6,
     )
     if not thumbnail_hook_text:
-        # Fallback so the thumbnail still gets SOME on-image text even if the
-        # upstream Make.com prompt hasn't been updated yet to supply a
-        # dedicated thumbnailText field - a short slice of the video's own
-        # title beats no text at all.
         fallback_title = (seo_metadata.get("long_video_title") or "").strip()
         thumbnail_hook_text = pick_hindi(fallback_title, max_words=6)
     with open("public/thumbnail_props.json", "w", encoding="utf-8") as f:
         json.dump(
-            {"backgroundImage": "thumbnail.jpg", "hookText": thumbnail_hook_text},
+            {
+                "backgroundImage": "thumbnail.jpg",
+                "hookText": thumbnail_hook_text,
+                "textPosition": thumbnail_text_position,
+            },
             f, ensure_ascii=False, indent=2,
         )
 
-    # 2c. Shorts-specific 9:16 Thumbnail - its OWN background image + hook
-    # text, distinct from the long-video thumbnail above. Previously Shorts
-    # either reused the long-video 16:9 thumbnail (badly cropped for a
-    # vertical feed) or got no custom thumbnail applied at all - see
-    # ShortsThumbnailComposition.tsx (render.yml's new render-thumbnail-shorts
-    # job) and the "Integration YouTube" Make.com scenario, which now
-    # actually calls YouTube's "Set a Video Thumbnail" action for both
-    # uploads instead of never setting one.
-    shorts_thumb_prompt = shorts_thumbnail_data.get("imagePrompt") or f"{thumb_prompt}, vertical 9:16 composition"
-    print("🖼️ Generating Shorts-specific 9:16 Thumbnail...", flush=True)
+    # 2c. ONE Shorts-specific 9:16 thumbnail with its own hook and layout.
+    shorts_thumb_prompt = shorts_thumbnail_data.get("imagePrompt") or f"{thumbnail_data.get('imagePrompt') or thumb_prompt}, vertical 9:16 composition"
+    shorts_thumbnail_text_position = _thumb_layout(shorts_thumb_prompt, seo_metadata.get("shorts_title", ""), True)
+    shorts_thumb_prompt = (
+        f"{shorts_thumb_prompt}. YouTube Shorts cover art direction: ONE dominant focal subject, "
+        f"dramatic emotion/action, strong contrast, cinematic lighting, clean uncluttered composition, "
+        f"no text, no watermark, no collage, no split screen. Keep the main subject unobstructed and "
+        f"leave intentional clean negative space on the {_opposite_side(shorts_thumbnail_text_position)} "
+        f"for a short Hindi hook."
+    )
+    print(f"🖼️ Generating ONE High-CTR Shorts Thumbnail ({shorts_thumbnail_text_position})...", flush=True)
     shorts_thumb_dest = "public/images/thumbnail_shorts.jpg"
     generate_ai_image(shorts_thumb_prompt, shorts_thumb_dest, aspect_ratio="9:16", pollinations_width=1080, pollinations_height=1920)
     subprocess.run(["cp", shorts_thumb_dest, "out/thumbnail_shorts.jpg"], check=False)
@@ -1763,56 +1798,21 @@ async def process():
         max_words=6,
     )
     if not shorts_thumbnail_hook_text:
-        # Same graceful fallback as the long-video thumbnail above: prefer a
-        # dedicated hook line, but a slice of the Shorts' own title beats no
-        # text at all if the upstream Make.com prompt hasn't been updated yet.
         fallback_shorts_title = (seo_metadata.get("shorts_title") or "").strip()
         shorts_thumbnail_hook_text = pick_hindi(fallback_shorts_title, max_words=6)
     with open("public/thumbnail_props_shorts.json", "w", encoding="utf-8") as f:
         json.dump(
-            {"backgroundImage": "thumbnail_shorts.jpg", "hookText": shorts_thumbnail_hook_text},
+            {
+                "backgroundImage": "thumbnail_shorts.jpg",
+                "hookText": shorts_thumbnail_hook_text,
+                "textPosition": shorts_thumbnail_text_position,
+            },
             f, ensure_ascii=False, indent=2,
         )
 
-    # 2d. Thumbnail A/B/C variants for YouTube Studio's "Test & Compare"
-    # (upload all three manually; YouTube picks the winner by watch time).
-    #   A = main image + main hook text (the thumbnail rendered above)
-    #   B = same image + concept #2 text (tests the TEXT hook)
-    #   C = new image from concept #3 + its text (tests the IMAGE)
+    # Exactly one thumbnail per format. No A/B/C variant rendering.
     thumbnail_variants = []
-    if os.getenv("THUMBNAIL_VARIANTS", "3").strip() != "1":
-        concepts = [c for c in _as_list(seo_metadata.get("thumbnailConcepts")) if isinstance(c, dict)]
-        used = {thumbnail_hook_text}
-        def _concept_text(concept):
-            txt = pick_hindi(concept.get("text"), max_words=6) if concept else ""
-            return txt if txt and txt not in used else ""
-        text_b = _concept_text(concepts[1] if len(concepts) > 1 else {}) or pick_hindi(
-            seo_metadata.get("thumbnailText"), shorts_thumbnail_hook_text, max_words=6)
-        if text_b and text_b not in used:
-            used.add(text_b)
-            thumbnail_variants.append({"id": "b", "backgroundImage": "thumbnail.jpg", "hookText": text_b})
-        concept_c = concepts[2] if len(concepts) > 2 else {}
-        text_c = _concept_text(concept_c) or text_b or thumbnail_hook_text
-        visual_c = " ".join(str(concept_c.get(k, "")) for k in ("visualSubject", "emotionAction", "composition")).strip()
-        bg_c = "thumbnail.jpg"
-        if visual_c:
-            try:
-                generate_ai_image(
-                    f"{visual_c}, dramatic high-contrast close-up, cinematic 16:9 devotional painting",
-                    "public/images/thumbnail_c.jpg", aspect_ratio="16:9",
-                    pollinations_width=1920, pollinations_height=1080,
-                )
-                if os.path.exists("public/images/thumbnail_c.jpg"):
-                    bg_c = "thumbnail_c.jpg"
-            except Exception as e:
-                print(f"Thumbnail C notice: {e} - reusing main image.", flush=True)
-        if bg_c != "thumbnail.jpg" or text_c not in used:
-            thumbnail_variants.append({"id": "c", "backgroundImage": bg_c, "hookText": text_c})
-    for variant in thumbnail_variants:
-        with open(f"public/thumbnail_props_{variant['id']}.json", "w", encoding="utf-8") as f:
-            json.dump({"backgroundImage": variant["backgroundImage"], "hookText": variant["hookText"]},
-                      f, ensure_ascii=False, indent=2)
-    print(f"🖼️ Thumbnail test variants prepared: A + {', '.join(v['id'].upper() for v in thumbnail_variants) or 'none'}", flush=True)
+    print("🖼️ Thumbnail output policy: 1 long + 1 Shorts thumbnail only.", flush=True)
 
     # 3. Parallel Visuals (Pexels + Pixabay + Coverr + FLUX.1 for Long & Shorts)
     long_items = [(i + 1, s) for i, s in enumerate(long_scenes)]
@@ -1978,7 +1978,7 @@ async def process():
     # Extra context for the YouTube copy-paste pack (scripts/youtube_pack.py).
     metadata_for_upload["thumbnailVariants"] = [
         {"id": "a", "file": "thumbnail.jpg", "hookText": thumbnail_hook_text}
-    ] + [{"id": v["id"], "file": f"thumbnail_{v['id']}.jpg", "hookText": v["hookText"]} for v in thumbnail_variants]
+    ]
     metadata_for_upload["meta"] = {
         k: meta_data.get(k) for k in (
             "category", "track", "content_role", "festival_angle", "experiment_id",
