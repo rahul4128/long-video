@@ -114,7 +114,6 @@ jobs:
           INDICF5_STRICT: ${{ vars.INDICF5_STRICT || 'false' }}
           CLIP_RERANK_ENABLED: ${{ vars.CLIP_RERANK_ENABLED || 'false' }}
           HOOK_OVERLAY_ENABLED: ${{ vars.HOOK_OVERLAY_ENABLED || 'true' }}
-          THUMBNAIL_VARIANTS: ${{ vars.THUMBNAIL_VARIANTS || '3' }}
         run: python generate_assets.py
 
       - name: Upload content QC report
@@ -328,18 +327,12 @@ jobs:
       - name: Render Thumbnail (background image + bold Hindi hook-text overlay)
         run: |
           npx remotion still ThumbnailComposition out/thumbnail.jpg --props=public/thumbnail_props.json
-          # A/B/C variants for YouTube "Test & Compare" (manual upload)
-          for v in b c; do
-            if [ -f "public/thumbnail_props_$v.json" ]; then
-              npx remotion still ThumbnailComposition "out/thumbnail_$v.jpg" --props="public/thumbnail_props_$v.json" || echo "::warning::thumbnail $v failed"
-            fi
-          done
 
       - name: Upload Thumbnail Artifact
         uses: actions/upload-artifact@v7
         with:
           name: devotional-thumbnail-${{ github.run_id }}
-          path: out/thumbnail*.jpg
+          path: out/thumbnail.jpg
           retention-days: 1
 
   # ---------------------------------------------------------------
@@ -552,13 +545,11 @@ jobs:
             echo
             cat out/canva_notes.md 2>/dev/null || echo "_Canva finishing not run._"
           } > release_notes.md
-          EXTRA_THUMBS=$(ls thumbnail_final/thumbnail_b.jpg thumbnail_final/thumbnail_c.jpg 2>/dev/null || true)
           gh release create "$TAG" \
             "video/final_video.mp4" \
             "shorts/final_video_shorts.mp4" \
             "thumbnail_final/thumbnail.jpg" \
             "thumbnail_shorts_final/thumbnail_shorts_final.jpg" \
-            $EXTRA_THUMBS \
             --repo "${{ github.repository }}" \
             --title "Devotional upload $TAG" \
             --notes-file release_notes.md
