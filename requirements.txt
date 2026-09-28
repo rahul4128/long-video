@@ -3,3 +3,5 @@ requests
 soundfile>=0.12
 numpy>=1.26,<3
 indic_transliteration>=2.3
+
+huggingface_hub>=0.34
