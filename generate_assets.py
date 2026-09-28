@@ -2202,15 +2202,20 @@ def generate_huggingface_image(prompt: str, dest_path: str, aspect_ratio: str = 
 
     for model_id in model_ids:
         try:
-            image = client.text_to_image(
-                final_prompt[:700],
-                model=model_id,
-                width=width,
-                height=height,
-                num_inference_steps=4 if "FLUX.1-schnell" in model_id else None,
-            )
+            kwargs = {
+                "model": model_id,
+                "width": width,
+                "height": height,
+            }
+            if "FLUX.1-schnell" in model_id:
+                kwargs["num_inference_steps"] = 4
+            image = client.text_to_image(final_prompt[:700], **kwargs)
             if image is not None:
-                image.save(dest_path)
+                # All beat assets use .jpg names; normalize provider output to
+                # RGB so an RGBA image cannot fail with "cannot write mode RGBA as JPEG".
+                if hasattr(image, "convert"):
+                    image = image.convert("RGB")
+                image.save(dest_path, quality=92)
                 if _valid_generated_image(dest_path):
                     print(f"  ✅ Image fetched from Hugging Face provider-auto ({model_id})", flush=True)
                     return True
