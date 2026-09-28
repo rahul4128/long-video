@@ -16,6 +16,13 @@ export interface WordTiming {
 export interface Shot {
   type: 'video' | 'image';
   file: string;
+  // Phase-2 audit metadata. Scene.tsx intentionally ignores these fields for
+  // now; they make props.json explain which narration beat produced a shot.
+  beatIndex?: number;
+  durationTarget?: number;
+  subject?: string;
+  shotType?: string;
+  queryUsed?: string;
   // Optional per-shot transition style for the CUT INTO this shot (ignored
   // for the first shot in a scene, which only cross-dissolves in from the
   // previous scene). Scene.tsx alternates crossfade/blur_cut by shot index
