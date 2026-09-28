@@ -50,6 +50,8 @@ export interface Shot {
   narrationCue?: string;
   cameraMotion?: string;
   motionProfile?: 'cinematic_depth';
+  qcAction?: 'replace_failing_beat' | 'fill_missing_beat' | 'split_long_hold' | 'soften_short_beat';
+  qcReason?: string;
   // Optional per-shot transition style for the CUT INTO this shot (ignored
   // for the first shot in a scene, which only cross-dissolves in from the
   // previous scene). Scene.tsx alternates crossfade/blur_cut by shot index
