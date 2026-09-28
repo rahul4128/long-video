@@ -257,7 +257,12 @@ PY
 
       - name: Render Long Video with Remotion
         run: |
-          npx remotion render DevotionalComposition out/final_video.mp4 --props=public/props.json --concurrency=$(nproc)
+          npx remotion render DevotionalComposition out/final_video.mp4 \
+            --props=public/props.json \
+            --concurrency=$(nproc) \
+            --codec=h264 \
+            --crf=21 \
+            --offthreadvideo-video-threads=2
 
       - name: Upload Video Artifact
         uses: actions/upload-artifact@v7
