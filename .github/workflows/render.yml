@@ -1,6 +1,8 @@
 name: Render Devotional Video (Long + Shorts)
 
 on:
+  push:
+    branches: [visual-director-v2]
   repository_dispatch:
     types: [trigger-render-long]
   workflow_dispatch:
@@ -32,7 +34,7 @@ on:
         type: string
 
 concurrency:
-  group: canva-token-rotation
+  group: ${{ github.event_name == 'push' && 'visual-director-v2-e2e' || 'canva-token-rotation' }}
   cancel-in-progress: false
 
 jobs:
@@ -55,7 +57,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Static Python syntax check
-        run: python -m py_compile content_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py
+        run: python -m py_compile content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v7
@@ -114,6 +116,7 @@ jobs:
           INDICF5_STRICT: ${{ vars.INDICF5_STRICT || 'false' }}
           CLIP_RERANK_ENABLED: ${{ vars.CLIP_RERANK_ENABLED || 'true' }}
           HOOK_OVERLAY_ENABLED: ${{ vars.HOOK_OVERLAY_ENABLED || 'true' }}
+          VISUAL_DIRECTOR_E2E: ${{ github.event_name == 'push' && 'true' || 'false' }}
         run: python generate_assets.py
 
       - name: Upload content QC report
@@ -136,7 +139,7 @@ jobs:
       # be committing at the same time; if the push still loses a race this
       # step logs it and moves on rather than failing the whole render.
       - name: Persist clip-usage history (avoid repeating recent clips)
-        if: always()
+        if: ${{ always() && github.event_name != 'push' }}
         run: |
           if [ ! -f used_clips_history.json ]; then
             echo "No used_clips_history.json produced (no stock clips fetched this run) - nothing to commit."
@@ -447,6 +450,7 @@ jobs:
   # title/description/thumbnail and files each into its playlist.
   # ---------------------------------------------------------------
   publish-and-notify:
+    if: ${{ github.event_name != 'push' }}
     needs: [generate-assets, render-long, render-shorts, render-thumbnail, render-thumbnail-shorts, media-qc]
     runs-on: ubuntu-latest
     permissions:
