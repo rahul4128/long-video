@@ -3667,11 +3667,54 @@ async def process():
             "words": shorts_word_timings[i]
         })
 
+    # 6a. Phase-8 Pre-Render Visual QC.
+    # This runs AFTER real TTS timing is attached but BEFORE props.json is
+    # written, so repairs affect the actual Remotion render without touching
+    # Make, narration, Canva, or publishing.
+    print("🔍 Visual QC: auditing Long + Shorts selected media before render...", flush=True)
+    long_visual_qc = run_visual_qc_and_repair(
+        long_scenes,
+        enriched_long,
+        format_name="long",
+        orientation="landscape",
+    )
+    shorts_visual_qc = run_visual_qc_and_repair(
+        shorts_scenes,
+        enriched_shorts,
+        format_name="shorts",
+        orientation="portrait",
+    )
+    visual_qc_report = {
+        "phase": 8,
+        "ok": bool(long_visual_qc.get("ok") and shorts_visual_qc.get("ok")),
+        "long": long_visual_qc,
+        "shorts": shorts_visual_qc,
+    }
+    with open("out/visual_qc_report.json", "w", encoding="utf-8") as f:
+        json.dump(visual_qc_report, f, ensure_ascii=False, indent=2)
+
+    total_repairs = int(long_visual_qc.get("repairsUsed") or 0) + int(shorts_visual_qc.get("repairsUsed") or 0)
+    remaining_blockers = (
+        int((long_visual_qc.get("after") or {}).get("blockingIssueCount") or 0)
+        + int((shorts_visual_qc.get("after") or {}).get("blockingIssueCount") or 0)
+    )
+    print(
+        f"🔍 Visual QC complete: {total_repairs} targeted repair(s), "
+        f"{remaining_blockers} unresolved blocking issue(s).",
+        flush=True,
+    )
+    if not visual_qc_report["ok"]:
+        raise RuntimeError(
+            "Visual QC failed after targeted repair: "
+            f"{remaining_blockers} blocking issue(s) remain. "
+            "See out/visual_qc_report.json."
+        )
+
     # Phase-6 audit: selected asset + rerank score + narration-synchronised
     # shot timing + editorial typography/SFX cues. This lets us compare what
     # the director asked for with exactly what Remotion will render/play.
     visual_search_report = {
-        "phase": 7,
+        "phase": 8,
         "reranker": {
             "candidateTarget": _candidate_target_count(),
             "maxQueriesPerBeat": _rerank_query_limit(),
@@ -3698,6 +3741,13 @@ async def process():
             "adjacentPreviewSimilarity": bool(clip_rerank is not None and clip_rerank.enabled()),
             "nearDuplicateThreshold": _continuity_duplicate_threshold(),
             "hardRejects": ["realism_conflict", "entity_conflict", "period_conflict", "near_duplicate_composition"],
+        },
+        "visualQc": {
+            "enabled": True,
+            "report": "out/visual_qc_report.json",
+            "longRepairs": long_visual_qc.get("repairsUsed", 0),
+            "shortsRepairs": shorts_visual_qc.get("repairsUsed", 0),
+            "blockingIssuesAfterRepair": remaining_blockers,
         },
         "long": [
             {
@@ -3732,11 +3782,10 @@ async def process():
     else:
         bgm_swell_scene_numbers = []
 
-    # Phase-1 visual director report. This is planning metadata only; asset
-    # retrieval still uses the existing scene-level search path until the
-    # next phase explicitly consumes visualBeats.
+    # Visual-director planning report. Phase 8 also has a separate final
+    # selection/QC report; this file remains the director's requested plan.
     visual_plan = {
-        "directorVersion": 4,
+        "directorVersion": 7,
         "long": [
             {
                 "scene_number": s.get("scene_number", i + 1),
@@ -3758,7 +3807,7 @@ async def process():
         json.dump(visual_plan, f, ensure_ascii=False, indent=2)
 
     print(
-        "🎬 Visual Director v4 plan: "
+        "🎬 Visual Director v7 plan: "
         f"{sum(x['visualBeatCount'] for x in visual_plan['long'])} long-form beats + "
         f"{sum(x['visualBeatCount'] for x in visual_plan['shorts'])} Shorts beats. "
         "Beat planning + media selection + narration timing metadata are ready.",
