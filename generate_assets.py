@@ -1463,19 +1463,20 @@ def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
                             force_images: bool = False) -> list:
     """Resolve exactly one visual shot per director beat.
 
-    The key Phase-2 behavior is that each beat gets its OWN ordered query
-    bundle instead of every shot reusing one scene-wide videoSearchQuery.
-    Stock source priority/gates remain unchanged, and there is still no
-    semantic reranking here: the first acceptable result wins.
+    Phase 3 compares a lightweight multi-source candidate pool before
+    downloading the winner. If no candidate clears the relevance/quality
+    threshold, use a narration-specific AI image instead of unrelated stock.
     """
     beats = scene.get("visualBeats") or scene.get("director", {}).get("visualBeats") or []
     if not beats:
         return []
 
     shots = []
+    previous_candidate = None
     print(
         f"  🎯 Visual-beat retrieval: {len(beats)} beat(s), "
-        f"up to {max(1, min(4, int(os.getenv('VISUAL_BEAT_MAX_QUERIES', '3') or 3)))} queries/beat.",
+        f"candidate target={_candidate_target_count()}, "
+        f"rerank queries={_rerank_query_limit()}/beat.",
         flush=True,
     )
 
@@ -1494,15 +1495,16 @@ def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
                 f"→ queries={queries}",
                 flush=True,
             )
-            match_meta = {}
-            if fetch_multi_source_video(
-                queries[0],
-                dest,
+
+            selected = select_best_visual_candidate(
+                queries=queries,
+                beat=beat,
+                beat_prompt=beat_prompt,
                 orientation=orientation,
-                prompt_text=beat_prompt,
-                candidate_queries=queries,
-                match_meta=match_meta,
-            ):
+                dest_path=dest,
+                previous_candidate=previous_candidate,
+            )
+            if selected:
                 shot = {
                     "type": "video",
                     "file": filename,
@@ -1510,14 +1512,52 @@ def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
                     "durationTarget": beat.get("durationTarget"),
                     "subject": beat.get("subject", ""),
                     "shotType": beat.get("shotType", ""),
-                    "queryUsed": match_meta.get("matched_query", queries[0]),
-                    "source": match_meta.get("source", "unknown"),
+                    "queryUsed": selected.get("query", ""),
+                    "source": selected.get("source", "unknown"),
                     "queryCandidates": queries,
+                    "selectionScore": selected.get("selectionScore"),
+                    "scoreBreakdown": selected.get("scoreBreakdown", {}),
+                    "clipSimilarity": selected.get("clipSimilarity"),
+                    "candidateId": selected.get("id"),
                 }
+                previous_candidate = selected
+                print(
+                    f"    ✅ Beat {beat_index}: selected {selected.get('source')} "
+                    f"score={selected.get('selectionScore')} query='{selected.get('query')}'",
+                    flush=True,
+                )
+            else:
+                # Keep the hand-curated local library as a zero-network,
+                # trusted fallback before generating an AI image. Strict
+                # mythology scenes intentionally skip this fuzzy filename match.
+                requirements = extract_visual_requirements(" ".join(queries), beat_prompt)
+                local_terms = " ".join(queries)
+                if not requirements.get("strict") and fetch_local_library_video(local_terms, dest):
+                    shot = {
+                        "type": "video",
+                        "file": filename,
+                        "beatIndex": beat_index,
+                        "durationTarget": beat.get("durationTarget"),
+                        "subject": beat.get("subject", ""),
+                        "shotType": beat.get("shotType", ""),
+                        "queryUsed": local_terms,
+                        "source": "local_library",
+                        "queryCandidates": queries,
+                        "selectionScore": 1.0,
+                        "scoreBreakdown": {"curated_local_library": 1.0},
+                        "clipSimilarity": None,
+                        "candidateId": "local_library",
+                    }
+                    previous_candidate = {
+                        "source": "local_library",
+                        "id": "local_library",
+                        "style": "live",
+                    }
 
         if not shot:
             print(
-                f"    🎨 Beat {beat_index}: no acceptable stock match; using narration-specific AI visual.",
+                f"    🎨 Beat {beat_index}: no stock candidate cleared the gate; "
+                "using narration-specific AI visual.",
                 flush=True,
             )
             shot = _generate_visual_beat_image(
@@ -1528,8 +1568,6 @@ def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
             )
 
         if shot:
-            # Keep the director's transition hint attached to the selected
-            # media. Scene.tsx can use it later; Phase 2 does not alter timing.
             transition = beat.get("transition")
             if transition in {"crossfade", "blur_cut"}:
                 shot["transition"] = transition
