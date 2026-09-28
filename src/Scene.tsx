@@ -131,14 +131,26 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
       : 0;
 
   const blurPx = Math.max(entryBlur, exitBlur);
+  const isShorts = format === 'shorts';
 
-  const planned = scene.director?.camera;
+  // Phase 5: beat-specific camera direction is authoritative for AI images.
+  // Videos keep the existing scene/director behavior so this phase cannot
+  // accidentally change real-stock motion or crop decisions.
+  const beatCamera = shot.cameraMotion;
+  const sceneCamera = scene.director?.camera;
+  const plannedCamera =
+    shot.type === 'image' && beatCamera
+      ? beatCamera
+      : sceneCamera === 'slow_push'
+        ? 'slow_push_in'
+        : sceneCamera;
+
   const shotDirection: 'zoom-in' | 'pan-right' =
-    planned === 'pan_left'
+    plannedCamera === 'pan_left'
       ? 'pan-right'
-      : planned === 'pan_right'
+      : plannedCamera === 'pan_right'
         ? 'pan-right'
-        : planned === 'slow_push'
+        : plannedCamera === 'slow_push_in'
           ? 'zoom-in'
           : shotIndex % 2 === 0
             ? direction
@@ -146,9 +158,8 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
               ? 'pan-right'
               : 'zoom-in';
 
-  const isShorts = format === 'shorts';
   const zoomEnd =
-    scene.director?.camera === 'slow_push'
+    plannedCamera === 'slow_push_in'
       ? isShorts
         ? 1.07
         : 1.1
@@ -183,8 +194,8 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
           frame,
           [0, safeShotDuration],
           [
-            scene.director?.camera === 'pan_left' ? panDistance : -panDistance,
-            scene.director?.camera === 'pan_left' ? -panDistance : panDistance,
+            plannedCamera === 'pan_left' ? panDistance : -panDistance,
+            plannedCamera === 'pan_left' ? -panDistance : panDistance,
           ],
           {
             easing: smooth,
@@ -195,33 +206,158 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
       : 0;
 
   const transform = `scale(${scale}) translateX(${translateX}px)`;
-  const commonStyle: React.CSSProperties = {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover',
-    transform,
-    opacity,
-    filter: blurPx > 0 ? `blur(${blurPx}px)` : undefined,
-  };
 
   if (shot.type === 'video') {
     return (
       <Video
         key={`video-${shotIndex}-${shot.file}`}
         src={staticFile(`images/${shot.file}`)}
-        style={commonStyle}
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          transform,
+          opacity,
+          filter: blurPx > 0 ? `blur(${blurPx}px)` : undefined,
+        }}
         muted
         loop
       />
     );
   }
 
+  // AI-image motion is deliberately subtle. We create depth without a
+  // segmentation model by using the same artwork as a soft, oversized
+  // background layer moving slightly opposite to the sharper foreground.
+  // It reads as cinematic depth but avoids the warped "AI animation" look.
+  const isAiVisual =
+    shot.source === 'ai_image' ||
+    shot.cameraMotion === 'slow_push_in' ||
+    shot.cameraMotion === 'pan_left' ||
+    shot.cameraMotion === 'pan_right';
+
+  if (!isAiVisual) {
+    return (
+      <Img
+        key={`image-${shotIndex}-${shot.file}`}
+        src={staticFile(`images/${shot.file}`)}
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          transform,
+          opacity,
+          filter: blurPx > 0 ? `blur(${blurPx}px)` : undefined,
+        }}
+      />
+    );
+  }
+
+  const progress = interpolate(frame, [0, safeShotDuration], [0, 1], {
+    easing: smooth,
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
+
+  const imageMotion =
+    shot.cameraMotion === 'pan_left' ||
+    shot.cameraMotion === 'pan_right' ||
+    shot.cameraMotion === 'slow_push_in'
+      ? shot.cameraMotion
+      : 'slow_push_in';
+
+  // Keep movement especially restrained in vertical Shorts. Large travel on
+  // a narrow crop feels like a phone slideshow rather than a camera move.
+  const foregroundPush = isShorts ? 1.055 : 1.075;
+  const foregroundPan = isShorts ? 14 : 24;
+  const backgroundPan = isShorts ? 6 : 10;
+  const verticalDrift = isShorts ? 4 : 7;
+
+  const fgScale =
+    imageMotion === 'slow_push_in'
+      ? interpolate(progress, [0, 1], [1.025, foregroundPush])
+      : interpolate(progress, [0, 1], [1.075, 1.045]);
+
+  const fgX =
+    imageMotion === 'pan_left'
+      ? interpolate(progress, [0, 1], [foregroundPan, -foregroundPan])
+      : imageMotion === 'pan_right'
+        ? interpolate(progress, [0, 1], [-foregroundPan, foregroundPan])
+        : interpolate(progress, [0, 1], [-3, 3]);
+
+  const fgY =
+    shot.shotType === 'detail' || shot.shotType === 'close_up'
+      ? interpolate(progress, [0, 1], [verticalDrift, -verticalDrift])
+      : interpolate(progress, [0, 1], [2, -2]);
+
+  // Background moves in the opposite direction at a lower amplitude. Because
+  // it is blurred and darkened, the duplicate image is perceived as depth,
+  // not as a second visible copy.
+  const bgX = -fgX * 0.32;
+  const bgY = -fgY * 0.18;
+  const bgScale = interpolate(progress, [0, 1], [1.14, 1.105]);
+
+  // One slow moving glow is enough to keep a still alive. Opacity remains
+  // tiny so faces/deities are never washed out and devotional art stays calm.
+  const glowX = interpolate(progress, [0, 1], [-35, 135]);
+  const glowOpacity =
+    shot.shotType === 'atmosphere' ? 0.11 : shot.shotType === 'wide' ? 0.075 : 0.055;
+
   return (
-    <Img
-      key={`image-${shotIndex}-${shot.file}`}
-      src={staticFile(`images/${shot.file}`)}
-      style={commonStyle}
-    />
+    <AbsoluteFill
+      style={{
+        opacity,
+        overflow: 'hidden',
+        filter: blurPx > 0 ? `blur(${blurPx}px)` : undefined,
+        backgroundColor: '#000000',
+      }}
+    >
+      <Img
+        src={staticFile(`images/${shot.file}`)}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          transform: `translate3d(${bgX}px, ${bgY}px, 0) scale(${bgScale})`,
+          filter: 'blur(16px) brightness(0.64) saturate(0.92)',
+          opacity: 0.72,
+          willChange: 'transform',
+        }}
+      />
+
+      <Img
+        src={staticFile(`images/${shot.file}`)}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          transform: `translate3d(${fgX}px, ${fgY}px, 0) scale(${fgScale})`,
+          filter: 'saturate(1.035) contrast(1.025) brightness(1.015)',
+          willChange: 'transform',
+        }}
+      />
+
+      <AbsoluteFill
+        style={{
+          background:
+            `linear-gradient(105deg, transparent ${glowX - 28}%, rgba(255,244,214,${glowOpacity}) ${glowX}%, transparent ${glowX + 28}%)`,
+          mixBlendMode: 'screen',
+          pointerEvents: 'none',
+        }}
+      />
+
+      <AbsoluteFill
+        style={{
+          background:
+            'radial-gradient(circle at 50% 44%, transparent 48%, rgba(0,0,0,0.18) 82%, rgba(0,0,0,0.3) 100%)',
+          pointerEvents: 'none',
+        }}
+      />
+    </AbsoluteFill>
   );
 };
 
