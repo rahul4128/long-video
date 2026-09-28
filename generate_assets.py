@@ -18,6 +18,7 @@ from director import enrich_scenes
 from sfx_engine import resolve_sound_effect_audio
 from visual_matcher import extract_visual_requirements, candidate_is_accurate
 from content_qc import validate_payload, fact_check_items
+from visual_qc import assess_sequence
 from storyteller import build_prosody_map, prepare_storyteller_text
 from hindi_text import to_spoken_hindi, hindi_display_text, pick_hindi, text_free_prompt, has_latin, best_hindi_title
 try:
@@ -1603,7 +1604,9 @@ def _download_ranked_candidate(candidate: dict, dest_path: str) -> bool:
 
 def select_best_visual_candidate(queries: list, beat: dict, beat_prompt: str,
                                  orientation: str, dest_path: str,
-                                 previous_candidate: dict = None) -> dict:
+                                 previous_candidate: dict = None,
+                                 exclude_keys: set = None,
+                                 minimum_score: float = None) -> dict:
     """Collect, score and download the strongest candidate for one beat.
 
     If the top candidate fails to download, try the next ranked candidate.
@@ -1621,10 +1624,19 @@ def select_best_visual_candidate(queries: list, beat: dict, beat_prompt: str,
         orientation,
         previous_candidate=previous_candidate,
     )
-    threshold = _candidate_min_score()
+    threshold = (
+        _candidate_min_score()
+        if minimum_score is None
+        else max(_candidate_min_score(), float(minimum_score))
+    )
+    excluded = set(exclude_keys or set())
     viable = [
         c for c in ranked
-        if not c.get("rejected") and float(c.get("selectionScore") or 0.0) >= threshold
+        if (
+            not c.get("rejected")
+            and _candidate_key(c) not in excluded
+            and float(c.get("selectionScore") or 0.0) >= threshold
+        )
     ]
 
     top_preview = [
