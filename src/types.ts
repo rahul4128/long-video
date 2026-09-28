@@ -33,7 +33,7 @@ export interface Shot {
   shotType?: string;
   queryUsed?: string;
   queryCandidates?: string[];
-  source?: 'pexels' | 'pixabay' | 'coverr' | 'wikimedia' | 'local_library' | 'ai_image' | 'unknown';
+  source?: 'pexels' | 'pixabay' | 'coverr' | 'wikimedia' | 'local_library' | 'ai_image' | 'local_continuity_fallback' | 'local_atmosphere_fallback' | 'unknown';
   candidateId?: string | number;
   selectionScore?: number;
   scoreBreakdown?: Record<string, number>;
