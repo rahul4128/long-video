@@ -3,6 +3,8 @@ name: Render Devotional Video (Long + Shorts)
 on:
   push:
     branches: [visual-director-v2]
+    paths:
+      - '.e2e-trigger'
   repository_dispatch:
     types: [trigger-render-long]
   workflow_dispatch:
