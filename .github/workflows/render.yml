@@ -130,6 +130,18 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: Upload visual director diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: visual-diagnostics-${{ github.run_id }}
+          path: |
+            out/visual_director_plan.json
+            out/visual_search_report.json
+            out/visual_qc_report.json
+          if-no-files-found: ignore
+          retention-days: 7
+
       # Commits used_clips_history.json (written by generate_assets.py's
       # save_clip_history()) back to the repo, so a LATER run can see which
       # stock clips this run used and avoid repeating them (this is what
