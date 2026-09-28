@@ -13,6 +13,15 @@ export interface WordTiming {
 // with AI-image sub-shots when real footage runs out) so there is always
 // enough real screen time, see fetch_video_shots_for_duration() and
 // process_long_scene_visual()/process_shorts_scene_visual().
+export interface VisualStyleProfile {
+  realism?: 'cinematic_realism' | 'stylized';
+  period?: 'ancient' | 'modern' | 'timeless';
+  lighting?: 'warm_golden' | 'low_key_night' | 'natural_cinematic';
+  palette?: 'warm_gold_earth' | 'natural_earth' | string;
+  entityAnchor?: string;
+  settingMatch?: number;
+}
+
 export interface Shot {
   type: 'video' | 'image';
   file: string;
@@ -29,6 +38,9 @@ export interface Shot {
   selectionScore?: number;
   scoreBreakdown?: Record<string, number>;
   clipSimilarity?: number | null;
+  continuitySimilarity?: number | null;
+  continuityProfile?: VisualStyleProfile;
+  continuityFlags?: string[];
   // Phase-4 narration synchronisation. These seconds are scene-local and are
   // authoritative when present; legacy props fall back to equal shot windows.
   startSeconds?: number;
@@ -61,6 +73,7 @@ export interface VisualBeat {
   queries: string[];
   preferredMedia: 'video' | 'auto';
   transition: 'cut' | 'crossfade' | 'blur_cut';
+  styleProfile?: VisualStyleProfile;
   actualStartSeconds?: number;
   actualEndSeconds?: number;
   actualDurationSeconds?: number;
@@ -85,6 +98,7 @@ export interface DirectorPlan {
   patternBreak?: boolean;
   visualBeats?: VisualBeat[];
   visualBeatCount?: number;
+  visualStyleProfile?: VisualStyleProfile;
 }
 
 export interface SceneItem {
