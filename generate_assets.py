@@ -728,8 +728,12 @@ def build_query_candidates(primary_query: str, prompt_text: str = "") -> list:
 
     return candidates
 
-def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "landscape", prompt_text: str = "") -> bool:
-    requirements = extract_visual_requirements(query, prompt_text)
+def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "landscape",
+                             prompt_text: str = "", candidate_queries: list = None) -> bool:
+    bundled_query_text = " ".join(
+        str(q).strip() for q in (candidate_queries or []) if str(q).strip()
+    )
+    requirements = extract_visual_requirements(bundled_query_text or query, prompt_text)
     strict = bool(requirements.get("strict"))
     if strict:
         print(
@@ -742,8 +746,16 @@ def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "lan
     # "Krishna" must not become "golden deity statue"; "Bal Krishna" must not
     # become "generic child". If the stock catalog cannot prove the entity from
     # metadata, the caller falls through to AI generation instead.
-    candidates = [query.strip()] if strict and query.strip() else build_query_candidates(query, prompt_text)
-    if strict and prompt_text and prompt_text.strip() not in candidates:
+    if candidate_queries:
+        candidates = []
+        for candidate in candidate_queries:
+            candidate = str(candidate or "").strip()
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+    else:
+        candidates = [query.strip()] if strict and query.strip() else build_query_candidates(query, prompt_text)
+
+    if strict and prompt_text and not candidate_queries and prompt_text.strip() not in candidates:
         candidates.append(prompt_text.strip())
 
     for candidate in candidates:
@@ -768,7 +780,8 @@ def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "lan
             return True
 
     # Never use fuzzy local matching for strict entity scenes either.
-    if not strict and fetch_local_library_video(f"{query} {prompt_text}", dest_path):
+    local_query = bundled_query_text or query
+    if not strict and fetch_local_library_video(f"{local_query} {prompt_text}", dest_path):
         return True
     return False
 
@@ -806,6 +819,162 @@ HOOK_SUB_SHOT_FRAMING_HINTS = [
     "dynamic low angle",
     "dramatic push-in composition",
 ]
+
+def _visual_beat_prompt(scene_prompt: str, beat: dict) -> str:
+    """Build one media-generation/search context string for a visual beat."""
+    parts = [
+        scene_prompt,
+        f"Narration beat: {beat.get('narrationText', '')}",
+        f"Subject: {beat.get('subject', '')}",
+        f"Action: {beat.get('action', '')}",
+        f"Setting: {beat.get('setting', '')}",
+        f"Mood: {beat.get('mood', '')}",
+        f"Time: {beat.get('time', '')}",
+        f"Shot type: {beat.get('shotType', '')}",
+    ]
+    return ". ".join(str(p).strip(" .") for p in parts if str(p).strip(" ."))
+
+
+def _visual_beat_queries(beat: dict, fallback_query: str = "") -> list:
+    """Return an ordered, de-duplicated query bundle for one visual beat.
+
+    Phase 2 deliberately tries several director-authored beat queries but
+    still selects the first acceptable stock result. Multi-candidate semantic
+    reranking is a later phase.
+    """
+    configured_limit = int(os.getenv("VISUAL_BEAT_MAX_QUERIES", "3") or 3)
+    limit = max(1, min(4, configured_limit))
+
+    queries = []
+    for raw in (beat.get("queries") or []):
+        q = re.sub(r"\s+", " ", str(raw or "")).strip()
+        if q and q.lower() not in {x.lower() for x in queries}:
+            queries.append(q)
+        if len(queries) >= limit:
+            break
+
+    fallback_query = re.sub(r"\s+", " ", str(fallback_query or "")).strip()
+    if fallback_query and fallback_query.lower() not in {x.lower() for x in queries}:
+        queries.append(fallback_query)
+
+    return queries[:limit]
+
+
+def _generate_visual_beat_image(scene_prompt: str, beat: dict, orientation: str,
+                                base_name: str) -> dict:
+    """Generate a narration-specific AI image when stock misses this beat."""
+    beat_index = int(beat.get("beatIndex") or 1)
+    shot_type = str(beat.get("shotType") or "medium").replace("_", " ")
+    camera = str(beat.get("cameraMotion") or "slow_push_in").replace("_", " ")
+    prompt = (
+        f"{_visual_beat_prompt(scene_prompt, beat)}. "
+        f"{shot_type} cinematic composition, designed for {camera} motion, "
+        "single coherent moment, no collage, no text"
+    )
+    aspect_ratio = "9:16" if orientation == "portrait" else "16:9"
+    width, height = (1080, 1920) if orientation == "portrait" else (1920, 1080)
+    filename = f"{base_name}_b{beat_index}.jpg"
+    dest = os.path.join("public/images", filename)
+
+    generate_ai_image(
+        prompt,
+        dest,
+        aspect_ratio=aspect_ratio,
+        pollinations_width=width,
+        pollinations_height=height,
+    )
+    if not _valid_generated_image(dest):
+        return {}
+
+    return {
+        "type": "image",
+        "file": filename,
+        "beatIndex": beat_index,
+        "durationTarget": beat.get("durationTarget"),
+        "subject": beat.get("subject", ""),
+        "shotType": beat.get("shotType", ""),
+        "queryUsed": "",
+    }
+
+
+def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
+                            base_name: str, fallback_query: str = "",
+                            force_images: bool = False) -> list:
+    """Resolve exactly one visual shot per director beat.
+
+    The key Phase-2 behavior is that each beat gets its OWN ordered query
+    bundle instead of every shot reusing one scene-wide videoSearchQuery.
+    Stock source priority/gates remain unchanged, and there is still no
+    semantic reranking here: the first acceptable result wins.
+    """
+    beats = scene.get("visualBeats") or scene.get("director", {}).get("visualBeats") or []
+    if not beats:
+        return []
+
+    shots = []
+    print(
+        f"  🎯 Visual-beat retrieval: {len(beats)} beat(s), "
+        f"up to {max(1, min(4, int(os.getenv('VISUAL_BEAT_MAX_QUERIES', '3') or 3)))} queries/beat.",
+        flush=True,
+    )
+
+    for fallback_index, beat in enumerate(beats, 1):
+        beat = dict(beat or {})
+        beat_index = int(beat.get("beatIndex") or fallback_index)
+        queries = _visual_beat_queries(beat, fallback_query)
+        beat_prompt = _visual_beat_prompt(scene_prompt, beat)
+        shot = {}
+
+        if not force_images and queries:
+            filename = f"{base_name}_b{beat_index}.mp4"
+            dest = os.path.join("public/images", filename)
+            print(
+                f"    🔎 Beat {beat_index}: {beat.get('narrationCue', '')[:70]} "
+                f"→ queries={queries}",
+                flush=True,
+            )
+            if fetch_multi_source_video(
+                queries[0],
+                dest,
+                orientation=orientation,
+                prompt_text=beat_prompt,
+                candidate_queries=queries,
+            ):
+                shot = {
+                    "type": "video",
+                    "file": filename,
+                    "beatIndex": beat_index,
+                    "durationTarget": beat.get("durationTarget"),
+                    "subject": beat.get("subject", ""),
+                    "shotType": beat.get("shotType", ""),
+                    # The search function can stop on any query in the bundle;
+                    # record the bundle for auditability rather than pretending
+                    # we know which one won before Phase 3 returns scored candidates.
+                    "queryUsed": " | ".join(queries),
+                }
+
+        if not shot:
+            print(
+                f"    🎨 Beat {beat_index}: no acceptable stock match; using narration-specific AI visual.",
+                flush=True,
+            )
+            shot = _generate_visual_beat_image(
+                scene_prompt,
+                beat,
+                orientation=orientation,
+                base_name=base_name,
+            )
+
+        if shot:
+            # Keep the director's transition hint attached to the selected
+            # media. Scene.tsx can use it later; Phase 2 does not alter timing.
+            transition = beat.get("transition")
+            if transition in {"crossfade", "blur_cut"}:
+                shot["transition"] = transition
+            shots.append(shot)
+
+    return shots
+
 
 def fetch_video_shots_for_duration(primary_query: str, prompt_text: str, target_seconds: float,
                                     orientation: str, base_name: str,
@@ -1513,12 +1682,13 @@ def estimate_scene_duration_seconds(narration_text: str) -> float:
 # 4. PROCESS LONG VIDEO SCENES (Pexels + Pixabay + Coverr + FLUX.1)
 # -------------------------------------------------------------
 def process_long_scene_visual(scene_info):
-    """Returns an ordered list of shot dicts ({"type": "video"|"image",
-    "file": ...}) sized to cover this scene's full estimated duration - see
-    fetch_video_shots_for_duration() above. Real stock video is always tried
-    first (when the scene calls for it) and AI images only fill whatever
-    remainder real footage couldn't cover, exactly mirroring the priority the
-    old single-clip code had, just with a duration guarantee now."""
+    """Resolve long-form visuals.
+
+    Phase 2 prefers the narration-aware visualBeats plan from director.py:
+    one ordered shot per beat, with up to several beat-specific stock queries
+    before an AI-image fallback. Older/no-plan payloads keep the existing
+    duration-aware scene-level path unchanged.
+    """
     idx, scene = scene_info
     prompt = scene.get("imagePrompt") or scene.get("image_prompt", "Indian spiritual story scene")
     media_type = scene.get("mediaType", "auto").lower()
@@ -1538,15 +1708,36 @@ def process_long_scene_visual(scene_info):
         words = [w for w in prompt.split() if w.lower() not in ["the", "a", "an", "and", "with", "in", "on", "of", "cinematic", "16:9", "lighting", "shot"]]
         video_query = " ".join(words[:4])
 
-    should_try_video = (media_type == "video") or (media_type == "auto" and idx % 2 == 0)
+    visual_beats = scene.get("visualBeats") or scene.get("director", {}).get("visualBeats") or []
+    if visual_beats:
+        print(
+            f"🎬 [Long Scene {idx}] Resolving {len(visual_beats)} narration-aware visual beats...",
+            flush=True,
+        )
+        beat_shots = fetch_visual_beat_shots(
+            scene,
+            prompt,
+            orientation="landscape",
+            base_name=f"scene_{idx}",
+            fallback_query=video_query,
+            force_images=(media_type == "ai_image"),
+        )
+        if beat_shots:
+            return beat_shots
+        print(
+            f"⚠️ [Long Scene {idx}] Beat-aware retrieval produced no usable assets; falling back to legacy scene-level path.",
+            flush=True,
+        )
 
+    # Backward-compatible scene-level fallback.
+    should_try_video = (media_type == "video") or (media_type == "auto" and idx % 2 == 0)
     narration_text = scene.get("text") or scene.get("narration_chunk", "")
     target_seconds = estimate_scene_duration_seconds(narration_text)
 
     shots = []
     covered = 0.0
     if should_try_video and video_query:
-        print(f"🎥 [Long Scene {idx}] Searching ~{target_seconds:.0f}s of 4K video (Pexels + Pixabay + Coverr + Wikimedia + Library) for: '{video_query}'...", flush=True)
+        print(f"🎥 [Long Scene {idx}] Legacy search ~{target_seconds:.0f}s for: '{video_query}'...", flush=True)
         shots, covered = fetch_video_shots_for_duration(
             video_query, prompt, target_seconds, orientation="landscape", base_name=f"scene_{idx}",
         )
@@ -1585,12 +1776,14 @@ def recover_shots(shots, scene_idx, aspect="16:9") -> list:
 # 5. PROCESS SHORTS SCENES (9:16 Vertical)
 # -------------------------------------------------------------
 def process_shorts_scene_visual(scene_info):
-    """Shorts counterpart to process_long_scene_visual() above - same
-    duration-aware multi-clip-then-top-up-with-images approach, just with
-    portrait orientation and the existing hook-scene special-casing
-    (punchier framings, shorter per-shot window) preserved exactly."""
+    """Resolve Shorts visuals using the same per-beat query strategy.
+
+    Existing hook-specific legacy behavior remains as a fallback for payloads
+    without visualBeats or if every beat-aware asset attempt fails.
+    """
     idx, scene = scene_info
     prompt = scene.get("imagePrompt") or scene.get("image_prompt", "Devotional sacred 9:16")
+    media_type = scene.get("mediaType", "auto").lower()
     visual_entities = scene.get("visualEntities") or scene.get("visual_entities") or []
     visual_attributes = scene.get("visualAttributes") or scene.get("visual_attributes") or []
     visual_strict = bool(scene.get("visualStrict") or scene.get("visual_strict") or visual_entities)
@@ -1601,12 +1794,34 @@ def process_shorts_scene_visual(scene_info):
             " Do not substitute a generic person, child, animal, statue, or unrelated deity."
         )
         prompt = f"{prompt}{visual_contract}"
+
     video_query = scene.get("videoSearchQuery") or "sacred temple diya"
+    visual_beats = scene.get("visualBeats") or scene.get("director", {}).get("visualBeats") or []
+    if visual_beats:
+        print(
+            f"🎬 [Shorts Scene {idx}] Resolving {len(visual_beats)} narration-aware visual beats...",
+            flush=True,
+        )
+        beat_shots = fetch_visual_beat_shots(
+            scene,
+            f"{prompt}, vertical 9:16 composition",
+            orientation="portrait",
+            base_name=f"shorts_scene_{idx}",
+            fallback_query=video_query,
+            force_images=(media_type == "ai_image"),
+        )
+        if beat_shots:
+            return beat_shots
+        print(
+            f"⚠️ [Shorts Scene {idx}] Beat-aware retrieval produced no usable assets; falling back to legacy path.",
+            flush=True,
+        )
+
     narration_text = scene.get("text") or scene.get("narration_chunk", "")
     target_seconds = estimate_scene_duration_seconds(narration_text)
     is_hook = idx == 1
 
-    print(f"🎥 [Shorts Scene {idx}] Searching ~{target_seconds:.0f}s of vertical video (Pexels + Pixabay + Coverr + Wikimedia + Library)...", flush=True)
+    print(f"🎥 [Shorts Scene {idx}] Legacy search ~{target_seconds:.0f}s of vertical video...", flush=True)
     shots, covered = fetch_video_shots_for_duration(
         video_query, prompt, target_seconds, orientation="portrait",
         base_name=f"shorts_scene_{idx}", max_shots=3 if is_hook else 2,
@@ -1618,22 +1833,11 @@ def process_shorts_scene_visual(scene_info):
 
     basis = remaining if shots else target_seconds
     if is_hook:
-        # The hook is the single highest-leverage moment in the Short (see
-        # module 1's Make.com prompt, which now also biases videoSearchQuery
-        # toward motion-rich phrasing so video is found here more often). If
-        # it still falls back to a still image, that image must NEVER read
-        # as one static frame: force at least 2 quick, cross-fading sub-shots
-        # (Scene.tsx already cross-fades + Ken-Burns between them) using the
-        # short HOOK_SUB_SHOT_SECONDS window, and lead with punchier framings
-        # from HOOK_SUB_SHOT_FRAMING_HINTS instead of a flat wide shot.
         num_image_shots = max(2, min(3, round(basis / HOOK_SUB_SHOT_SECONDS)))
         framing_hints = HOOK_SUB_SHOT_FRAMING_HINTS
         verb = "Topping up with" if shots else "No video match - generating"
-        print(f"🎨 [Shorts HOOK Scene {idx}] {verb} {num_image_shots} quick, dynamic 9:16 sub-shot(s) so the opening never feels static...", flush=True)
+        print(f"🎨 [Shorts HOOK Scene {idx}] {verb} {num_image_shots} quick, dynamic 9:16 sub-shot(s)...", flush=True)
     else:
-        # Shorts scenes are naturally briefer and vertical framing has less
-        # room for a wide/medium-shot distinction, so cap at 2 sub-shots
-        # instead of 4.
         num_image_shots = max(1, min(2, round(basis / SUB_SHOT_SECONDS)))
         framing_hints = SUB_SHOT_FRAMING_HINTS
         verb = "Topping up with" if shots else "Generating"
