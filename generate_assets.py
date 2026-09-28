@@ -33,6 +33,17 @@ except Exception:
 # Read payload safely
 raw_payload = os.environ.get("DISPATCH_PAYLOAD", "").strip()
 
+# Branch-only safe E2E fixture path.
+if (
+    os.getenv("VISUAL_DIRECTOR_E2E", "False").strip().lower() == "true"
+    and raw_payload in ("", "null", "{}")
+):
+    fixture_path = "tests/visual_director_e2e_payload.json"
+    if os.path.exists(fixture_path):
+        with open(fixture_path, encoding="utf-8") as f:
+            raw_payload = f.read()
+        print("🧪 Visual Director E2E: loaded test fixture payload.", flush=True)
+
 payload = {}
 if raw_payload and raw_payload != "null":
     try:
