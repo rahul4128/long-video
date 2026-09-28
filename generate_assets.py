@@ -2544,6 +2544,25 @@ def _fallback_word_timings(text: str, audio_path: str) -> list:
         cursor += span
     return timings
 
+def _edge_boundary_seconds(value) -> float:
+    """Convert edge-tts boundary offsets/durations to seconds.
+
+    Current edge-tts stream events expose offset/duration as 100-nanosecond
+    ticks. Older versions may expose timedelta-like objects, so handle both.
+    """
+    if value is None:
+        return 0.0
+    if hasattr(value, "total_seconds"):
+        try:
+            return float(value.total_seconds())
+        except Exception:
+            return 0.0
+    try:
+        return float(value) / 10_000_000.0
+    except Exception:
+        return 0.0
+
+
 async def _generate_edge_chunked_audio(clean_text: str, audio_dest: str) -> list:
     """Generate narration sentence-by-sentence for more human pacing.
 
@@ -2589,12 +2608,27 @@ async def _generate_edge_chunked_audio(clean_text: str, audio_dest: str) -> list
             )
             submaker = edge_tts.SubMaker()
             audio_bytes = bytearray()
+            raw_boundaries = []
 
             async for item in communicate.stream():
                 if item["type"] == "audio":
                     audio_bytes.extend(item["data"])
                 elif item["type"] == "WordBoundary":
-                    submaker.feed(item)
+                    # Use the raw stream event as the primary timing source.
+                    # SubMaker.cues can be empty on newer edge-tts versions.
+                    start_s = _edge_boundary_seconds(item.get("offset"))
+                    duration_s = _edge_boundary_seconds(item.get("duration"))
+                    word = str(item.get("text") or item.get("word") or "").strip()
+                    if word:
+                        raw_boundaries.append({
+                            "word": word,
+                            "start": round(cursor + start_s, 3),
+                            "end": round(cursor + start_s + max(0.01, duration_s), 3),
+                        })
+                    try:
+                        submaker.feed(item)
+                    except Exception:
+                        pass
 
             if not audio_bytes:
                 raise RuntimeError(f"Edge-TTS returned no audio for sentence {index + 1}")
@@ -2603,12 +2637,15 @@ async def _generate_edge_chunked_audio(clean_text: str, audio_dest: str) -> list
                 f.write(audio_bytes)
 
             duration = max(0.05, get_audio_duration(path))
-            for cue in submaker.cues:
-                all_timings.append({
-                    "word": cue.content,
-                    "start": round(cursor + cue.start.total_seconds(), 3),
-                    "end": round(cursor + cue.end.total_seconds(), 3),
-                })
+            if raw_boundaries:
+                all_timings.extend(raw_boundaries)
+            else:
+                for cue in submaker.cues:
+                    all_timings.append({
+                        "word": cue.content,
+                        "start": round(cursor + cue.start.total_seconds(), 3),
+                        "end": round(cursor + cue.end.total_seconds(), 3),
+                    })
 
             chunk_paths.append(path)
             cursor += duration
@@ -2654,6 +2691,16 @@ async def _generate_edge_chunked_audio(clean_text: str, audio_dest: str) -> list
         if normalize.returncode != 0 or not os.path.exists(audio_dest):
             raise RuntimeError("FFmpeg failed while assembling chunked narration")
 
+        if all_timings:
+            print(
+                f"  🎯 Edge word boundaries captured: {len(all_timings)} cue(s) for {os.path.basename(audio_dest)}",
+                flush=True,
+            )
+        else:
+            print(
+                f"  ⚠️ Edge returned no word boundaries for {os.path.basename(audio_dest)}; proportional timing fallback will be used.",
+                flush=True,
+            )
         return all_timings
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
