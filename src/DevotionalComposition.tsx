@@ -98,7 +98,12 @@ export const DevotionalComposition: React.FC<DevotionalVideoProps> = ({
                 direction={index % 2 === 0 ? 'zoom-in' : 'pan-right'}
                 format="long"
               />
-              <Subtitles text={scene.narration_chunk} words={scene.words} format="long" />
+              <Subtitles
+                text={scene.narration_chunk}
+                words={scene.words}
+                format="long"
+                sceneDurationInFrames={sceneDurationInFrames}
+              />
             </Series.Sequence>
           );
         })}
