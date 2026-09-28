@@ -21,6 +21,8 @@ _EFFECT_QUERIES = {
     "thunder": "thunder",
     "wind": "wind ambience",
     "fire": "fire crackle",
+    "om_drone": "meditation drone om",
+    "flute_swell": "indian bamboo flute swell",
 }
 
 def _download_freesound(effect_name: str, output_path: str) -> bool:
@@ -88,6 +90,20 @@ def _ffmpeg_fallback(effect_name: str, output_path: str) -> bool:
         lavfi = (
             "anoisesrc=color=brown:duration=2.2:amplitude=0.35,"
             "lowpass=f=180,afade=t=in:st=0:d=0.08,afade=t=out:st=0.8:d=1.3"
+        )
+    elif effect_name == "om_drone":
+        lavfi = (
+            "sine=frequency=136.1:duration=2.4,"
+            "tremolo=f=0.8:d=0.22,"
+            "lowpass=f=1400,"
+            "afade=t=in:st=0:d=0.35,afade=t=out:st=1.45:d=0.9"
+        )
+    elif effect_name == "flute_swell":
+        lavfi = (
+            "sine=frequency=660:duration=1.6,"
+            "tremolo=f=5:d=0.18,"
+            "highpass=f=280,lowpass=f=2600,"
+            "afade=t=in:st=0:d=0.28,afade=t=out:st=0.95:d=0.6"
         )
     else:
         lavfi = (
