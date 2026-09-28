@@ -101,6 +101,7 @@ export const DevotionalComposition: React.FC<DevotionalVideoProps> = ({
               <Subtitles
                 text={scene.narration_chunk}
                 words={scene.words}
+                visualBeats={scene.visualBeats}
                 format="long"
                 sceneDurationInFrames={sceneDurationInFrames}
               />
