@@ -1752,6 +1752,7 @@ def _generate_visual_beat_image(scene_prompt: str, beat: dict, orientation: str,
             orientation=orientation,
             reference_paths=local_reference_paths,
             variant_seed=beat_index,
+            allow_reference_reuse=False,
         )
     if not _valid_generated_image(dest):
         return {}
@@ -1795,6 +1796,7 @@ def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
 
     shots = []
     previous_candidate = None
+    selected_candidate_keys = set()
     print(
         f"  🎯 Visual-beat retrieval: {len(beats)} beat(s), "
         f"candidate target={_candidate_target_count()}, "
@@ -1809,7 +1811,17 @@ def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
         beat_prompt = _visual_beat_prompt(scene_prompt, beat)
         shot = {}
 
-        if not force_images and queries:
+        # mediaType=ai_image is treated as an AI-preferred establishing
+        # anchor, not a command to turn every narration beat into a still.
+        # Supporting beats may use accurate stock B-roll, which gives the
+        # sequence a more human/editorial rhythm.
+        force_this_beat_image = (
+            force_images
+            and beat_index == 1
+            and beat.get("preferredMedia") != "video"
+        )
+
+        if not force_this_beat_image and queries:
             filename = f"{base_name}_b{beat_index}.mp4"
             dest = os.path.join("public/images", filename)
             print(
@@ -1825,6 +1837,7 @@ def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
                 orientation=orientation,
                 dest_path=dest,
                 previous_candidate=previous_candidate,
+                exclude_keys=selected_candidate_keys,
             )
             if selected:
                 shot = {
@@ -1846,6 +1859,7 @@ def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
                     "candidateId": selected.get("id"),
                 }
                 previous_candidate = selected
+                selected_candidate_keys.add(_candidate_key(selected))
                 print(
                     f"    ✅ Beat {beat_index}: selected {selected.get('source')} "
                     f"score={selected.get('selectionScore')} "
@@ -2094,26 +2108,33 @@ def _create_local_atmosphere_visual(dest_path: str, orientation: str,
 
 
 def create_local_visual_fallback(dest_path: str, orientation: str,
-                                 reference_paths=None, variant_seed: int = 1) -> str:
-    """Guarantee a non-black local visual. Returns fallback source label."""
+                                 reference_paths=None, variant_seed: int = 1,
+                                 allow_reference_reuse: bool = True) -> str:
+    """Guarantee a non-black local visual.
+
+    Per-beat narration fallbacks should NOT derive a new crop from a previous
+    accepted shot: viewers perceive that as the same visual being reused for
+    different narration. Reference reuse is therefore opt-in at the call site.
+    """
     refs = []
-    for raw in (reference_paths or []):
-        path = str(raw or "")
-        if path and path not in refs and os.path.exists(path):
-            refs.append(path)
+    if allow_reference_reuse:
+        for raw in (reference_paths or []):
+            path = str(raw or "")
+            if path and path not in refs and os.path.exists(path):
+                refs.append(path)
 
-    thumb = (
-        "public/images/thumbnail_shorts.jpg"
-        if orientation == "portrait"
-        else "public/images/thumbnail.jpg"
-    )
-    if os.path.exists(thumb) and thumb not in refs:
-        refs.append(thumb)
+        thumb = (
+            "public/images/thumbnail_shorts.jpg"
+            if orientation == "portrait"
+            else "public/images/thumbnail.jpg"
+        )
+        if os.path.exists(thumb) and thumb not in refs:
+            refs.append(thumb)
 
-    for ref in refs:
-        if _derive_local_visual(ref, dest_path, orientation, variant_seed=variant_seed):
-            print(f"  🛟 Local continuity fallback created from {os.path.basename(ref)}", flush=True)
-            return "local_continuity_fallback"
+        for ref in refs:
+            if _derive_local_visual(ref, dest_path, orientation, variant_seed=variant_seed):
+                print(f"  🛟 Local continuity fallback created from {os.path.basename(ref)}", flush=True)
+                return "local_continuity_fallback"
 
     if _create_local_atmosphere_visual(dest_path, orientation, variant_seed=variant_seed):
         print("  🛟 Local abstract devotional fallback created (network-independent).", flush=True)
@@ -2982,6 +3003,7 @@ def recover_shots(shots, scene_idx, aspect="16:9") -> list:
         orientation=orientation,
         reference_paths=[],
         variant_seed=scene_idx,
+        allow_reference_reuse=False,
     )
     if source and _valid_generated_image(dest):
         print(
