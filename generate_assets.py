@@ -964,16 +964,196 @@ def _candidate_motion_score(candidate: dict) -> float:
     return _clamp01(base)
 
 
-def _candidate_continuity_score(candidate: dict, previous_candidate: dict = None) -> float:
-    if not previous_candidate:
-        return 0.75
-    current_style = str(candidate.get("style") or "live")
-    previous_style = str(previous_candidate.get("style") or "live")
-    if current_style == previous_style:
-        return 1.0
-    # A change between live footage and animation is allowed, just not
-    # rewarded as continuity.
-    return 0.45
+_CONTINUITY_STYLIZED_TERMS = {
+    "animation", "animated", "illustration", "illustrated", "cartoon", "anime",
+    "3d render", "cgi", "digital art", "painting", "watercolor",
+}
+_CONTINUITY_ANCIENT_TERMS = {
+    "ancient", "vedic", "mythological", "temple", "palace", "chariot",
+    "battlefield", "traditional", "heritage", "ritual",
+}
+_CONTINUITY_MODERN_TERMS = {
+    "modern", "city", "urban", "office", "smartphone", "phone", "car",
+    "traffic", "skyscraper", "technology", "contemporary",
+}
+_CONTINUITY_WARM_TERMS = {
+    "golden", "warm", "sunrise", "sunset", "candle", "diya", "lamp",
+    "fire", "orange", "amber",
+}
+_CONTINUITY_NIGHT_TERMS = {
+    "night", "moon", "moonlight", "dark", "blue hour", "midnight",
+}
+_CONTINUITY_NATURAL_TERMS = {
+    "daylight", "day", "natural light", "sunlight", "outdoor",
+}
+
+
+def _contains_any(text: str, terms: set) -> bool:
+    value = str(text or "").lower()
+    return any(term in value for term in terms)
+
+
+def _candidate_style_profile(candidate: dict, beat: dict = None) -> dict:
+    text = " ".join([
+        str(candidate.get("text") or ""),
+        str(candidate.get("query") or ""),
+    ]).lower()
+    source_style = str(candidate.get("style") or "live").lower()
+
+    realism = (
+        "stylized"
+        if source_style == "animation" or _contains_any(text, _CONTINUITY_STYLIZED_TERMS)
+        else "cinematic_realism"
+    )
+
+    if _contains_any(text, _CONTINUITY_MODERN_TERMS):
+        period = "modern"
+    elif _contains_any(text, _CONTINUITY_ANCIENT_TERMS):
+        period = "ancient"
+    else:
+        period = "unknown"
+
+    if _contains_any(text, _CONTINUITY_NIGHT_TERMS):
+        lighting = "low_key_night"
+    elif _contains_any(text, _CONTINUITY_WARM_TERMS):
+        lighting = "warm_golden"
+    elif _contains_any(text, _CONTINUITY_NATURAL_TERMS):
+        lighting = "natural_cinematic"
+    else:
+        lighting = "unknown"
+
+    setting_text = str((beat or {}).get("setting") or "").lower()
+    setting_match = 0.75
+    if setting_text and setting_text not in {"story environment", "unspecified"}:
+        setting_words = _extract_keywords(setting_text)
+        candidate_words = _extract_keywords(text)
+        setting_match = 1.0 if setting_words & candidate_words else 0.45
+
+    return {
+        "realism": realism,
+        "period": period,
+        "lighting": lighting,
+        "settingMatch": round(setting_match, 3),
+    }
+
+
+def _continuity_duplicate_threshold() -> float:
+    try:
+        return max(0.90, min(0.995, float(os.getenv("VISUAL_DUPLICATE_SIMILARITY", "0.965") or 0.965)))
+    except ValueError:
+        return 0.965
+
+
+def _candidate_continuity_score(candidate: dict, beat: dict,
+                                previous_candidate: dict = None,
+                                preview_similarity=None) -> tuple:
+    """Return (score, rejected, reason, profile, flags).
+
+    Continuity is mostly a soft preference, except for two high-confidence
+    editorial failures:
+      1. explicit modern-vs-ancient contradiction;
+      2. adjacent previews that are effectively the same composition.
+    """
+    desired = dict(beat.get("styleProfile") or {})
+    profile = _candidate_style_profile(candidate, beat)
+    flags = []
+    rejected = False
+    reason = ""
+
+    desired_realism = desired.get("realism")
+    current_realism = profile.get("realism")
+    if desired_realism and current_realism == desired_realism:
+        realism_score = 1.0
+    elif desired_realism == "cinematic_realism" and current_realism == "stylized":
+        realism_score = 0.18
+        flags.append("realism_jump")
+    elif desired_realism == "stylized" and current_realism == "cinematic_realism":
+        realism_score = 0.35
+        flags.append("realism_jump")
+    else:
+        realism_score = 0.72
+
+    desired_period = desired.get("period", "timeless")
+    current_period = profile.get("period", "unknown")
+    if desired_period in {"ancient", "modern"} and current_period in {"ancient", "modern"}:
+        if desired_period != current_period:
+            rejected = True
+            reason = "period_conflict"
+            flags.append("period_conflict")
+            period_score = 0.0
+        else:
+            period_score = 1.0
+    elif current_period == "unknown" or desired_period == "timeless":
+        period_score = 0.78
+    else:
+        period_score = 0.72
+
+    desired_lighting = desired.get("lighting")
+    current_lighting = profile.get("lighting")
+    if not desired_lighting or current_lighting == "unknown":
+        lighting_score = 0.74
+    elif desired_lighting == current_lighting:
+        lighting_score = 1.0
+    elif {desired_lighting, current_lighting} <= {"warm_golden", "natural_cinematic"}:
+        lighting_score = 0.72
+    else:
+        lighting_score = 0.48
+        flags.append("lighting_jump")
+
+    previous_score = 0.78
+    if previous_candidate:
+        previous_profile = dict(previous_candidate.get("continuityProfile") or {})
+        if not previous_profile:
+            previous_profile = _candidate_style_profile(previous_candidate, beat)
+
+        previous_realism = previous_profile.get("realism")
+        if previous_realism and previous_realism == current_realism:
+            previous_score = 1.0
+        elif previous_realism:
+            previous_score = 0.28
+            flags.append("adjacent_realism_jump")
+
+        previous_period = previous_profile.get("period")
+        if (
+            previous_period in {"ancient", "modern"}
+            and current_period in {"ancient", "modern"}
+            and previous_period != current_period
+        ):
+            previous_score = min(previous_score, 0.22)
+            flags.append("adjacent_period_jump")
+
+    similarity_score = 0.75
+    if preview_similarity is not None:
+        sim = float(preview_similarity)
+        if sim >= _continuity_duplicate_threshold():
+            rejected = True
+            reason = reason or "near_duplicate_composition"
+            flags.append("near_duplicate")
+            similarity_score = 0.0
+        elif sim >= 0.90:
+            # Very similar but not identical: useful continuity, less novelty.
+            similarity_score = 0.70
+            flags.append("very_similar_composition")
+        elif 0.48 <= sim < 0.90:
+            similarity_score = 1.0
+        else:
+            # Low image similarity can simply mean the narration changed
+            # subject, so penalise gently rather than rejecting.
+            similarity_score = 0.58
+            flags.append("large_visual_change")
+
+    setting_score = float(profile.get("settingMatch") or 0.75)
+
+    score = (
+        realism_score * 0.28
+        + period_score * 0.20
+        + lighting_score * 0.14
+        + setting_score * 0.13
+        + previous_score * 0.15
+        + similarity_score * 0.10
+    )
+
+    return _clamp01(score), rejected, reason, profile, flags
 
 
 def _candidate_novelty_score(candidate: dict) -> float:
@@ -1390,6 +1570,7 @@ def _visual_beat_prompt(scene_prompt: str, beat: dict) -> str:
         f"Mood: {beat.get('mood', '')}",
         f"Time: {beat.get('time', '')}",
         f"Shot type: {beat.get('shotType', '')}",
+        f"Style profile: {json.dumps(beat.get('styleProfile') or {}, ensure_ascii=False)}",
     ]
     return ". ".join(str(p).strip(" .") for p in parts if str(p).strip(" ."))
 
@@ -1425,10 +1606,28 @@ def _generate_visual_beat_image(scene_prompt: str, beat: dict, orientation: str,
     beat_index = int(beat.get("beatIndex") or 1)
     shot_type = str(beat.get("shotType") or "medium").replace("_", " ")
     camera = str(beat.get("cameraMotion") or "slow_push_in").replace("_", " ")
+    style_profile = dict(beat.get("styleProfile") or {})
+    realism_phrase = (
+        "stylized devotional artwork"
+        if style_profile.get("realism") == "stylized"
+        else "cinematic photorealistic devotional frame"
+    )
+    period_phrase = {
+        "ancient": "ancient Indian period details, no modern objects",
+        "modern": "contemporary Indian setting",
+        "timeless": "timeless devotional setting",
+    }.get(style_profile.get("period"), "timeless devotional setting")
+    lighting_phrase = {
+        "warm_golden": "warm golden devotional lighting",
+        "low_key_night": "low-key night lighting with controlled highlights",
+        "natural_cinematic": "natural cinematic lighting",
+    }.get(style_profile.get("lighting"), "natural cinematic lighting")
+
     prompt = (
         f"{_visual_beat_prompt(scene_prompt, beat)}. "
         f"{shot_type} cinematic composition, designed for {camera} motion, "
-        "single coherent moment, no collage, no text"
+        f"{realism_phrase}, {period_phrase}, {lighting_phrase}, "
+        "consistent visual language, single coherent moment, no collage, no text"
     )
     aspect_ratio = "9:16" if orientation == "portrait" else "16:9"
     width, height = (1080, 1920) if orientation == "portrait" else (1920, 1080)
@@ -1456,6 +1655,13 @@ def _generate_visual_beat_image(scene_prompt: str, beat: dict, orientation: str,
         "source": "ai_image",
         "queryCandidates": beat.get("queries", []),
         "motionProfile": "cinematic_depth",
+        "continuityProfile": {
+            "realism": style_profile.get("realism", "cinematic_realism"),
+            "period": style_profile.get("period", "timeless"),
+            "lighting": style_profile.get("lighting", "warm_golden"),
+            "settingMatch": 1.0,
+        },
+        "continuityFlags": [],
     }
 
 
