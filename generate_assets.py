@@ -1455,6 +1455,7 @@ def _generate_visual_beat_image(scene_prompt: str, beat: dict, orientation: str,
         "queryUsed": "",
         "source": "ai_image",
         "queryCandidates": beat.get("queries", []),
+        "motionProfile": "cinematic_depth",
     }
 
 
@@ -2880,7 +2881,7 @@ async def process():
     # shot timing. This lets us compare what the director asked for, what stock
     # retrieval selected, and exactly where Remotion will cut during speech.
     visual_search_report = {
-        "phase": 4,
+        "phase": 5,
         "reranker": {
             "candidateTarget": _candidate_target_count(),
             "maxQueriesPerBeat": _rerank_query_limit(),
@@ -2891,6 +2892,11 @@ async def process():
         "timing": {
             "mode": "tts_word_boundary_sync",
             "fallback": "proportional_scene_timing",
+        },
+        "imageMotion": {
+            "profile": "cinematic_depth",
+            "scope": "ai_image_shots_only",
+            "layers": ["soft_depth_background", "foreground_camera_move", "subtle_light_pass", "vignette"],
         },
         "long": [
             {
