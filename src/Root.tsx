@@ -11,7 +11,10 @@ import defaultPropsThumbnail from '../public/thumbnail_props.json';
 import defaultPropsThumbnailShorts from '../public/thumbnail_props_shorts.json';
 
 export const RemotionRoot: React.FC = () => {
-  const fps = 30;
+  // Long-form at 24fps keeps cinematic motion smooth while cutting ~20% of
+  // rendered frames. Shorts stays at 30fps for fast vertical motion.
+  const longFps = 24;
+  const shortsFps = 30;
   const typedPropsLong = defaultPropsLong as DevotionalVideoProps;
   const typedPropsShorts = defaultPropsShorts as DevotionalVideoProps;
   const typedPropsThumbnail = defaultPropsThumbnail as ThumbnailProps;
@@ -21,13 +24,13 @@ export const RemotionRoot: React.FC = () => {
   const totalLongSeconds = typedPropsLong.scenes?.length
     ? typedPropsLong.scenes.reduce((acc, scene) => acc + (scene.durationInSeconds || 5), 0)
     : 10;
-  const durationInFramesLong = Math.max(30, Math.round(totalLongSeconds * fps));
+  const durationInFramesLong = Math.max(30, Math.round(totalLongSeconds * longFps));
 
   // Calculate dynamic duration for Shorts Video (no longer hardcoded to 45s)
   const totalShortsSeconds = typedPropsShorts.scenes?.length
     ? typedPropsShorts.scenes.reduce((acc, scene) => acc + (scene.durationInSeconds || 5), 0)
     : 45;
-  const durationInFramesShorts = Math.max(30, Math.round(totalShortsSeconds * fps));
+  const durationInFramesShorts = Math.max(30, Math.round(totalShortsSeconds * shortsFps));
 
   return (
     <>
@@ -36,7 +39,7 @@ export const RemotionRoot: React.FC = () => {
         id="DevotionalComposition"
         component={DevotionalComposition}
         durationInFrames={durationInFramesLong}
-        fps={fps}
+        fps={longFps}
         width={1920}
         height={1080}
         defaultProps={typedPropsLong}
@@ -47,7 +50,7 @@ export const RemotionRoot: React.FC = () => {
         id="DevotionalShortsComposition"
         component={DevotionalShortsComposition}
         durationInFrames={durationInFramesShorts}
-        fps={fps}
+        fps={shortsFps}
         width={1080}
         height={1920}
         defaultProps={typedPropsShorts}
