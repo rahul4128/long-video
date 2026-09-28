@@ -1088,12 +1088,11 @@ def _candidate_continuity_score(candidate: dict, beat: dict,
     current_realism = profile.get("realism")
     if desired_realism and current_realism == desired_realism:
         realism_score = 1.0
-    elif desired_realism == "cinematic_realism" and current_realism == "stylized":
-        realism_score = 0.18
-        flags.append("realism_jump")
-    elif desired_realism == "stylized" and current_realism == "cinematic_realism":
-        realism_score = 0.35
-        flags.append("realism_jump")
+    elif desired_realism and current_realism and desired_realism != current_realism:
+        realism_score = 0.0
+        rejected = True
+        reason = "realism_conflict"
+        flags.append("realism_conflict")
     else:
         realism_score = 0.72
 
@@ -3242,7 +3241,7 @@ async def process():
             "styleProfile": ["realism", "period", "lighting", "palette"],
             "adjacentPreviewSimilarity": bool(clip_rerank is not None and clip_rerank.enabled()),
             "nearDuplicateThreshold": _continuity_duplicate_threshold(),
-            "hardRejects": ["entity_conflict", "period_conflict", "near_duplicate_composition"],
+            "hardRejects": ["realism_conflict", "entity_conflict", "period_conflict", "near_duplicate_composition"],
         },
         "long": [
             {
