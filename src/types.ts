@@ -25,6 +25,10 @@ export interface Shot {
   queryUsed?: string;
   queryCandidates?: string[];
   source?: 'pexels' | 'pixabay' | 'coverr' | 'wikimedia' | 'local_library' | 'ai_image' | 'unknown';
+  candidateId?: string | number;
+  selectionScore?: number;
+  scoreBreakdown?: Record<string, number>;
+  clipSimilarity?: number | null;
   // Optional per-shot transition style for the CUT INTO this shot (ignored
   // for the first shot in a scene, which only cross-dissolves in from the
   // previous scene). Scene.tsx alternates crossfade/blur_cut by shot index
