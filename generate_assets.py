@@ -2731,7 +2731,14 @@ async def process():
     # metadata. This is intentionally separate from the planning report so we
     # can compare what the director ASKED for with what retrieval ACTUALLY found.
     visual_search_report = {
-        "phase": 2,
+        "phase": 3,
+        "reranker": {
+            "candidateTarget": _candidate_target_count(),
+            "maxQueriesPerBeat": _rerank_query_limit(),
+            "minimumScore": _candidate_min_score(),
+            "clipEnabled": bool(clip_rerank is not None and clip_rerank.enabled()),
+            "weights": _VISUAL_SCORE_WEIGHTS,
+        },
         "long": [
             {
                 "scene_number": scene.get("scene_number"),
