@@ -29,6 +29,14 @@ export interface Shot {
   selectionScore?: number;
   scoreBreakdown?: Record<string, number>;
   clipSimilarity?: number | null;
+  // Phase-4 narration synchronisation. These seconds are scene-local and are
+  // authoritative when present; legacy props fall back to equal shot windows.
+  startSeconds?: number;
+  endSeconds?: number;
+  syncedDurationSeconds?: number;
+  timingSource?: 'tts_word_boundaries' | 'proportional_fallback';
+  narrationCue?: string;
+  cameraMotion?: string;
   // Optional per-shot transition style for the CUT INTO this shot (ignored
   // for the first shot in a scene, which only cross-dissolves in from the
   // previous scene). Scene.tsx alternates crossfade/blur_cut by shot index
@@ -52,12 +60,16 @@ export interface VisualBeat {
   queries: string[];
   preferredMedia: 'video' | 'auto';
   transition: 'cut' | 'crossfade' | 'blur_cut';
+  actualStartSeconds?: number;
+  actualEndSeconds?: number;
+  actualDurationSeconds?: number;
+  timingSource?: 'tts_word_boundaries' | 'proportional_fallback';
 }
 
 export interface DirectorPlan {
   camera?: 'slow_push' | 'pan_left' | 'pan_right' | 'zoom_in';
   mood?: string;
-  transition?: 'crossfade' | 'blur_cut';
+  transition?: 'cut' | 'crossfade' | 'blur_cut';
   emphasis?: 'climax' | 'normal';
   visual_priority?: string[];
   director_version?: number;
