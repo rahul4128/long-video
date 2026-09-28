@@ -2522,6 +2522,9 @@ def sync_visual_beats_to_narration(scene: dict, shots: list, word_timings: list,
         beat["actualEndSeconds"] = round(end, 3)
         beat["actualDurationSeconds"] = round(max(0.05, end - start), 3)
         beat["timingSource"] = timing_source
+        effect_name = str(beat.get("soundEffect") or "none")
+        if effect_name != "none":
+            beat["soundEffectFile"] = f"audio/effects/beat_{effect_name}.mp3"
 
     # Attach real windows to surviving shots. Usually there is one shot per
     # beat. If one beat failed to produce media, use the next surviving
@@ -2800,21 +2803,23 @@ async def process():
     # normal-length story; only an unusually long script gets a gentle (<=8%) trim.
     _fit_long_narration_to_target(long_audio_paths, long_word_timings, target_seconds=240.0)
 
-    # 4b. Sound-Effect Layer (BOTH Long video and Shorts now carry an
-    # optional soundEffect field - Shorts previously had none at all in the
-    # payload, so every Shorts render silently had zero effect layer
-    # regardless of what Scene.tsx already expected for format="shorts").
-    for i, scene in enumerate(long_scenes):
-        idx = i + 1
-        effect_name = scene.get("soundEffect", "none")
-        if effect_name and effect_name != "none":
-            resolve_sound_effect_audio(effect_name, f"public/audio/effects/long_effect_{idx}.mp3")
+    # 4b. Phase-6 Beat-Level Sound-Effect Layer.
+    # Resolve each unique cue once, then Scene.tsx schedules the shared file
+    # at the beat's actualStartSeconds. The old scene-start SFX playback is
+    # intentionally suppressed by director.py.
+    beat_effects = set()
+    for scene in list(long_scenes) + list(shorts_scenes):
+        for beat in (scene.get("visualBeats") or scene.get("director", {}).get("visualBeats") or []):
+            effect_name = str(beat.get("soundEffect") or "none")
+            if effect_name != "none":
+                beat_effects.add(effect_name)
 
-    for i, scene in enumerate(shorts_scenes):
-        idx = i + 1
-        effect_name = scene.get("soundEffect", "none")
-        if effect_name and effect_name != "none":
-            resolve_sound_effect_audio(effect_name, f"public/audio/effects/shorts_effect_{idx}.mp3")
+    for effect_name in sorted(beat_effects):
+        resolve_sound_effect_audio(
+            effect_name,
+            f"public/audio/effects/beat_{effect_name}.mp3",
+        )
+
 
     # 5. Build Remotion Props for Long Video
     # long_visuals[i] / shorts_visuals[i] are now ordered shot LISTS (see
@@ -2881,7 +2886,7 @@ async def process():
     # shot timing. This lets us compare what the director asked for, what stock
     # retrieval selected, and exactly where Remotion will cut during speech.
     visual_search_report = {
-        "phase": 5,
+        "phase": 6,
         "reranker": {
             "candidateTarget": _candidate_target_count(),
             "maxQueriesPerBeat": _rerank_query_limit(),
@@ -2897,6 +2902,11 @@ async def process():
             "profile": "cinematic_depth",
             "scope": "ai_image_shots_only",
             "layers": ["soft_depth_background", "foreground_camera_move", "subtle_light_pass", "vignette"],
+        },
+        "editorialCues": {
+            "typography": "reveal_climax_action_only",
+            "soundEffects": "beat_timed",
+            "calmCrossfadeWhoosh": false,
         },
         "long": [
             {
