@@ -1780,12 +1780,18 @@ def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
                     "selectionScore": selected.get("selectionScore"),
                     "scoreBreakdown": selected.get("scoreBreakdown", {}),
                     "clipSimilarity": selected.get("clipSimilarity"),
+                    "continuitySimilarity": selected.get("continuitySimilarity"),
+                    "continuityProfile": selected.get("continuityProfile", {}),
+                    "continuityFlags": selected.get("continuityFlags", []),
                     "candidateId": selected.get("id"),
                 }
                 previous_candidate = selected
                 print(
                     f"    ✅ Beat {beat_index}: selected {selected.get('source')} "
-                    f"score={selected.get('selectionScore')} query='{selected.get('query')}'",
+                    f"score={selected.get('selectionScore')} "
+                    f"continuity={selected.get('scoreBreakdown', {}).get('continuity')} "
+                    f"flags={selected.get('continuityFlags', [])} "
+                    f"query='{selected.get('query')}'",
                     flush=True,
                 )
             else:
@@ -1808,12 +1814,21 @@ def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
                         "selectionScore": 1.0,
                         "scoreBreakdown": {"curated_local_library": 1.0},
                         "clipSimilarity": None,
+                        "continuitySimilarity": None,
+                        "continuityProfile": {
+                            "realism": (beat.get("styleProfile") or {}).get("realism", "cinematic_realism"),
+                            "period": (beat.get("styleProfile") or {}).get("period", "timeless"),
+                            "lighting": (beat.get("styleProfile") or {}).get("lighting", "warm_golden"),
+                            "settingMatch": 1.0,
+                        },
+                        "continuityFlags": ["curated_local_library"],
                         "candidateId": "local_library",
                     }
                     previous_candidate = {
                         "source": "local_library",
                         "id": "local_library",
                         "style": "live",
+                        "continuityProfile": shot.get("continuityProfile", {}),
                     }
 
         if not shot:
@@ -1828,6 +1843,18 @@ def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
                 orientation=orientation,
                 base_name=base_name,
             )
+            if shot:
+                previous_candidate = {
+                    "source": "ai_image",
+                    "id": shot.get("file", f"ai_beat_{beat_index}"),
+                    "style": (
+                        "animation"
+                        if (beat.get("styleProfile") or {}).get("realism") == "stylized"
+                        else "live"
+                    ),
+                    "continuityProfile": shot.get("continuityProfile", {}),
+                    "preview_url": "",
+                }
 
         if shot:
             transition = beat.get("transition")
@@ -3153,7 +3180,7 @@ async def process():
     # shot timing + editorial typography/SFX cues. This lets us compare what
     # the director asked for with exactly what Remotion will render/play.
     visual_search_report = {
-        "phase": 6,
+        "phase": 7,
         "reranker": {
             "candidateTarget": _candidate_target_count(),
             "maxQueriesPerBeat": _rerank_query_limit(),
@@ -3174,6 +3201,12 @@ async def process():
             "typography": "reveal_climax_action_only",
             "soundEffects": "beat_timed",
             "calmCrossfadeWhoosh": false,
+        },
+        "continuity": {
+            "styleProfile": ["realism", "period", "lighting", "palette"],
+            "adjacentPreviewSimilarity": bool(clip_rerank is not None and clip_rerank.enabled()),
+            "nearDuplicateThreshold": _continuity_duplicate_threshold(),
+            "hardRejects": ["period_conflict", "near_duplicate_composition"],
         },
         "long": [
             {
