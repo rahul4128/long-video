@@ -729,7 +729,8 @@ def build_query_candidates(primary_query: str, prompt_text: str = "") -> list:
     return candidates
 
 def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "landscape",
-                             prompt_text: str = "", candidate_queries: list = None) -> bool:
+                             prompt_text: str = "", candidate_queries: list = None,
+                             match_meta: dict = None) -> bool:
     bundled_query_text = " ".join(
         str(q).strip() for q in (candidate_queries or []) if str(q).strip()
     )
@@ -764,24 +765,34 @@ def fetch_multi_source_video(query: str, dest_path: str, orientation: str = "lan
         target_keywords.prompt = f"{prompt_text or candidate}".strip()
         # 1. Try Pexels only when its URL metadata can prove the strict entity.
         if fetch_pexels_video(candidate, dest_path, orientation, target_keywords):
+            if match_meta is not None:
+                match_meta.update({"matched_query": candidate, "source": "pexels"})
             print(f"  ✅ Accurate video fetched from Pexels ('{candidate}')", flush=True)
             return True
         # 2. Pixabay has the strongest stock tags for strict metadata matching.
         if fetch_pixabay_video(candidate, dest_path, target_keywords):
+            if match_meta is not None:
+                match_meta.update({"matched_query": candidate, "source": "pixabay"})
             print(f"  ✅ Accurate video fetched from Pixabay ('{candidate}')", flush=True)
             return True
         # 3. Coverr title/tags, still subject to the same hard gate.
         if fetch_coverr_video(candidate, dest_path, target_keywords):
+            if match_meta is not None:
+                match_meta.update({"matched_query": candidate, "source": "coverr"})
             print(f"  ✅ Accurate video fetched from Coverr ('{candidate}')", flush=True)
             return True
         # 4. Wikimedia Commons is useful for real devotional/historical footage.
         if fetch_wikimedia_video(candidate, dest_path, target_keywords):
+            if match_meta is not None:
+                match_meta.update({"matched_query": candidate, "source": "wikimedia"})
             print(f"  ✅ Accurate video fetched from Wikimedia Commons ('{candidate}')", flush=True)
             return True
 
     # Never use fuzzy local matching for strict entity scenes either.
     local_query = bundled_query_text or query
     if not strict and fetch_local_library_video(f"{local_query} {prompt_text}", dest_path):
+        if match_meta is not None:
+            match_meta.update({"matched_query": local_query, "source": "local_library"})
         return True
     return False
 
@@ -894,6 +905,8 @@ def _generate_visual_beat_image(scene_prompt: str, beat: dict, orientation: str,
         "subject": beat.get("subject", ""),
         "shotType": beat.get("shotType", ""),
         "queryUsed": "",
+        "source": "ai_image",
+        "queryCandidates": beat.get("queries", []),
     }
 
 
@@ -933,12 +946,14 @@ def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
                 f"→ queries={queries}",
                 flush=True,
             )
+            match_meta = {}
             if fetch_multi_source_video(
                 queries[0],
                 dest,
                 orientation=orientation,
                 prompt_text=beat_prompt,
                 candidate_queries=queries,
+                match_meta=match_meta,
             ):
                 shot = {
                     "type": "video",
@@ -947,10 +962,9 @@ def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
                     "durationTarget": beat.get("durationTarget"),
                     "subject": beat.get("subject", ""),
                     "shotType": beat.get("shotType", ""),
-                    # The search function can stop on any query in the bundle;
-                    # record the bundle for auditability rather than pretending
-                    # we know which one won before Phase 3 returns scored candidates.
-                    "queryUsed": " | ".join(queries),
+                    "queryUsed": match_meta.get("matched_query", queries[0]),
+                    "source": match_meta.get("source", "unknown"),
+                    "queryCandidates": queries,
                 }
 
         if not shot:
@@ -2126,6 +2140,29 @@ async def process():
             "visualStrict": bool(scene.get("visualStrict") or scene.get("visual_strict")),
             "words": shorts_word_timings[i]
         })
+
+    # Phase-2 audit: exact selected asset, successful query/source and beat
+    # metadata. This is intentionally separate from the planning report so we
+    # can compare what the director ASKED for with what retrieval ACTUALLY found.
+    visual_search_report = {
+        "phase": 2,
+        "long": [
+            {
+                "scene_number": scene.get("scene_number"),
+                "shots": scene.get("shots", []),
+            }
+            for scene in enriched_long
+        ],
+        "shorts": [
+            {
+                "scene_number": scene.get("scene_number"),
+                "shots": scene.get("shots", []),
+            }
+            for scene in enriched_shorts
+        ],
+    }
+    with open("out/visual_search_report.json", "w", encoding="utf-8") as f:
+        json.dump(visual_search_report, f, ensure_ascii=False, indent=2)
 
     # 6b. Climax scene(s) for the bgm-swell in DevotionalComposition.tsx.
     # Prefer whatever the Make.com prompt supplied (_meta.climax_scene_number
