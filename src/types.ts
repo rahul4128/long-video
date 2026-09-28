@@ -37,6 +37,7 @@ export interface Shot {
   timingSource?: 'tts_word_boundaries' | 'proportional_fallback';
   narrationCue?: string;
   cameraMotion?: string;
+  motionProfile?: 'cinematic_depth';
   // Optional per-shot transition style for the CUT INTO this shot (ignored
   // for the first shot in a scene, which only cross-dissolves in from the
   // previous scene). Scene.tsx alternates crossfade/blur_cut by shot index
