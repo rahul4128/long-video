@@ -202,12 +202,11 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
               display: 'inline-block',
               padding: isShorts ? '11px 22px 13px' : '10px 24px 12px',
               borderRadius: 18,
-              background: 'rgba(8, 7, 5, 0.58)',
+              background: 'rgba(8, 7, 5, 0.72)',
               border: isClimax
                 ? '1px solid rgba(255, 213, 74, 0.72)'
                 : '1px solid rgba(255,255,255,0.24)',
               boxShadow: '0 10px 34px rgba(0,0,0,0.48)',
-              backdropFilter: 'blur(5px)',
             }}
           >
             <span
@@ -258,8 +257,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
       >
         <div
           style={{
-            backgroundColor: 'rgba(15, 10, 5, 0.75)',
-            backdropFilter: 'blur(8px)',
+            backgroundColor: 'rgba(15, 10, 5, 0.82)',
             border: '1.5px solid rgba(255, 215, 0, 0.4)',
             borderRadius: isShorts ? 20 : 16,
             padding: isShorts ? '18px 28px' : '16px 36px',
