@@ -2524,7 +2524,13 @@ def sync_visual_beats_to_narration(scene: dict, shots: list, word_timings: list,
         beat["timingSource"] = timing_source
         effect_name = str(beat.get("soundEffect") or "none")
         if effect_name != "none":
-            beat["soundEffectFile"] = f"audio/effects/beat_{effect_name}.mp3"
+            effect_rel = f"audio/effects/beat_{effect_name}.mp3"
+            effect_abs = os.path.join("public", effect_rel)
+            if os.path.exists(effect_abs) and os.path.getsize(effect_abs) > 1000:
+                beat["soundEffectFile"] = effect_rel
+            else:
+                beat["soundEffectFile"] = ""
+                beat["soundEffectReason"] = "effect_asset_unavailable"
 
     # Attach real windows to surviving shots. Usually there is one shot per
     # beat. If one beat failed to produce media, use the next surviving
