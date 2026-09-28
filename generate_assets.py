@@ -987,6 +987,30 @@ _CONTINUITY_NATURAL_TERMS = {
     "daylight", "day", "natural light", "sunlight", "outdoor",
 }
 
+_CONTINUITY_ENTITY_ALIASES = {
+    "krishna": {"krishna", "shri krishna", "lord krishna", "कृष्ण", "श्रीकृष्ण"},
+    "shiva": {"shiva", "mahadev", "lord shiva", "शिव", "महादेव"},
+    "ram": {"ram", "rama", "lord ram", "राम"},
+    "hanuman": {"hanuman", "bajrangbali", "हनुमान", "बजरंगबली"},
+    "ganesh": {"ganesh", "ganesha", "गणेश"},
+    "vishnu": {"vishnu", "विष्णु"},
+    "lakshmi": {"lakshmi", "laxmi", "लक्ष्मी"},
+    "durga": {"durga", "दुर्गा"},
+    "parvati": {"parvati", "पार्वती"},
+    "arjuna": {"arjuna", "arjun", "अर्जुन"},
+    "karna": {"karna", "karn", "कर्ण"},
+    "radha": {"radha", "राधा"},
+    "sita": {"sita", "सीता"},
+}
+
+
+def _canonical_entity(text: str) -> str:
+    value = str(text or "").lower()
+    for canonical, aliases in _CONTINUITY_ENTITY_ALIASES.items():
+        if any(alias.lower() in value for alias in aliases):
+            return canonical
+    return ""
+
 
 def _contains_any(text: str, terms: set) -> bool:
     value = str(text or "").lower()
@@ -1072,6 +1096,18 @@ def _candidate_continuity_score(candidate: dict, beat: dict,
         flags.append("realism_jump")
     else:
         realism_score = 0.72
+
+    desired_entity = _canonical_entity(desired.get("entityAnchor", ""))
+    candidate_entity = _canonical_entity(
+        " ".join([
+            str(candidate.get("text") or ""),
+            str(candidate.get("query") or ""),
+        ])
+    )
+    if desired_entity and candidate_entity and desired_entity != candidate_entity:
+        rejected = True
+        reason = "entity_conflict"
+        flags.append("entity_conflict")
 
     desired_period = desired.get("period", "timeless")
     current_period = profile.get("period", "unknown")
@@ -3206,7 +3242,7 @@ async def process():
             "styleProfile": ["realism", "period", "lighting", "palette"],
             "adjacentPreviewSimilarity": bool(clip_rerank is not None and clip_rerank.enabled()),
             "nearDuplicateThreshold": _continuity_duplicate_threshold(),
-            "hardRejects": ["period_conflict", "near_duplicate_composition"],
+            "hardRejects": ["entity_conflict", "period_conflict", "near_duplicate_composition"],
         },
         "long": [
             {
