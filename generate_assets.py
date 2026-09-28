@@ -1393,15 +1393,24 @@ def _score_visual_candidates(candidates: list, beat: dict, beat_prompt: str,
         beat_prompt,
     ])
 
+    preview_urls = [c.get("preview_url", "") for c in candidates]
     clip_sims = None
+    continuity_sims = None
     if clip_rerank is not None and clip_rerank.enabled():
-        clip_sims = clip_rerank.similarities(
-            beat_prompt,
-            [c.get("preview_url", "") for c in candidates],
-        )
+        clip_sims = clip_rerank.similarities(beat_prompt, preview_urls)
+        previous_preview = str((previous_candidate or {}).get("preview_url") or "")
+        if previous_preview:
+            continuity_sims = clip_rerank.image_similarities(
+                previous_preview,
+                preview_urls,
+            )
 
     scored = []
-    clip_floor = clip_rerank.min_similarity() if clip_rerank is not None and clip_rerank.enabled() else 0.0
+    clip_floor = (
+        clip_rerank.min_similarity()
+        if clip_rerank is not None and clip_rerank.enabled()
+        else 0.0
+    )
 
     for index, candidate in enumerate(candidates):
         entity_action, accepted, reject_reason = _candidate_entity_action_score(
@@ -1415,7 +1424,10 @@ def _score_visual_candidates(candidates: list, beat: dict, beat_prompt: str,
             scored.append(candidate)
             continue
 
-        lexical_semantic = _candidate_text_score(candidate.get("text", ""), target_text)
+        lexical_semantic = _candidate_text_score(
+            candidate.get("text", ""),
+            target_text,
+        )
         clip_sim = None
         if clip_sims and index < len(clip_sims):
             clip_sim = clip_sims[index]
@@ -1426,38 +1438,81 @@ def _score_visual_candidates(candidates: list, beat: dict, beat_prompt: str,
                 semantic = 0.0
                 clip_rejected = True
             else:
-                # Typical ViT-B-32 similarities for relevant stock previews are
-                # roughly 0.20-0.35. Map that useful range onto 0-1.
-                semantic = _clamp01((clip_sim - clip_floor) / max(0.08, 0.35 - clip_floor))
-                # Keep metadata as a small stabilizer for ambiguous previews.
+                semantic = _clamp01(
+                    (clip_sim - clip_floor) / max(0.08, 0.35 - clip_floor)
+                )
                 semantic = max(semantic, lexical_semantic * 0.55)
         else:
             semantic = lexical_semantic
+
+        continuity_sim = None
+        if continuity_sims and index < len(continuity_sims):
+            continuity_sim = continuity_sims[index]
+
+        (
+            continuity_score,
+            continuity_rejected,
+            continuity_reason,
+            continuity_profile,
+            continuity_flags,
+        ) = _candidate_continuity_score(
+            candidate,
+            beat,
+            previous_candidate=previous_candidate,
+            preview_similarity=continuity_sim,
+        )
 
         breakdown = {
             "semantic": semantic,
             "entity_action": entity_action,
             "quality": _candidate_quality_score(candidate, orientation),
             "motion": _candidate_motion_score(candidate),
-            "continuity": _candidate_continuity_score(candidate, previous_candidate),
+            "continuity": continuity_score,
             "novelty": _candidate_novelty_score(candidate),
             "composition": _candidate_composition_score(candidate, orientation),
         }
-        total = sum(_VISUAL_SCORE_WEIGHTS[k] * breakdown[k] for k in _VISUAL_SCORE_WEIGHTS)
+        total = sum(
+            _VISUAL_SCORE_WEIGHTS[k] * breakdown[k]
+            for k in _VISUAL_SCORE_WEIGHTS
+        )
 
         candidate = dict(candidate)
         candidate["selectionScore"] = round(total, 4)
-        candidate["scoreBreakdown"] = {k: round(v, 4) for k, v in breakdown.items()}
-        candidate["clipSimilarity"] = None if clip_sim is None else round(float(clip_sim), 4)
-        candidate["rejected"] = bool(clip_rejected)
-        candidate["rejectReason"] = "clip_similarity_below_floor" if clip_rejected else ""
+        candidate["scoreBreakdown"] = {
+            k: round(v, 4) for k, v in breakdown.items()
+        }
+        candidate["clipSimilarity"] = (
+            None if clip_sim is None else round(float(clip_sim), 4)
+        )
+        candidate["continuitySimilarity"] = (
+            None
+            if continuity_sim is None
+            else round(float(continuity_sim), 4)
+        )
+        candidate["continuityProfile"] = continuity_profile
+        candidate["continuityFlags"] = continuity_flags
+
+        rejected = bool(clip_rejected or continuity_rejected)
+        reasons = []
+        if clip_rejected:
+            reasons.append("clip_similarity_below_floor")
+        if continuity_rejected and continuity_reason:
+            reasons.append(continuity_reason)
+
+        candidate["rejected"] = rejected
+        candidate["rejectReason"] = "|".join(reasons)
         scored.append(candidate)
 
-    scored.sort(key=lambda c: (
-        0 if c.get("rejected") else 1,
-        float(c.get("selectionScore") or 0.0),
-        0 if _candidate_key(c) in RECENTLY_USED_CLIP_IDS else 1,
-    ), reverse=True)
+    scored.sort(
+        key=lambda candidate: (
+            0 if candidate.get("rejected") else 1,
+            float(candidate.get("selectionScore") or 0.0),
+            0
+            if _candidate_key(candidate) in RECENTLY_USED_CLIP_IDS
+            else 1,
+        ),
+        reverse=True,
+    )
     return scored
 
 
