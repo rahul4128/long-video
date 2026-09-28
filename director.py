@@ -242,12 +242,15 @@ def _visual_style_profile(scene, mood):
         if mood in {"devotional", "revelation", "climax"}
         else "natural_earth"
     )
+    entities = _scene_entities(scene)
+    entity_anchor = entities[0] if entities else ""
 
     return {
         "realism": realism,
         "period": period,
         "lighting": lighting,
         "palette": palette,
+        "entityAnchor": entity_anchor,
     }
 
 
