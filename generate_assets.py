@@ -831,6 +831,554 @@ HOOK_SUB_SHOT_FRAMING_HINTS = [
     "dramatic push-in composition",
 ]
 
+
+# -------------------------------------------------------------
+# 1d. PHASE-3 BEAT-LEVEL MULTI-SOURCE CANDIDATE RERANKING
+# -------------------------------------------------------------
+# Phase 2 gave every narration beat its own queries. Phase 3 goes one level
+# higher: instead of accepting the first source that returns an acceptable
+# clip, collect a small metadata/preview pool across sources, compare the
+# candidates against the SAME narration beat, then download only the winner.
+#
+# Weighting mirrors the visual-director plan:
+#   semantic narration match       40%
+#   entity/action correctness      20%
+#   visual quality                 15%
+#   useful motion                  10%
+#   scene continuity                5%
+#   novelty / reuse penalty         5%
+#   composition suitability         5%
+#
+# OpenCLIP remains optional. When enabled it supplies the strongest semantic
+# signal from candidate preview images. When disabled/unavailable, a lexical
+# narration-vs-metadata score fills that slot so the reranker still works.
+_VISUAL_SCORE_WEIGHTS = {
+    "semantic": 0.40,
+    "entity_action": 0.20,
+    "quality": 0.15,
+    "motion": 0.10,
+    "continuity": 0.05,
+    "novelty": 0.05,
+    "composition": 0.05,
+}
+
+
+def _clamp01(value):
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except Exception:
+        return 0.0
+
+
+def _candidate_key(candidate: dict) -> str:
+    return f"{candidate.get('source', '')}:{candidate.get('id', '')}"
+
+
+def _candidate_target_count() -> int:
+    try:
+        return max(5, min(15, int(os.getenv("VISUAL_CANDIDATE_TARGET", "8") or 8)))
+    except ValueError:
+        return 8
+
+
+def _candidate_min_score() -> float:
+    try:
+        return max(0.20, min(0.85, float(os.getenv("VISUAL_CANDIDATE_MIN_SCORE", "0.46") or 0.46)))
+    except ValueError:
+        return 0.46
+
+
+def _rerank_query_limit() -> int:
+    try:
+        return max(1, min(3, int(os.getenv("VISUAL_RERANK_MAX_QUERIES", "2") or 2)))
+    except ValueError:
+        return 2
+
+
+def _candidate_text_score(candidate_text: str, target_text: str) -> float:
+    candidate_words = _extract_keywords(candidate_text)
+    target_words = _extract_keywords(target_text)
+    if not candidate_words or not target_words:
+        return 0.0
+    overlap = len(candidate_words & target_words)
+    # Four meaningful overlaps is already a strong stock-catalog metadata
+    # match; saturating here avoids rewarding verbose tag spam.
+    return _clamp01(overlap / max(1.0, min(4.0, len(target_words) * 0.45)))
+
+
+def _candidate_entity_action_score(candidate: dict, beat: dict, requirements: dict) -> tuple:
+    text = str(candidate.get("text") or "")
+    if requirements.get("strict"):
+        accepted, reason = candidate_is_accurate(text, requirements)
+        if not accepted:
+            return 0.0, False, reason or "strict_visual_requirement_failed"
+
+    required_terms = []
+    for key in ("subject", "action", "setting"):
+        value = str(beat.get(key) or "").strip()
+        if value and value not in {"narrative moment", "story environment", "unspecified"}:
+            required_terms.extend(_extract_keywords(value))
+
+    if not required_terms:
+        return 0.65, True, "no_specific_entity_action_terms"
+
+    candidate_words = _extract_keywords(text)
+    hits = sum(1 for term in set(required_terms) if term in candidate_words)
+    score = hits / max(1, len(set(required_terms)))
+
+    # A strict candidate that passed the visual matcher deserves a floor:
+    # its metadata may use an alias/transliteration rather than our exact word.
+    if requirements.get("strict"):
+        score = max(score, 0.75)
+    return _clamp01(score), True, "accepted"
+
+
+def _candidate_quality_score(candidate: dict, orientation: str) -> float:
+    width = int(candidate.get("width") or 0)
+    height = int(candidate.get("height") or 0)
+    if width <= 0 or height <= 0:
+        return 0.55
+    long_edge = max(width, height)
+    short_edge = min(width, height)
+    resolution = min(1.0, short_edge / 1080.0)
+    # Preserve a little credit for true 720p footage if it's otherwise the
+    # strongest semantic match; 1080+ gets full quality credit.
+    return _clamp01(0.25 + 0.75 * resolution)
+
+
+def _candidate_motion_score(candidate: dict) -> float:
+    duration = float(candidate.get("duration") or 0.0)
+    style = str(candidate.get("style") or "live").lower()
+    # Useful B-roll usually has enough real motion for a 4-7 second edit but
+    # does not need to be extremely long. Unknown duration gets a neutral mark.
+    if duration <= 0:
+        base = 0.65
+    elif 4.0 <= duration <= 30.0:
+        base = 1.0
+    elif 2.0 <= duration < 4.0:
+        base = 0.70
+    else:
+        base = 0.78
+    if style == "animation":
+        base = min(1.0, base + 0.08)
+    return _clamp01(base)
+
+
+def _candidate_continuity_score(candidate: dict, previous_candidate: dict = None) -> float:
+    if not previous_candidate:
+        return 0.75
+    current_style = str(candidate.get("style") or "live")
+    previous_style = str(previous_candidate.get("style") or "live")
+    if current_style == previous_style:
+        return 1.0
+    # A change between live footage and animation is allowed, just not
+    # rewarded as continuity.
+    return 0.45
+
+
+def _candidate_novelty_score(candidate: dict) -> float:
+    return 0.20 if _candidate_key(candidate) in RECENTLY_USED_CLIP_IDS else 1.0
+
+
+def _candidate_composition_score(candidate: dict, orientation: str) -> float:
+    width = int(candidate.get("width") or 0)
+    height = int(candidate.get("height") or 0)
+    if width <= 0 or height <= 0:
+        return 0.55
+    landscape = width >= height
+    wanted_landscape = orientation != "portrait"
+    if landscape == wanted_landscape:
+        return 1.0
+    # A square-ish source can still crop reasonably; a strongly wrong aspect
+    # ratio receives a low composition score.
+    ratio = max(width, height) / max(1, min(width, height))
+    return 0.45 if ratio < 1.25 else 0.15
+
+
+def _pexels_candidates(query: str, orientation: str, per_page: int = 5) -> list:
+    if not PEXELS_API_KEY or not query:
+        return []
+    try:
+        clean_q = urllib.parse.quote(query.strip()[:60])
+        url = (
+            f"https://api.pexels.com/videos/search?query={clean_q}"
+            f"&orientation={orientation}&per_page={per_page}"
+        )
+        res = requests.get(url, headers={"Authorization": PEXELS_API_KEY}, timeout=15)
+        if res.status_code != 200:
+            return []
+        out = []
+        for video in res.json().get("videos", []):
+            files = video.get("video_files", []) or []
+            hd_files = sorted(
+                (f for f in files if int(f.get("width") or 0) >= 1080),
+                key=lambda f: int(f.get("width") or 0),
+            )
+            target = hd_files[0] if hd_files else (files[0] if files else {})
+            video_url = target.get("link")
+            if not video_url:
+                continue
+            out.append({
+                "source": "pexels",
+                "id": str(video.get("id") or video_url),
+                "query": query,
+                "text": video.get("url", ""),
+                "preview_url": video.get("image", ""),
+                "video_url": video_url,
+                "width": int(target.get("width") or video.get("width") or 0),
+                "height": int(target.get("height") or video.get("height") or 0),
+                "duration": float(video.get("duration") or 0),
+                "style": "live",
+            })
+        return out
+    except Exception as exc:
+        print(f"Pexels candidate-pool notice: {exc}", flush=True)
+        return []
+
+
+def _pixabay_candidates(query: str, per_page: int = 5) -> list:
+    if not PIXABAY_API_KEY or not query:
+        return []
+    try:
+        clean_q = urllib.parse.quote(query.strip()[:60])
+        url = f"https://pixabay.com/api/videos/?key={PIXABAY_API_KEY}&q={clean_q}&video_type=all&per_page={per_page}"
+        res = requests.get(url, timeout=15)
+        if res.status_code != 200:
+            return []
+        out = []
+        for hit in res.json().get("hits", []):
+            videos = hit.get("videos", {}) or {}
+            target = videos.get("large") or videos.get("medium") or videos.get("small") or {}
+            video_url = target.get("url")
+            if not video_url:
+                continue
+            tags = str(hit.get("tags") or "")
+            out.append({
+                "source": "pixabay",
+                "id": str(hit.get("id") or video_url),
+                "query": query,
+                "text": tags,
+                "preview_url": target.get("thumbnail", ""),
+                "video_url": video_url,
+                "width": int(target.get("width") or 0),
+                "height": int(target.get("height") or 0),
+                "duration": float(hit.get("duration") or 0),
+                "style": "animation" if "animation" in tags.lower() else "live",
+            })
+        return out
+    except Exception as exc:
+        print(f"Pixabay candidate-pool notice: {exc}", flush=True)
+        return []
+
+
+def _coverr_candidates(query: str, per_page: int = 5) -> list:
+    if not COVERR_API_KEY or not query:
+        return []
+    try:
+        clean_q = urllib.parse.quote(query.strip()[:60])
+        url = f"https://api.coverr.co/videos?query={clean_q}&urls=true&page_size={per_page}"
+        res = requests.get(url, headers={"Authorization": f"Bearer {COVERR_API_KEY}"}, timeout=15)
+        if res.status_code != 200:
+            return []
+        out = []
+        for hit in res.json().get("hits", []):
+            video_url = (hit.get("urls") or {}).get("mp4")
+            if not video_url:
+                continue
+            preview = (
+                hit.get("thumbnail")
+                or hit.get("poster")
+                or hit.get("image")
+                or (hit.get("urls") or {}).get("thumbnail")
+                or ""
+            )
+            out.append({
+                "source": "coverr",
+                "id": str(hit.get("id") or video_url),
+                "query": query,
+                "text": f"{hit.get('title', '')} {_coverr_tags_text(hit)}".strip(),
+                "preview_url": preview,
+                "video_url": video_url,
+                "width": int(hit.get("width") or 0),
+                "height": int(hit.get("height") or 0),
+                "duration": float(hit.get("duration") or 0),
+                "style": "live",
+            })
+        return out
+    except Exception as exc:
+        print(f"Coverr candidate-pool notice: {exc}", flush=True)
+        return []
+
+
+def _wikimedia_candidates(query: str, limit: int = 5) -> list:
+    if not query:
+        return []
+    try:
+        clean_q = urllib.parse.quote(f"filetype:video {query.strip()[:60]}")
+        search_url = (
+            "https://commons.wikimedia.org/w/api.php?action=query&format=json"
+            f"&generator=search&gsrsearch={clean_q}&gsrnamespace=6&gsrlimit={limit}"
+            "&prop=imageinfo&iiprop=url%7Cmime%7Csize&iiurlwidth=640"
+        )
+        headers = {"User-Agent": "long-video-devotional-bot/1.0 (automated free stock B-roll fetch)"}
+        res = requests.get(search_url, headers=headers, timeout=15)
+        if res.status_code != 200:
+            return []
+        out = []
+        for page in (res.json().get("query", {}).get("pages", {}) or {}).values():
+            infos = page.get("imageinfo", []) or []
+            if not infos:
+                continue
+            info = infos[0]
+            file_url = info.get("url")
+            mime = info.get("mime", "")
+            if not file_url or not str(mime).startswith("video/"):
+                continue
+            title = page.get("title", "")
+            out.append({
+                "source": "wikimedia",
+                "id": str(title or file_url),
+                "query": query,
+                "text": title,
+                "preview_url": info.get("thumburl", ""),
+                "video_url": file_url,
+                "width": int(info.get("width") or 0),
+                "height": int(info.get("height") or 0),
+                "duration": 0.0,
+                "style": "live",
+            })
+        return out
+    except Exception as exc:
+        print(f"Wikimedia candidate-pool notice: {exc}", flush=True)
+        return []
+
+
+def _collect_visual_candidates(queries: list, orientation: str) -> list:
+    """Collect 5-15 lightweight candidate records without downloading video."""
+    target = _candidate_target_count()
+    query_limit = _rerank_query_limit()
+    pool = []
+    seen = set()
+
+    for query in (queries or [])[:query_limit]:
+        # Pexels/Pixabay generally provide the best preview metadata for CLIP,
+        # so collect them first; Coverr adds variety. Wikimedia is queried only
+        # if the pool is still thin, reducing API traffic.
+        batches = [
+            _pexels_candidates(query, orientation, per_page=5),
+            _pixabay_candidates(query, per_page=5),
+            _coverr_candidates(query, per_page=4),
+        ]
+        for batch in batches:
+            for candidate in batch:
+                key = _candidate_key(candidate)
+                if not candidate.get("video_url") or not key or key in seen:
+                    continue
+                seen.add(key)
+                pool.append(candidate)
+
+        if len(pool) >= target:
+            break
+
+    if len(pool) < 5:
+        for query in (queries or [])[:query_limit]:
+            for candidate in _wikimedia_candidates(query, limit=5):
+                key = _candidate_key(candidate)
+                if not candidate.get("video_url") or not key or key in seen:
+                    continue
+                seen.add(key)
+                pool.append(candidate)
+            if len(pool) >= target:
+                break
+
+    # Avoid spending CLIP time on dozens of previews. Keep the first 15
+    # deduplicated candidates; search APIs have already ranked them by query.
+    return pool[:15]
+
+
+def _score_visual_candidates(candidates: list, beat: dict, beat_prompt: str,
+                             orientation: str, previous_candidate: dict = None) -> list:
+    if not candidates:
+        return []
+
+    requirements = extract_visual_requirements(
+        " ".join(str(q) for q in beat.get("queries", [])),
+        beat_prompt,
+    )
+    target_text = " ".join([
+        str(beat.get("narrationText") or ""),
+        str(beat.get("subject") or ""),
+        str(beat.get("action") or ""),
+        str(beat.get("setting") or ""),
+        beat_prompt,
+    ])
+
+    clip_sims = None
+    if clip_rerank is not None and clip_rerank.enabled():
+        clip_sims = clip_rerank.similarities(
+            beat_prompt,
+            [c.get("preview_url", "") for c in candidates],
+        )
+
+    scored = []
+    clip_floor = clip_rerank.min_similarity() if clip_rerank is not None and clip_rerank.enabled() else 0.0
+
+    for index, candidate in enumerate(candidates):
+        entity_action, accepted, reject_reason = _candidate_entity_action_score(
+            candidate, beat, requirements
+        )
+        if not accepted:
+            candidate = dict(candidate)
+            candidate["selectionScore"] = 0.0
+            candidate["rejected"] = True
+            candidate["rejectReason"] = reject_reason
+            scored.append(candidate)
+            continue
+
+        lexical_semantic = _candidate_text_score(candidate.get("text", ""), target_text)
+        clip_sim = None
+        if clip_sims and index < len(clip_sims):
+            clip_sim = clip_sims[index]
+
+        clip_rejected = False
+        if clip_sim is not None:
+            if clip_sim < clip_floor:
+                semantic = 0.0
+                clip_rejected = True
+            else:
+                # Typical ViT-B-32 similarities for relevant stock previews are
+                # roughly 0.20-0.35. Map that useful range onto 0-1.
+                semantic = _clamp01((clip_sim - clip_floor) / max(0.08, 0.35 - clip_floor))
+                # Keep metadata as a small stabilizer for ambiguous previews.
+                semantic = max(semantic, lexical_semantic * 0.55)
+        else:
+            semantic = lexical_semantic
+
+        breakdown = {
+            "semantic": semantic,
+            "entity_action": entity_action,
+            "quality": _candidate_quality_score(candidate, orientation),
+            "motion": _candidate_motion_score(candidate),
+            "continuity": _candidate_continuity_score(candidate, previous_candidate),
+            "novelty": _candidate_novelty_score(candidate),
+            "composition": _candidate_composition_score(candidate, orientation),
+        }
+        total = sum(_VISUAL_SCORE_WEIGHTS[k] * breakdown[k] for k in _VISUAL_SCORE_WEIGHTS)
+
+        candidate = dict(candidate)
+        candidate["selectionScore"] = round(total, 4)
+        candidate["scoreBreakdown"] = {k: round(v, 4) for k, v in breakdown.items()}
+        candidate["clipSimilarity"] = None if clip_sim is None else round(float(clip_sim), 4)
+        candidate["rejected"] = bool(clip_rejected)
+        candidate["rejectReason"] = "clip_similarity_below_floor" if clip_rejected else ""
+        scored.append(candidate)
+
+    scored.sort(key=lambda c: (
+        0 if c.get("rejected") else 1,
+        float(c.get("selectionScore") or 0.0),
+        0 if _candidate_key(c) in RECENTLY_USED_CLIP_IDS else 1,
+    ), reverse=True)
+    return scored
+
+
+def _download_ranked_candidate(candidate: dict, dest_path: str) -> bool:
+    source = candidate.get("source")
+    url = candidate.get("video_url")
+    if not source or not url:
+        return False
+
+    if source == "wikimedia":
+        raw_path = dest_path + ".raw"
+        try:
+            headers = {"User-Agent": "long-video-devotional-bot/1.0 (automated free stock B-roll fetch)"}
+            res = requests.get(url, headers=headers, timeout=45)
+            if res.status_code != 200 or len(res.content) <= 100000:
+                return False
+            with open(raw_path, "wb") as f:
+                f.write(res.content)
+            convert = subprocess.run(
+                [
+                    "ffmpeg", "-y", "-i", raw_path,
+                    "-vf", "scale='min(1920,iw)':-2",
+                    "-c:v", "libx264", "-preset", "veryfast",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", dest_path,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            ok = (
+                convert.returncode == 0
+                and os.path.exists(dest_path)
+                and os.path.getsize(dest_path) > 50000
+            )
+            if ok:
+                record_clip_usage(source, candidate.get("id"))
+            return ok
+        finally:
+            if os.path.exists(raw_path):
+                os.remove(raw_path)
+
+    try:
+        res = requests.get(url, timeout=45)
+        if res.status_code != 200 or len(res.content) <= 100000:
+            return False
+        with open(dest_path, "wb") as f:
+            f.write(res.content)
+        record_clip_usage(source, candidate.get("id"))
+        return True
+    except Exception as exc:
+        print(f"{source} ranked-candidate download notice: {exc}", flush=True)
+        return False
+
+
+def select_best_visual_candidate(queries: list, beat: dict, beat_prompt: str,
+                                 orientation: str, dest_path: str,
+                                 previous_candidate: dict = None) -> dict:
+    """Collect, score and download the strongest candidate for one beat.
+
+    If the top candidate fails to download, try the next ranked candidate.
+    If every candidate is below the quality/relevance threshold, return {}
+    so the caller can use its narration-specific AI-image fallback.
+    """
+    candidates = _collect_visual_candidates(queries, orientation)
+    if not candidates:
+        return {}
+
+    ranked = _score_visual_candidates(
+        candidates,
+        beat,
+        beat_prompt,
+        orientation,
+        previous_candidate=previous_candidate,
+    )
+    threshold = _candidate_min_score()
+    viable = [
+        c for c in ranked
+        if not c.get("rejected") and float(c.get("selectionScore") or 0.0) >= threshold
+    ]
+
+    top_preview = [
+        {
+            "source": c.get("source"),
+            "score": c.get("selectionScore"),
+            "query": c.get("query"),
+            "text": str(c.get("text") or "")[:80],
+        }
+        for c in ranked[:3]
+    ]
+    print(
+        f"    🧠 Rerank: {len(candidates)} candidate(s), threshold={threshold:.2f}, "
+        f"top={top_preview}",
+        flush=True,
+    )
+
+    for candidate in viable:
+        if _download_ranked_candidate(candidate, dest_path):
+            return candidate
+
+    return {}
+
+
 def _visual_beat_prompt(scene_prompt: str, beat: dict) -> str:
     """Build one media-generation/search context string for a visual beat."""
     parts = [
