@@ -4,7 +4,7 @@ The director deliberately uses fewer effects: a wrong SFX/transition hurts
 retention more than a clean cut. Pattern breaks are reserved for real story
 beats, reveals, action and climax.
 
-Director v4 adds a planning-only visual-beat layer. It does NOT fetch media
+Director v6 adds visual-beat editorial cues on top of the planning layer. It does NOT fetch media
 or change the renderer yet. Each narration scene is divided into short,
 ordered visual beats that later pipeline phases can use for stock retrieval,
 semantic reranking and narration-synchronised editing.
@@ -269,6 +269,70 @@ def plan_visual_beats(scene, mood, camera, pattern_break, format_name="long"):
     return beats
 
 
+
+def _focus_beat_index(visual_beats, pattern_break):
+    """Choose the one beat in a scene that deserves editorial emphasis."""
+    if not visual_beats:
+        return None
+    if pattern_break in {"reveal", "climax"}:
+        return len(visual_beats) - 1
+    if pattern_break == "action":
+        for i, beat in enumerate(visual_beats):
+            if beat.get("action") not in (None, "", "narrative moment", "reveal"):
+                return i
+        return min(1, len(visual_beats) - 1)
+    if pattern_break == "hook":
+        return 0
+    return None
+
+
+def _emphasis_phrase(beat, max_words=4):
+    """Return a compact narration-derived phrase for motion typography."""
+    text = str(beat.get("narrationText") or "")
+    raw_words = re.findall(r"[\w\u0900-\u097F'’-]+", text)
+    meaningful = []
+    for word in raw_words:
+        token = word.lower()
+        if (
+            len(token) >= 2
+            and token not in _HINDI_STOPWORDS
+            and token not in _ENGLISH_STOPWORDS
+        ):
+            meaningful.append(word)
+    chosen = meaningful[:max_words] or raw_words[:max_words]
+    return " ".join(chosen).strip()
+
+
+def _apply_editorial_beat_cues(plan, format_name, typography_allowed=True):
+    """Attach at most one typography cue and one meaningful SFX cue per scene.
+
+    Hook typography is intentionally skipped because HookOverlay already owns
+    the first 1.8 seconds. SFX can still accompany the hook if the director
+    explicitly budgeted one.
+    """
+    beats = plan.get("visualBeats") or []
+    pattern = plan.get("entertainmentBeat") or "establish"
+    focus_index = _focus_beat_index(beats, pattern)
+
+    if focus_index is not None and 0 <= focus_index < len(beats):
+        focus = beats[focus_index]
+
+        if typography_allowed and pattern in {"reveal", "climax", "action"}:
+            phrase = _emphasis_phrase(focus, max_words=4 if format_name == "long" else 3)
+            if phrase:
+                focus["emphasisText"] = phrase
+                focus["emphasisStyle"] = pattern
+                focus["emphasisDurationSeconds"] = 1.45 if format_name == "shorts" else 1.7
+
+        effect = plan.get("soundEffect") or "none"
+        if effect != "none":
+            focus["soundEffect"] = effect
+            focus["soundEffectVolume"] = 0.14 if format_name == "shorts" else 0.17
+            focus["soundEffectReason"] = plan.get("effectReason", "story_beat")
+
+    return beats
+
+
 def direct_scene(scene, index, total, effect_slot=False, format_name="long"):
     text = scene.get("text") or scene.get("narration_chunk") or ""
     w = _words(text)
@@ -348,7 +412,7 @@ def direct_scene(scene, index, total, effect_slot=False, format_name="long"):
             else "restrained_devotional_transition" if transition == "crossfade"
             else "default_clean_cut"
         ),
-        "director_version": 4,
+        "director_version": 6,
     }
 
 
@@ -356,7 +420,11 @@ def enrich_scenes(scenes, format_name="long"):
     total = len(scenes)
     out = []
     effect_budget = max(1, min(3, round(total / 4)))
+    # Motion typography is deliberately rarer than ordinary captions:
+    # roughly four emphasis moments in a long episode, two in a Short.
+    typography_budget = min(total, 2 if format_name == "shorts" else 4)
     used_effects = 0
+    used_typography = 0
 
     for i, scene in enumerate(scenes, 1):
         merged = dict(scene)
@@ -377,10 +445,27 @@ def enrich_scenes(scenes, format_name="long"):
                 plan["soundEffect"] = "none"
                 plan["effectReason"] = "effect_budget_exhausted"
 
+        typography_allowed = (
+            used_typography < typography_budget
+            and plan.get("entertainmentBeat") in {"reveal", "climax", "action"}
+        )
+        plan["visualBeats"] = _apply_editorial_beat_cues(
+            plan,
+            format_name=format_name,
+            typography_allowed=typography_allowed,
+        )
+        if any(b.get("emphasisText") for b in plan["visualBeats"]):
+            used_typography += 1
+
         merged["director"] = plan
         merged["visualBeats"] = plan["visualBeats"]
-        merged["soundEffect"] = plan["soundEffect"]
+
+        # Phase 6 moves meaningful scene SFX to the exact narration beat.
+        # Keep the director's requested effect in plan["soundEffect"] for
+        # auditability, but suppress the legacy scene-start playback.
+        merged["soundEffect"] = "none"
         merged["transition"] = plan["transition"]
         out.append(merged)
 
     return out
+
