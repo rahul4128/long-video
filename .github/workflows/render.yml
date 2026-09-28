@@ -257,12 +257,21 @@ PY
 
       - name: Render Long Video with Remotion
         run: |
+          START_TS=$(date +%s)
           npx remotion render DevotionalComposition out/final_video.mp4 \
             --props=public/props.json \
             --concurrency=$(nproc) \
             --codec=h264 \
             --crf=21 \
             --offthreadvideo-video-threads=2
+          END_TS=$(date +%s)
+          ELAPSED=$((END_TS-START_TS))
+          SIZE_BYTES=$(stat -c%s out/final_video.mp4)
+          echo "### Long render benchmark" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Seconds: $ELAPSED" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Size bytes: $SIZE_BYTES" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Composition FPS: 24" >> "$GITHUB_STEP_SUMMARY"
+          echo "LONG_RENDER_SECONDS=$ELAPSED" >> "$GITHUB_ENV"
 
       - name: Upload Video Artifact
         uses: actions/upload-artifact@v7
