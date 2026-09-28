@@ -324,11 +324,19 @@ def _apply_editorial_beat_cues(plan, format_name, typography_allowed=True):
                 focus["emphasisStyle"] = pattern
                 focus["emphasisDurationSeconds"] = 1.45 if format_name == "shorts" else 1.7
 
-        effect = plan.get("soundEffect") or "none"
-        if effect != "none":
-            focus["soundEffect"] = effect
-            focus["soundEffectVolume"] = 0.14 if format_name == "shorts" else 0.17
-            focus["soundEffectReason"] = plan.get("effectReason", "story_beat")
+    effect = plan.get("soundEffect") or "none"
+    if effect != "none" and beats:
+        # Normally SFX follows the editorial focus beat. For an explicit SFX
+        # request on an establish/curiosity scene, keep the request instead of
+        # silently dropping it: use the final beat for curiosity, otherwise
+        # the opening beat.
+        sfx_index = focus_index
+        if sfx_index is None:
+            sfx_index = len(beats) - 1 if pattern == "curiosity" else 0
+        sfx_focus = beats[max(0, min(len(beats) - 1, sfx_index))]
+        sfx_focus["soundEffect"] = effect
+        sfx_focus["soundEffectVolume"] = 0.14 if format_name == "shorts" else 0.17
+        sfx_focus["soundEffectReason"] = plan.get("effectReason", "story_beat")
 
     return beats
 
