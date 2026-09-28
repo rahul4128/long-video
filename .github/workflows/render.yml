@@ -1,10 +1,6 @@
 name: Render Devotional Video (Long + Shorts)
 
 on:
-  push:
-    branches: [visual-director-v2]
-    paths:
-      - '.e2e-trigger'
   repository_dispatch:
     types: [trigger-render-long]
   workflow_dispatch:
@@ -36,7 +32,7 @@ on:
         type: string
 
 concurrency:
-  group: ${{ github.event_name == 'push' && 'visual-director-v2-e2e' || 'canva-token-rotation' }}
+  group: canva-token-rotation
   cancel-in-progress: false
 
 jobs:
@@ -125,7 +121,6 @@ jobs:
           INDICF5_STRICT: ${{ vars.INDICF5_STRICT || 'false' }}
           CLIP_RERANK_ENABLED: ${{ vars.CLIP_RERANK_ENABLED || 'true' }}
           HOOK_OVERLAY_ENABLED: ${{ vars.HOOK_OVERLAY_ENABLED || 'true' }}
-          VISUAL_DIRECTOR_E2E: ${{ github.event_name == 'push' && 'true' || 'false' }}
         run: python generate_assets.py
 
       - name: Upload content QC report
@@ -160,7 +155,7 @@ jobs:
       # be committing at the same time; if the push still loses a race this
       # step logs it and moves on rather than failing the whole render.
       - name: Persist clip-usage history (avoid repeating recent clips)
-        if: ${{ always() && github.event_name != 'push' }}
+        if: ${{ always() }}
         run: |
           if [ ! -f used_clips_history.json ]; then
             echo "No used_clips_history.json produced (no stock clips fetched this run) - nothing to commit."
@@ -485,7 +480,6 @@ jobs:
   # title/description/thumbnail and files each into its playlist.
   # ---------------------------------------------------------------
   publish-and-notify:
-    if: ${{ github.event_name != 'push' }}
     needs: [generate-assets, render-long, render-shorts, render-thumbnail, render-thumbnail-shorts, media-qc]
     runs-on: ubuntu-latest
     permissions:
