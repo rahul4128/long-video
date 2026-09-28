@@ -2451,6 +2451,146 @@ def process_shorts_scene_visual(scene_info):
     shots.extend({"type": "image", "file": f} for f in filenames)
     return shots
 
+
+# -------------------------------------------------------------
+# 5a. PHASE-4 NARRATION-SYNCHRONISED VISUAL TIMING
+# -------------------------------------------------------------
+def sync_visual_beats_to_narration(scene: dict, shots: list, word_timings: list,
+                                   scene_duration: float) -> tuple:
+    """Map director word ranges onto real TTS timestamps.
+
+    Director visualBeats are planned before TTS and contain wordStart/wordEnd
+    indices. TTS later gives us the actual spoken start/end time for each word.
+    This function joins those datasets after audio generation.
+
+    It is intentionally tolerant of token-count drift: spoken-Hindi cleanup can
+    change the number of TTS words, so director indices are projected
+    proportionally onto the available timing cues rather than assuming both
+    token streams have identical lengths.
+
+    Returns (timed_beats, timed_shots). Shot ranges are gap-free: when a beat's
+    visual asset could not be generated, the previous/next surviving visual
+    expands to cover that missing beat instead of exposing black frames.
+    """
+    raw_beats = scene.get("visualBeats") or scene.get("director", {}).get("visualBeats") or []
+    beats = [dict(b or {}) for b in raw_beats if isinstance(b, dict)]
+    if not beats:
+        return beats, [dict(s) for s in (shots or [])]
+
+    beats.sort(key=lambda b: int(b.get("beatIndex") or 0))
+    safe_scene_duration = max(0.1, float(scene_duration or 0.1))
+    cues = [c for c in (word_timings or []) if isinstance(c, dict)]
+    cue_count = len(cues)
+
+    planned_word_count = max(
+        1,
+        max(int(b.get("wordEnd") or 0) for b in beats),
+    )
+
+    # Calculate the real start boundary for every beat. Beat 1 always starts
+    # at 0 so intro ambience/scene padding is covered. Subsequent beats start
+    # exactly when their first mapped narration word begins.
+    boundaries = []
+    timing_source = "tts_word_boundaries" if cue_count else "proportional_fallback"
+
+    for i, beat in enumerate(beats):
+        word_start = max(0, int(beat.get("wordStart") or 0))
+        if i == 0:
+            start = 0.0
+        elif cue_count:
+            ratio = word_start / planned_word_count
+            cue_index = min(cue_count - 1, max(0, int(round(ratio * cue_count))))
+            start = float(cues[cue_index].get("start") or 0.0)
+        else:
+            start = safe_scene_duration * (word_start / planned_word_count)
+
+        # Keep boundaries strictly monotonic even if a TTS engine emits a
+        # duplicate/zero timestamp for two adjacent cues.
+        if boundaries:
+            start = max(boundaries[-1] + 0.05, start)
+        start = min(max(0.0, start), max(0.0, safe_scene_duration - 0.05))
+        boundaries.append(start)
+
+    # Convert boundaries into beat windows; the final beat covers the small
+    # render tail after the last spoken word as well.
+    for i, beat in enumerate(beats):
+        start = boundaries[i]
+        end = boundaries[i + 1] if i + 1 < len(boundaries) else safe_scene_duration
+        end = max(start + 0.05, min(safe_scene_duration, end))
+        beat["actualStartSeconds"] = round(start, 3)
+        beat["actualEndSeconds"] = round(end, 3)
+        beat["actualDurationSeconds"] = round(max(0.05, end - start), 3)
+        beat["timingSource"] = timing_source
+
+    # Attach real windows to surviving shots. Usually there is one shot per
+    # beat. If one beat failed to produce media, use the next surviving
+    # shot's beat start as the previous shot's end so the timeline remains
+    # completely covered.
+    shot_list = [dict(s) for s in (shots or [])]
+    beat_by_index = {
+        int(b.get("beatIndex") or i + 1): b
+        for i, b in enumerate(beats)
+    }
+
+    indexed_shots = []
+    for i, shot in enumerate(shot_list):
+        try:
+            beat_index = int(shot.get("beatIndex") or i + 1)
+        except Exception:
+            beat_index = i + 1
+        shot["beatIndex"] = beat_index
+        indexed_shots.append((beat_index, i, shot))
+
+    indexed_shots.sort(key=lambda item: (item[0], item[1]))
+
+    for pos, (beat_index, _original_index, shot) in enumerate(indexed_shots):
+        beat = beat_by_index.get(beat_index)
+        if beat:
+            base_start = float(beat.get("actualStartSeconds") or 0.0)
+        elif pos == 0:
+            base_start = 0.0
+        else:
+            base_start = float(indexed_shots[pos - 1][2].get("endSeconds") or 0.0)
+
+        if pos == 0:
+            start = 0.0
+        else:
+            start = base_start
+
+        if pos + 1 < len(indexed_shots):
+            next_beat_index = indexed_shots[pos + 1][0]
+            next_beat = beat_by_index.get(next_beat_index)
+            end = (
+                float(next_beat.get("actualStartSeconds") or safe_scene_duration)
+                if next_beat
+                else safe_scene_duration
+            )
+        else:
+            end = safe_scene_duration
+
+        end = max(start + 0.05, min(safe_scene_duration, end))
+        shot["startSeconds"] = round(start, 3)
+        shot["endSeconds"] = round(end, 3)
+        shot["syncedDurationSeconds"] = round(max(0.05, end - start), 3)
+        shot["timingSource"] = timing_source
+        if beat:
+            shot["narrationCue"] = beat.get("narrationCue", "")
+            shot["cameraMotion"] = beat.get("cameraMotion", "")
+
+    # Restore visual order, which is beat order for the new path.
+    timed_shots = [item[2] for item in indexed_shots]
+
+    if timed_shots:
+        print(
+            f"  ⏱️ Narration sync: {len(timed_shots)} visual(s), "
+            f"source={timing_source}, duration={safe_scene_duration:.2f}s, "
+            f"cuts={[s.get('startSeconds') for s in timed_shots[1:]]}",
+            flush=True,
+        )
+
+    return beats, timed_shots
+
+
 # -------------------------------------------------------------
 # 5b. AUTO-CHAPTERS (YouTube description timestamps)
 # -------------------------------------------------------------
@@ -2687,14 +2827,18 @@ async def process():
         duration = get_audio_duration(audio_path)
         shots = long_visuals[i] or []
         director = scene.get("director", {})
-        shots = [dict(s, transition=director.get("transition", s.get("transition", "crossfade"))) for s in shots]
+        shots = [dict(s, transition=s.get("transition", director.get("transition", "crossfade"))) for s in shots]
+        scene_duration = round(duration + 0.3, 2)
+        timed_beats, shots = sync_visual_beats_to_narration(
+            scene, shots, long_word_timings[i], scene_duration
+        )
         enriched_long.append({
             "scene_number": idx,
-            "durationInSeconds": round(duration + 0.3, 2),
+            "durationInSeconds": scene_duration,
             "narration_chunk": hindi_display_text(scene.get("text", "")),
             "shots": shots,
             "director": scene.get("director", {}),
-            "visualBeats": scene.get("visualBeats", scene.get("director", {}).get("visualBeats", [])),
+            "visualBeats": timed_beats,
             "entertainmentBeat": scene.get("director", {}).get("entertainmentBeat", ""),
             "imageFileName": shots[0]["file"] if shots else "",  # legacy/debug only, see Scene.tsx's resolveShots()
             "soundEffect": scene.get("soundEffect", "none"),
@@ -2712,13 +2856,18 @@ async def process():
         duration = get_audio_duration(audio_path)
         shots = shorts_visuals[i] or []
         director = scene.get("director", {})
-        shots = [dict(s, transition=director.get("transition", s.get("transition", "crossfade"))) for s in shots]
+        shots = [dict(s, transition=s.get("transition", director.get("transition", "crossfade"))) for s in shots]
+        scene_duration = round(duration + 0.2, 2)
+        timed_beats, shots = sync_visual_beats_to_narration(
+            scene, shots, shorts_word_timings[i], scene_duration
+        )
         enriched_shorts.append({
             "scene_number": idx,
-            "durationInSeconds": round(duration + 0.2, 2),
+            "durationInSeconds": scene_duration,
             "narration_chunk": hindi_display_text(scene.get("text", "")),
             "shots": shots,
-            "visualBeats": scene.get("visualBeats", scene.get("director", {}).get("visualBeats", [])),
+            "director": scene.get("director", {}),
+            "visualBeats": timed_beats,
             "imageFileName": shots[0]["file"] if shots else "",  # legacy/debug only, see Scene.tsx's resolveShots()
             "soundEffect": scene.get("soundEffect", "none"),
             "visualEntities": scene.get("visualEntities", scene.get("visual_entities", [])),
@@ -2731,13 +2880,17 @@ async def process():
     # metadata. This is intentionally separate from the planning report so we
     # can compare what the director ASKED for with what retrieval ACTUALLY found.
     visual_search_report = {
-        "phase": 3,
+        "phase": 4,
         "reranker": {
             "candidateTarget": _candidate_target_count(),
             "maxQueriesPerBeat": _rerank_query_limit(),
             "minimumScore": _candidate_min_score(),
             "clipEnabled": bool(clip_rerank is not None and clip_rerank.enabled()),
             "weights": _VISUAL_SCORE_WEIGHTS,
+        },
+        "timing": {
+            "mode": "tts_word_boundary_sync",
+            "fallback": "proportional_scene_timing",
         },
         "long": [
             {
