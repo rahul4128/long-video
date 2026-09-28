@@ -97,6 +97,8 @@ export const DevotionalComposition: React.FC<DevotionalVideoProps> = ({
                 durationInFrames={sceneDurationInFrames}
                 direction={index % 2 === 0 ? 'zoom-in' : 'pan-right'}
                 format="long"
+                fadeIn={index === 0}
+                fadeOut={index === scenes.length - 1}
               />
               <Subtitles
                 text={scene.narration_chunk}
