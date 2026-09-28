@@ -22,6 +22,25 @@ export interface Shot {
   // when this isn't provided, so older props.json files still render fine.
   transition?: 'crossfade' | 'blur_cut';
 }
+export interface VisualBeat {
+  beatIndex: number;
+  narrationCue: string;
+  narrationText: string;
+  wordStart: number;
+  wordEnd: number;
+  durationTarget: number;
+  subject: string;
+  action: string;
+  setting: string;
+  mood: string;
+  time: string;
+  shotType: 'wide' | 'medium' | 'close_up' | 'detail' | 'atmosphere';
+  cameraMotion: 'slow_push_in' | 'pan_left' | 'pan_right';
+  queries: string[];
+  preferredMedia: 'video' | 'auto';
+  transition: 'cut' | 'crossfade' | 'blur_cut';
+}
+
 export interface DirectorPlan {
   camera?: 'slow_push' | 'pan_left' | 'pan_right' | 'zoom_in';
   mood?: string;
@@ -31,6 +50,8 @@ export interface DirectorPlan {
   director_version?: number;
   entertainmentBeat?: "hook" | "climax" | "reveal" | "action" | "curiosity" | "establish";
   patternBreak?: boolean;
+  visualBeats?: VisualBeat[];
+  visualBeatCount?: number;
 }
 
 export interface SceneItem {
@@ -42,6 +63,9 @@ export interface SceneItem {
   // falls back to the legacy single-asset fields below so an older
   // props.json (or a manual test payload) still renders correctly.
   shots?: Shot[];
+  // Phase-1 narration-aware visual plan. The renderer ignores this for now;
+  // later phases will map each beat to its selected stock/AI shot.
+  visualBeats?: VisualBeat[];
   // LEGACY (pre-multi-shot-video) fields: a single filename for a video clip
   // (.mp4) or a lone static image, OR an array of image filenames for a
   // multi-shot slideshow. Still written by generate_assets.py for backward
