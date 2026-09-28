@@ -153,11 +153,15 @@ def _build_queries(scene, beat_words, subject, action, setting):
     beat_terms = _clean_terms(" ".join(beat_words))[:5]
     prompt_terms = _clean_terms(prompt)[:3]
 
+    # Beat-specific intent comes first. The scene-wide videoSearchQuery is
+    # deliberately last: using it first for every beat makes a 25-second
+    # narration scene search the same broad phrase repeatedly and defeats
+    # the point of narration-aware visual direction.
     candidates = [
-        base,
         " ".join(v for v in (subject, action, setting) if v),
-        " ".join(beat_terms),
         " ".join((beat_terms[:3] + prompt_terms[:2])),
+        " ".join(beat_terms),
+        base,
     ]
 
     queries = []
