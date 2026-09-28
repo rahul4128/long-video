@@ -514,6 +514,28 @@ export const Scene: React.FC<SceneProps> = ({
     transition: window.incomingTransition,
   }));
 
+  // Phase 6: meaningful SFX are attached to individual visual beats after
+  // TTS timing is known, so a bell/conch lands on the reveal itself rather
+  // than blindly at the beginning of the scene.
+  const beatAudioCues = (scene.visualBeats || [])
+    .filter(
+      (beat) =>
+        beat.soundEffectFile &&
+        typeof beat.actualStartSeconds === 'number' &&
+        Number.isFinite(beat.actualStartSeconds),
+    )
+    .map((beat) => ({
+      frame: Math.max(
+        0,
+        Math.min(
+          safeDuration - 1,
+          Math.round((beat.actualStartSeconds || 0) * fps),
+        ),
+      ),
+      file: beat.soundEffectFile as string,
+      volume: Math.max(0.04, Math.min(0.24, beat.soundEffectVolume ?? 0.16)),
+    }));
+
   const entryFrames = format === 'shorts' && smoothEntry ? 6 : 0;
   const entryBlur =
     entryFrames > 0
@@ -540,9 +562,29 @@ export const Scene: React.FC<SceneProps> = ({
         <Audio src={staticFile(effectFile)} volume={0.35} />
       )}
 
+      {beatAudioCues.map((cue, index) => (
+        <Sequence
+          key={`beat-sfx-${cue.frame}-${index}`}
+          from={cue.frame}
+          durationInFrames={Math.max(1, safeDuration - cue.frame)}
+          layout="none"
+        >
+          <Audio src={staticFile(cue.file)} volume={cue.volume} />
+        </Sequence>
+      ))}
+
       {shotBoundaries.map((boundary, index) => {
         const transitionFrames = transitionFramesFor(boundary.transition);
-        if (transitionFrames <= 0) {
+        const meaningfulCueNearby = beatAudioCues.some(
+          (cue) => Math.abs(cue.frame - boundary.frame) <= Math.max(4, transitionFrames),
+        );
+        // Crossfades are intentionally silent. Blur cuts get a subtle whoosh
+        // only when a stronger story SFX is not already landing there.
+        if (
+          transitionFrames <= 0 ||
+          boundary.transition !== 'blur_cut' ||
+          meaningfulCueNearby
+        ) {
           return null;
         }
         return (
