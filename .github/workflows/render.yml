@@ -96,10 +96,22 @@ jobs:
       - name: Install optional engines (own voice / Kokoro / CLIP)
         if: ${{ (vars.AUDIO_TTS_ENGINE || 'kokoro') == 'indicf5' || (vars.AUDIO_TTS_ENGINE || 'kokoro') == 'kokoro' || (vars.CLIP_RERANK_ENABLED || 'true') == 'true' }}
         run: |
-          pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+          # Keep torch + torchvision + torchaudio on the SAME CPU wheel index.
+          # Previously torchvision arrived transitively from PyPI, causing
+          # "operator torchvision::nms does not exist" at OpenCLIP import time.
+          pip install --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
           if [ "${{ vars.AUDIO_TTS_ENGINE || 'kokoro' }}" = "indicf5" ]; then pip install -r requirements-indicf5.txt; pip uninstall -y torchcodec || true; fi
           if [ "${{ vars.AUDIO_TTS_ENGINE || 'kokoro' }}" = "kokoro" ]; then pip install -r requirements-kokoro.txt; fi
-          if [ "${{ vars.CLIP_RERANK_ENABLED || 'true' }}" = "true" ]; then pip install -r requirements-clip.txt; fi
+          if [ "${{ vars.CLIP_RERANK_ENABLED || 'true' }}" = "true" ]; then
+            pip install -r requirements-clip.txt
+            python - <<'PY'
+import torch
+import torchvision
+from torchvision.ops import nms
+import open_clip
+print(f"OpenCLIP runtime ready: torch={torch.__version__}, torchvision={torchvision.__version__}")
+PY
+          fi
 
       - name: Generate Unified Assets (4K B-Roll + FLUX.1 + Voiceover)
         env:
