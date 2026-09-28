@@ -1716,7 +1716,7 @@ def _visual_beat_queries(beat: dict, fallback_query: str = "") -> list:
 
 
 def _generate_visual_beat_image(scene_prompt: str, beat: dict, orientation: str,
-                                base_name: str) -> dict:
+                                base_name: str, local_reference_paths=None) -> dict:
     """Generate a narration-specific AI image when stock misses this beat."""
     beat_index = int(beat.get("beatIndex") or 1)
     shot_type = str(beat.get("shotType") or "medium").replace("_", " ")
@@ -1749,15 +1749,26 @@ def _generate_visual_beat_image(scene_prompt: str, beat: dict, orientation: str,
     filename = f"{base_name}_b{beat_index}.jpg"
     dest = os.path.join("public/images", filename)
 
-    generate_ai_image(
+    network_generated = generate_ai_image(
         prompt,
         dest,
         aspect_ratio=aspect_ratio,
         pollinations_width=width,
         pollinations_height=height,
     )
+    fallback_source = ""
+    if not network_generated or not _valid_generated_image(dest):
+        fallback_source = create_local_visual_fallback(
+            dest,
+            orientation=orientation,
+            reference_paths=local_reference_paths,
+            variant_seed=beat_index,
+        )
     if not _valid_generated_image(dest):
         return {}
+
+    visual_source = fallback_source or "ai_image"
+    continuity_flags = ["provider_outage_fallback"] if fallback_source else []
 
     return {
         "type": "image",
@@ -1767,7 +1778,7 @@ def _generate_visual_beat_image(scene_prompt: str, beat: dict, orientation: str,
         "subject": beat.get("subject", ""),
         "shotType": beat.get("shotType", ""),
         "queryUsed": "",
-        "source": "ai_image",
+        "source": visual_source,
         "queryCandidates": beat.get("queries", []),
         "motionProfile": "cinematic_depth",
         "continuityProfile": {
@@ -1776,7 +1787,7 @@ def _generate_visual_beat_image(scene_prompt: str, beat: dict, orientation: str,
             "lighting": style_profile.get("lighting", "warm_golden"),
             "settingMatch": 1.0,
         },
-        "continuityFlags": [],
+        "continuityFlags": continuity_flags,
     }
 
 
@@ -1897,15 +1908,21 @@ def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
                 "using narration-specific AI visual.",
                 flush=True,
             )
+            local_refs = [
+                os.path.join("public/images", s.get("file", ""))
+                for s in reversed(shots)
+                if s.get("file")
+            ]
             shot = _generate_visual_beat_image(
                 scene_prompt,
                 beat,
                 orientation=orientation,
                 base_name=base_name,
+                local_reference_paths=local_refs,
             )
             if shot:
                 previous_candidate = {
-                    "source": "ai_image",
+                    "source": shot.get("source", "ai_image"),
                     "id": shot.get("file", f"ai_beat_{beat_index}"),
                     "style": (
                         "animation"
@@ -1962,6 +1979,160 @@ def fetch_video_shots_for_duration(primary_query: str, prompt_text: str, target_
 # -------------------------------------------------------------
 # 2. CHARACTER-ACCURATE CLOUDFLARE FLUX.1 & FALLBACKS
 # -------------------------------------------------------------
+# AI-image providers are optional quality tiers, not single points of failure.
+# When a provider fails repeatedly in one run, stop hammering it and move to
+# local continuity-preserving fallback visuals.
+_AI_IMAGE_PROVIDER_STATE = {
+    "cloudflare": {"failures": 0, "open": False},
+    "huggingface": {"failures": 0, "open": False},
+    "pollinations": {"failures": 0, "open": False},
+}
+_AI_IMAGE_PROVIDER_LOCK = threading.Lock()
+
+
+def _ai_provider_failure_limit(name: str) -> int:
+    defaults = {"cloudflare": 2, "huggingface": 1, "pollinations": 1}
+    env_name = f"AI_{name.upper()}_FAILURE_LIMIT"
+    try:
+        return max(1, min(5, int(os.getenv(env_name, str(defaults.get(name, 2))) or defaults.get(name, 2))))
+    except ValueError:
+        return defaults.get(name, 2)
+
+
+def _ai_provider_allowed(name: str) -> bool:
+    with _AI_IMAGE_PROVIDER_LOCK:
+        return not bool(_AI_IMAGE_PROVIDER_STATE.get(name, {}).get("open"))
+
+
+def _ai_provider_record(name: str, success: bool) -> None:
+    with _AI_IMAGE_PROVIDER_LOCK:
+        state = _AI_IMAGE_PROVIDER_STATE.setdefault(name, {"failures": 0, "open": False})
+        if success:
+            state["failures"] = 0
+            return
+        state["failures"] = int(state.get("failures") or 0) + 1
+        limit = _ai_provider_failure_limit(name)
+        if state["failures"] >= limit and not state.get("open"):
+            state["open"] = True
+            print(
+                f"  ⚡ AI image circuit opened for {name} after {state['failures']} failure(s); "
+                "remaining beats will use other providers/local continuity fallback.",
+                flush=True,
+            )
+
+
+def _local_visual_dimensions(orientation: str):
+    return (1080, 1920) if orientation == "portrait" else (1920, 1080)
+
+
+def _derive_local_visual(reference_path: str, dest_path: str, orientation: str,
+                         variant_seed: int = 1) -> bool:
+    """Create a fresh still from a valid local image/video with a new crop.
+
+    This is not a generic placeholder: it reuses imagery already accepted for
+    the episode/scene and gives Remotion a different crop/camera move.
+    """
+    if not reference_path or not os.path.exists(reference_path):
+        return False
+    width, height = _local_visual_dimensions(orientation)
+    try:
+        seed = max(1, int(variant_seed or 1))
+        x_frac = (0.22, 0.50, 0.78)[seed % 3]
+        y_frac = (0.35, 0.55, 0.45)[seed % 3]
+        vf = (
+            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height}:"
+            f"x='(in_w-out_w)*{x_frac}':y='(in_h-out_h)*{y_frac}',"
+            "eq=contrast=1.035:saturation=1.035:brightness=0.008,"
+            "unsharp=5:5:0.25:5:5:0.0"
+        )
+        cmd = ["ffmpeg", "-y"]
+        # -ss works for both image and video inputs; on a still it is harmless.
+        if reference_path.lower().endswith((".mp4", ".webm", ".mov", ".mkv")):
+            cmd += ["-ss", "0.7"]
+        cmd += [
+            "-i", reference_path,
+            "-vf", vf,
+            "-frames:v", "1",
+            "-q:v", "2",
+            dest_path,
+        ]
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=35,
+        )
+        return result.returncode == 0 and _valid_generated_image(dest_path)
+    except Exception:
+        return False
+
+
+def _create_local_atmosphere_visual(dest_path: str, orientation: str,
+                                    variant_seed: int = 1) -> bool:
+    """Emergency network-independent devotional texture.
+
+    Used only when no semantically safe episode visual exists. It is warm,
+    textured and non-black, intentionally abstract so it cannot depict the
+    wrong deity/person/place.
+    """
+    width, height = _local_visual_dimensions(orientation)
+    seed = max(1, int(variant_seed or 1))
+    base = ("0x4b2f1b", "0x59351f", "0x3f2b25")[seed % 3]
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y",
+                "-f", "lavfi",
+                "-i", f"color=c={base}:s={width}x{height}:d=1",
+                "-vf",
+                (
+                    f"noise=alls={11 + (seed % 5)}:allf=t+u,"
+                    "eq=contrast=1.10:saturation=1.18:brightness=0.015,"
+                    "vignette=PI/5"
+                ),
+                "-frames:v", "1",
+                "-q:v", "2",
+                dest_path,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=25,
+        )
+        return result.returncode == 0 and _valid_generated_image(dest_path)
+    except Exception:
+        return False
+
+
+def create_local_visual_fallback(dest_path: str, orientation: str,
+                                 reference_paths=None, variant_seed: int = 1) -> str:
+    """Guarantee a non-black local visual. Returns fallback source label."""
+    refs = []
+    for raw in (reference_paths or []):
+        path = str(raw or "")
+        if path and path not in refs and os.path.exists(path):
+            refs.append(path)
+
+    thumb = (
+        "public/images/thumbnail_shorts.jpg"
+        if orientation == "portrait"
+        else "public/images/thumbnail.jpg"
+    )
+    if os.path.exists(thumb) and thumb not in refs:
+        refs.append(thumb)
+
+    for ref in refs:
+        if _derive_local_visual(ref, dest_path, orientation, variant_seed=variant_seed):
+            print(f"  🛟 Local continuity fallback created from {os.path.basename(ref)}", flush=True)
+            return "local_continuity_fallback"
+
+    if _create_local_atmosphere_visual(dest_path, orientation, variant_seed=variant_seed):
+        print("  🛟 Local abstract devotional fallback created (network-independent).", flush=True)
+        return "local_atmosphere_fallback"
+
+    return ""
+
+
 def generate_cloudflare_flux(prompt: str, dest_path: str, aspect_ratio: str = "16:9") -> bool:
     if not CLOUDFLARE_ACCOUNT_ID or not CLOUDFLARE_API_TOKEN:
         return False
@@ -2108,19 +2279,14 @@ def generate_hf_fallback_model(prompt: str, dest_path: str, model_id: str,
 
 
 def generate_ai_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9",
-                       pollinations_width: int = 1920, pollinations_height: int = 1080) -> None:
-    """Single entry point for AI visuals with resilient, validated fallbacks.
+                       pollinations_width: int = 1920, pollinations_height: int = 1080) -> bool:
+    """Network AI image tiers with per-run circuit breakers.
 
-    Order:
-      1. Cloudflare FLUX
-      2. Hugging Face FLUX.1-schnell
-      3. Optional HF SDXL
-      4. Optional HF Qwen-Image
-      5. Optional HF SD 3.5 Medium
-      6. Pollinations
-      7. No dark placeholder: caller will fall through to stock/local assets
+    Deprecated Hugging Face legacy-model retries are OFF by default because
+    provider logs currently return 400/410 for those endpoints. Set
+    HF_LEGACY_IMAGE_FALLBACKS_ENABLED=true only after verifying a working
+    provider/model pair.
     """
-    import hashlib
     cache_key = hashlib.sha256(
         f"{prompt.strip()}|{aspect_ratio}|{pollinations_width}x{pollinations_height}".encode("utf-8")
     ).hexdigest()[:24]
@@ -2130,38 +2296,63 @@ def generate_ai_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9",
     if _valid_generated_image(cache_path):
         shutil.copyfile(cache_path, dest_path)
         print(f"  ♻️ AI visual cache hit: {cache_key}", flush=True)
-        return
+        return True
 
-    if generate_cloudflare_flux(prompt, dest_path, aspect_ratio=aspect_ratio) and _valid_generated_image(dest_path):
-        print("  ✅ Image fetched from Cloudflare FLUX", flush=True)
-    elif generate_huggingface_image(prompt, dest_path, aspect_ratio=aspect_ratio) and _valid_generated_image(dest_path):
-        print("  ✅ Image fetched from Hugging Face (FLUX.1-schnell)", flush=True)
-    else:
-        fallback_models = [
-            ("stabilityai/stable-diffusion-xl-base-1.0", "SDXL"),
-            ("Qwen/Qwen-Image-2512", "Qwen-Image"),
-            ("stabilityai/stable-diffusion-3.5-medium", "SD 3.5 Medium"),
-        ]
-        generated = False
-        for model_id, label in fallback_models:
-            if generate_hf_fallback_model(prompt, dest_path, model_id, aspect_ratio=aspect_ratio):
+    generated = False
+
+    if _ai_provider_allowed("cloudflare"):
+        ok = generate_cloudflare_flux(prompt, dest_path, aspect_ratio=aspect_ratio)
+        ok = bool(ok and _valid_generated_image(dest_path))
+        _ai_provider_record("cloudflare", ok)
+        if ok:
+            print("  ✅ Image fetched from Cloudflare FLUX", flush=True)
+            generated = True
+
+    if not generated and _ai_provider_allowed("huggingface"):
+        ok = generate_huggingface_image(prompt, dest_path, aspect_ratio=aspect_ratio)
+        ok = bool(ok and _valid_generated_image(dest_path))
+        _ai_provider_record("huggingface", ok)
+        if ok:
+            print("  ✅ Image fetched from Hugging Face (FLUX.1-schnell)", flush=True)
+            generated = True
+
+    legacy_hf = os.getenv("HF_LEGACY_IMAGE_FALLBACKS_ENABLED", "false").strip().lower() == "true"
+    if not generated and legacy_hf and _ai_provider_allowed("huggingface"):
+        for model_id in (
+            "stabilityai/stable-diffusion-xl-base-1.0",
+            "Qwen/Qwen-Image-2512",
+            "stabilityai/stable-diffusion-3.5-medium",
+        ):
+            if generate_hf_fallback_model(
+                prompt, dest_path, model_id, aspect_ratio=aspect_ratio
+            ):
                 generated = True
                 break
-        if not generated:
-            generated = download_pollinations_fallback(
-                prompt, dest_path, width=pollinations_width, height=pollinations_height
-            )
-        if generated and not _valid_generated_image(dest_path):
-            try:
-                os.remove(dest_path)
-            except OSError:
-                pass
 
-    if _valid_generated_image(dest_path):
+    if not generated and _ai_provider_allowed("pollinations"):
+        ok = download_pollinations_fallback(
+            prompt,
+            dest_path,
+            width=pollinations_width,
+            height=pollinations_height,
+        )
+        ok = bool(ok and _valid_generated_image(dest_path))
+        _ai_provider_record("pollinations", ok)
+        generated = ok
+
+    if generated and _valid_generated_image(dest_path):
         try:
             shutil.copyfile(dest_path, cache_path)
         except Exception:
             pass
+        return True
+
+    try:
+        if os.path.exists(dest_path) and not _valid_generated_image(dest_path):
+            os.remove(dest_path)
+    except OSError:
+        pass
+    return False
 
 
 def download_pollinations_fallback(prompt: str, img_dest: str, width: int = 1920, height: int = 1080) -> bool:
@@ -2706,7 +2897,7 @@ def process_long_scene_visual(scene_info):
     return shots
 
 def recover_shots(shots, scene_idx, aspect="16:9") -> list:
-    """Drop invalid assets; never create a black placeholder frame."""
+    """Drop invalid assets and guarantee one non-black local fallback."""
     valid = []
     for shot in shots or []:
         path = os.path.join("public/images", shot.get("file", ""))
@@ -2714,9 +2905,33 @@ def recover_shots(shots, scene_idx, aspect="16:9") -> list:
             valid.append(shot)
     if valid:
         return valid
+
+    orientation = "portrait" if aspect == "9:16" else "landscape"
+    filename = f"local_recovery_scene_{scene_idx}_{'portrait' if orientation == 'portrait' else 'landscape'}.jpg"
+    dest = os.path.join("public/images", filename)
+    source = create_local_visual_fallback(
+        dest,
+        orientation=orientation,
+        reference_paths=[],
+        variant_seed=scene_idx,
+    )
+    if source and _valid_generated_image(dest):
+        print(
+            f"⚠️ No network visual survived for scene {scene_idx}; "
+            f"using {source} instead of a black/missing frame.",
+            flush=True,
+        )
+        return [{
+            "type": "image",
+            "file": filename,
+            "source": source,
+            "motionProfile": "cinematic_depth",
+            "continuityFlags": ["provider_outage_fallback"],
+            "qcReason": "network_visuals_unavailable",
+        }]
+
     print(
-        f"⚠️ No valid visual asset survived for scene {scene_idx}; "
-        "no black placeholder will be created.",
+        f"❌ No valid visual asset could be produced for scene {scene_idx}.",
         flush=True,
     )
     return []
@@ -3118,6 +3333,11 @@ def _visual_qc_generate_replacement(
     if stock_only:
         return {}
 
+    local_refs = [
+        os.path.join("public/images", shot.get("file", ""))
+        for shot in shots
+        if shot.get("file")
+    ]
     return _generate_visual_beat_image(
         scene_prompt,
         beat,
@@ -3126,6 +3346,7 @@ def _visual_qc_generate_replacement(
             f"qc_{format_name}_scene_{scene_number}_"
             f"r{repair_number}"
         ),
+        local_reference_paths=local_refs,
     )
 
 
@@ -3754,6 +3975,9 @@ async def process():
             "adjacentPreviewSimilarity": bool(clip_rerank is not None and clip_rerank.enabled()),
             "nearDuplicateThreshold": _continuity_duplicate_threshold(),
             "hardRejects": ["realism_conflict", "entity_conflict", "period_conflict", "near_duplicate_composition"],
+        },
+        "aiImageProviders": {
+            name: dict(state) for name, state in _AI_IMAGE_PROVIDER_STATE.items()
         },
         "visualQc": {
             "enabled": True,
