@@ -176,6 +176,8 @@ jobs:
             out/thumbnail_shorts.jpg
             out/metadata.json
             out/content_qc_report.json
+            out/visual_director_plan.json
+            out/visual_search_report.json
             out/canva_assets.json
           retention-days: 1
 
