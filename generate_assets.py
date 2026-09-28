@@ -2888,9 +2888,9 @@ async def process():
             "words": shorts_word_timings[i]
         })
 
-    # Phase-4 audit: selected asset + rerank score + narration-synchronised
-    # shot timing. This lets us compare what the director asked for, what stock
-    # retrieval selected, and exactly where Remotion will cut during speech.
+    # Phase-6 audit: selected asset + rerank score + narration-synchronised
+    # shot timing + editorial typography/SFX cues. This lets us compare what
+    # the director asked for with exactly what Remotion will render/play.
     visual_search_report = {
         "phase": 6,
         "reranker": {
@@ -2918,6 +2918,7 @@ async def process():
             {
                 "scene_number": scene.get("scene_number"),
                 "shots": scene.get("shots", []),
+                "visualBeats": scene.get("visualBeats", []),
             }
             for scene in enriched_long
         ],
@@ -2925,6 +2926,7 @@ async def process():
             {
                 "scene_number": scene.get("scene_number"),
                 "shots": scene.get("shots", []),
+                "visualBeats": scene.get("visualBeats", []),
             }
             for scene in enriched_shorts
         ],
