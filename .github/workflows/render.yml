@@ -104,13 +104,7 @@ jobs:
           if [ "${{ vars.AUDIO_TTS_ENGINE || 'kokoro' }}" = "kokoro" ]; then pip install -r requirements-kokoro.txt; fi
           if [ "${{ vars.CLIP_RERANK_ENABLED || 'true' }}" = "true" ]; then
             pip install -r requirements-clip.txt
-            python - <<'PY'
-import torch
-import torchvision
-from torchvision.ops import nms
-import open_clip
-print(f"OpenCLIP runtime ready: torch={torch.__version__}, torchvision={torchvision.__version__}")
-PY
+            python -c "import torch, torchvision, open_clip; from torchvision.ops import nms; print('OpenCLIP runtime ready: torch=' + torch.__version__ + ', torchvision=' + torchvision.__version__)"
           fi
 
       - name: Generate Unified Assets (4K B-Roll + FLUX.1 + Voiceover)
