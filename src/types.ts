@@ -65,6 +65,13 @@ export interface VisualBeat {
   actualEndSeconds?: number;
   actualDurationSeconds?: number;
   timingSource?: 'tts_word_boundaries' | 'proportional_fallback';
+  emphasisText?: string;
+  emphasisStyle?: 'reveal' | 'climax' | 'action';
+  emphasisDurationSeconds?: number;
+  soundEffect?: 'temple_bell' | 'shankh' | 'om_drone' | 'flute_swell' | 'none';
+  soundEffectVolume?: number;
+  soundEffectReason?: string;
+  soundEffectFile?: string;
 }
 
 export interface DirectorPlan {
