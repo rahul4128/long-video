@@ -5,7 +5,7 @@ import {
   Easing,
   Img,
   Sequence,
-  Video,
+  OffthreadVideo,
   interpolate,
   staticFile,
   useCurrentFrame,
@@ -209,7 +209,7 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
 
   if (shot.type === 'video') {
     return (
-      <Video
+      <OffthreadVideo
         key={`video-${shotIndex}-${shot.file}`}
         src={staticFile(`images/${shot.file}`)}
         style={{
@@ -290,13 +290,9 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
       ? interpolate(progress, [0, 1], [verticalDrift, -verticalDrift])
       : interpolate(progress, [0, 1], [2, -2]);
 
-  // Background moves in the opposite direction at a lower amplitude. Because
-  // it is blurred and darkened, the duplicate image is perceived as depth,
-  // not as a second visible copy.
-  const bgX = -fgX * 0.32;
-  const bgY = -fgY * 0.18;
-  const bgScale = interpolate(progress, [0, 1], [1.14, 1.105]);
-
+  // Keep the cinematic motion on one sharp layer. The previous duplicated
+  // full-frame blurred background was visually hidden by the scaled foreground
+  // in most frames but forced Chromium to rasterize a costly blur every frame.
   // One slow moving glow is enough to keep a still alive. Opacity remains
   // tiny so faces/deities are never washed out and devotional art stays calm.
   const glowX = interpolate(progress, [0, 1], [-35, 135]);
@@ -320,23 +316,7 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
           width: '100%',
           height: '100%',
           objectFit: 'cover',
-          transform: `translate3d(${bgX}px, ${bgY}px, 0) scale(${bgScale})`,
-          filter: 'blur(16px) brightness(0.64) saturate(0.92)',
-          opacity: 0.72,
-          willChange: 'transform',
-        }}
-      />
-
-      <Img
-        src={staticFile(`images/${shot.file}`)}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          width: '100%',
-          height: '100%',
-          objectFit: 'cover',
           transform: `translate3d(${fgX}px, ${fgY}px, 0) scale(${fgScale})`,
-          filter: 'saturate(1.035) contrast(1.025) brightness(1.015)',
           willChange: 'transform',
         }}
       />
@@ -345,7 +325,6 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
         style={{
           background:
             `linear-gradient(105deg, transparent ${glowX - 28}%, rgba(255,244,214,${glowOpacity}) ${glowX}%, transparent ${glowX + 28}%)`,
-          mixBlendMode: 'screen',
           pointerEvents: 'none',
         }}
       />
