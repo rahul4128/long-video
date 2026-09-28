@@ -181,6 +181,76 @@ def _build_queries(scene, beat_words, subject, action, setting):
     return queries
 
 
+
+_STYLE_ANCIENT_TERMS = {
+    "ancient", "vedic", "mythological", "mahabharata", "ramayana", "kurukshetra",
+    "प्राचीन", "वैदिक", "महाभारत", "रामायण", "कुरुक्षेत्र", "राजमहल", "युद्धभूमि",
+}
+_STYLE_MODERN_TERMS = {
+    "modern", "city", "urban", "office", "car", "phone", "contemporary",
+    "आधुनिक", "शहर", "कार", "फोन", "ऑफिस",
+}
+_STYLE_STYLIZED_TERMS = {
+    "illustration", "painting", "artwork", "anime", "cartoon", "3d render",
+    "digital art", "watercolor", "चित्र", "पेंटिंग", "कार्टून",
+}
+_STYLE_NIGHT_TERMS = {
+    "night", "moon", "moonlight", "dark", "midnight", "रात", "चांद", "चाँद", "अंधेरा",
+}
+_STYLE_DAWN_TERMS = {
+    "dawn", "sunrise", "golden hour", "morning", "भोर", "सूर्योदय", "प्रातः", "सुबह",
+}
+
+
+def _visual_style_profile(scene, mood):
+    """Create one restrained visual language shared by all beats in a scene.
+
+    This profile is deterministic and can be evaluated independently by
+    parallel asset workers. It gives Phase 7 an episode/scene style target
+    without serialising scene generation.
+    """
+    text = " ".join([
+        str(scene.get("text") or scene.get("narration_chunk") or ""),
+        str(scene.get("imagePrompt") or scene.get("image_prompt") or ""),
+        str(scene.get("videoSearchQuery") or scene.get("video_search_query") or ""),
+    ]).lower()
+
+    realism = (
+        "stylized"
+        if any(term in text for term in _STYLE_STYLIZED_TERMS)
+        else "cinematic_realism"
+    )
+
+    if any(term in text for term in _STYLE_ANCIENT_TERMS):
+        period = "ancient"
+    elif any(term in text for term in _STYLE_MODERN_TERMS):
+        period = "modern"
+    else:
+        period = "timeless"
+
+    if any(term in text for term in _STYLE_NIGHT_TERMS):
+        lighting = "low_key_night"
+    elif any(term in text for term in _STYLE_DAWN_TERMS):
+        lighting = "warm_golden"
+    elif mood in {"devotional", "revelation", "climax"}:
+        lighting = "warm_golden"
+    else:
+        lighting = "natural_cinematic"
+
+    palette = (
+        "warm_gold_earth"
+        if mood in {"devotional", "revelation", "climax"}
+        else "natural_earth"
+    )
+
+    return {
+        "realism": realism,
+        "period": period,
+        "lighting": lighting,
+        "palette": palette,
+    }
+
+
 def plan_visual_beats(scene, mood, camera, pattern_break, format_name="long"):
     """Return ordered narration-aware visual beats for one scene.
 
@@ -204,6 +274,7 @@ def plan_visual_beats(scene, mood, camera, pattern_break, format_name="long"):
     )
 
     estimated_scene_seconds = max(2.5, len(words) / 2.5)
+    style_profile = _visual_style_profile(scene, mood)
     beats = []
 
     for beat_index, (word_start, word_end, beat_words) in enumerate(chunks, 1):
@@ -264,6 +335,7 @@ def plan_visual_beats(scene, mood, camera, pattern_break, format_name="long"):
             "queries": _build_queries(scene, beat_words, subject, action, setting),
             "preferredMedia": "video" if action else "auto",
             "transition": transition,
+            "styleProfile": dict(style_profile),
         })
 
     return beats
@@ -407,6 +479,10 @@ def direct_scene(scene, index, total, effect_slot=False, format_name="long"):
         "visual_priority": ["subject", "action", "environment"],
         "visualBeats": visual_beats,
         "visualBeatCount": len(visual_beats),
+        "visualStyleProfile": (
+            dict(visual_beats[0].get("styleProfile") or {})
+            if visual_beats else _visual_style_profile(scene, mood)
+        ),
         "entertainmentBeat": pattern_break,
         "patternBreak": pattern_break in ("hook", "climax", "reveal", "action"),
         "effectReason": (
@@ -420,7 +496,7 @@ def direct_scene(scene, index, total, effect_slot=False, format_name="long"):
             else "restrained_devotional_transition" if transition == "crossfade"
             else "default_clean_cut"
         ),
-        "director_version": 6,
+        "director_version": 7,
     }
 
 
