@@ -1569,7 +1569,7 @@ def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
 
         if shot:
             transition = beat.get("transition")
-            if transition in {"crossfade", "blur_cut"}:
+            if transition in {"cut", "crossfade", "blur_cut"}:
                 shot["transition"] = transition
             shots.append(shot)
 
@@ -2876,9 +2876,9 @@ async def process():
             "words": shorts_word_timings[i]
         })
 
-    # Phase-2 audit: exact selected asset, successful query/source and beat
-    # metadata. This is intentionally separate from the planning report so we
-    # can compare what the director ASKED for with what retrieval ACTUALLY found.
+    # Phase-4 audit: selected asset + rerank score + narration-synchronised
+    # shot timing. This lets us compare what the director asked for, what stock
+    # retrieval selected, and exactly where Remotion will cut during speech.
     visual_search_report = {
         "phase": 4,
         "reranker": {
@@ -2952,7 +2952,7 @@ async def process():
         "🎬 Visual Director v4 plan: "
         f"{sum(x['visualBeatCount'] for x in visual_plan['long'])} long-form beats + "
         f"{sum(x['visualBeatCount'] for x in visual_plan['shorts'])} Shorts beats. "
-        "Planning only; media selection is unchanged in Phase 1.",
+        "Beat planning + media selection + narration timing metadata are ready.",
         flush=True,
     )
 
