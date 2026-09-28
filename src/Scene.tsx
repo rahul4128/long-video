@@ -9,6 +9,7 @@ import {
   interpolate,
   staticFile,
   useCurrentFrame,
+  useVideoConfig,
 } from 'remotion';
 import { Shot, SceneItem } from './types';
 
@@ -21,6 +22,8 @@ interface SceneProps {
   fadeOut?: boolean;
   smoothEntry?: boolean;
 }
+
+type TransitionStyle = 'cut' | 'crossfade' | 'blur_cut';
 
 function resolveShots(scene: SceneItem): Shot[] {
   if (scene.shots && scene.shots.length > 0) {
@@ -40,21 +43,23 @@ interface ShotLayerProps {
   shot: Shot;
   shotIndex: number;
   shotDurationInFrames: number;
-  transitionFrames: number;
+  incomingTransitionFrames: number;
+  outgoingTransitionFrames: number;
   direction: 'zoom-in' | 'pan-right';
   format: 'long' | 'shorts';
   scene: SceneItem;
   isFirst: boolean;
   isLast: boolean;
-  incomingTransition: 'crossfade' | 'blur_cut';
-  outgoingTransition: 'crossfade' | 'blur_cut';
+  incomingTransition: TransitionStyle;
+  outgoingTransition: TransitionStyle;
 }
 
 const ShotLayer: React.FC<ShotLayerProps> = ({
   shot,
   shotIndex,
   shotDurationInFrames,
-  transitionFrames,
+  incomingTransitionFrames,
+  outgoingTransitionFrames,
   direction,
   format,
   scene,
@@ -67,40 +72,55 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
   const safeShotDuration = Math.max(1, shotDurationInFrames);
   const smooth = Easing.inOut(Easing.cubic);
 
-  const entry = isFirst
-    ? 1
-    : interpolate(frame, [0, transitionFrames], [0, 1], {
-        easing: smooth,
-        extrapolateLeft: 'clamp',
-        extrapolateRight: 'clamp',
-      });
-  const exit = isLast
-    ? 1
-    : interpolate(
-        frame,
-        [Math.max(0, safeShotDuration - transitionFrames), safeShotDuration],
-        [1, 0],
-        {
+  const entry =
+    isFirst || incomingTransition === 'cut' || incomingTransitionFrames <= 0
+      ? 1
+      : interpolate(frame, [0, incomingTransitionFrames], [0, 1], {
           easing: smooth,
           extrapolateLeft: 'clamp',
           extrapolateRight: 'clamp',
-        },
-      );
+        });
+
+  const exit =
+    isLast || outgoingTransition === 'cut' || outgoingTransitionFrames <= 0
+      ? 1
+      : interpolate(
+          frame,
+          [
+            Math.max(0, safeShotDuration - outgoingTransitionFrames),
+            safeShotDuration,
+          ],
+          [1, 0],
+          {
+            easing: smooth,
+            extrapolateLeft: 'clamp',
+            extrapolateRight: 'clamp',
+          },
+        );
+
   const opacity = Math.min(entry, exit);
 
   const entryBlur =
-    !isFirst && incomingTransition === 'blur_cut'
-      ? interpolate(frame, [0, transitionFrames], [3.5, 0], {
+    !isFirst &&
+    incomingTransition === 'blur_cut' &&
+    incomingTransitionFrames > 0
+      ? interpolate(frame, [0, incomingTransitionFrames], [3.5, 0], {
           easing: smooth,
           extrapolateLeft: 'clamp',
           extrapolateRight: 'clamp',
         })
       : 0;
+
   const exitBlur =
-    !isLast && outgoingTransition === 'blur_cut'
+    !isLast &&
+    outgoingTransition === 'blur_cut' &&
+    outgoingTransitionFrames > 0
       ? interpolate(
           frame,
-          [Math.max(0, safeShotDuration - transitionFrames), safeShotDuration],
+          [
+            Math.max(0, safeShotDuration - outgoingTransitionFrames),
+            safeShotDuration,
+          ],
           [0, 3.5],
           {
             easing: smooth,
@@ -109,6 +129,7 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
           },
         )
       : 0;
+
   const blurPx = Math.max(entryBlur, exitBlur);
 
   const planned = scene.director?.camera;
@@ -125,14 +146,16 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
               ? 'pan-right'
               : 'zoom-in';
 
-  // Shorts use deliberately gentler travel than long-form. Large 18% zooms
-  // on a 9:16 crop read as jerky; an eased 7-9% push feels much more like a
-  // controlled camera move while still keeping static AI images alive.
   const isShorts = format === 'shorts';
-  const zoomEnd = scene.director?.camera === 'slow_push'
-    ? (isShorts ? 1.07 : 1.10)
-    : (isShorts ? 1.09 : 1.16);
-  const panStartScale = isShorts ? 1.10 : 1.15;
+  const zoomEnd =
+    scene.director?.camera === 'slow_push'
+      ? isShorts
+        ? 1.07
+        : 1.1
+      : isShorts
+        ? 1.09
+        : 1.16;
+  const panStartScale = isShorts ? 1.1 : 1.15;
   const panEndScale = isShorts ? 1.04 : 1.05;
   const panDistance = isShorts ? 18 : 30;
 
@@ -143,19 +166,26 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
           extrapolateLeft: 'clamp',
           extrapolateRight: 'clamp',
         })
-      : interpolate(frame, [0, safeShotDuration], [panStartScale, panEndScale], {
-          easing: smooth,
-          extrapolateLeft: 'clamp',
-          extrapolateRight: 'clamp',
-        });
+      : interpolate(
+          frame,
+          [0, safeShotDuration],
+          [panStartScale, panEndScale],
+          {
+            easing: smooth,
+            extrapolateLeft: 'clamp',
+            extrapolateRight: 'clamp',
+          },
+        );
 
   const translateX =
     shotDirection === 'pan-right'
       ? interpolate(
           frame,
           [0, safeShotDuration],
-          [scene.director?.camera === 'pan_left' ? panDistance : -panDistance,
-           scene.director?.camera === 'pan_left' ? -panDistance : panDistance],
+          [
+            scene.director?.camera === 'pan_left' ? panDistance : -panDistance,
+            scene.director?.camera === 'pan_left' ? -panDistance : panDistance,
+          ],
           {
             easing: smooth,
             extrapolateLeft: 'clamp',
@@ -205,13 +235,11 @@ export const Scene: React.FC<SceneProps> = ({
   smoothEntry = false,
 }) => {
   const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
   const safeDuration = Math.max(30, durationInFrames);
   const fadeDuration = format === 'shorts' ? 7 : 12;
   const smooth = Easing.inOut(Easing.cubic);
 
-  // Only fade the edges explicitly requested by the parent. Shorts now fade
-  // only at the beginning/end of the whole video, not at every scene boundary.
-  // This removes the repeated black dip that made the Short feel stitched.
   let opacity = 1;
   if (fadeIn && frame < fadeDuration) {
     opacity = interpolate(frame, [0, fadeDuration], [0, 1], {
@@ -243,39 +271,113 @@ export const Scene: React.FC<SceneProps> = ({
   const shots = resolveShots(scene);
   const shotCount = Math.max(1, shots.length);
   const nominalFrames = safeDuration / shotCount;
-  const transitionFrames =
+  const defaultTransitionFrames =
     shotCount <= 1
       ? 0
       : format === 'shorts'
         ? Math.max(5, Math.min(9, Math.round(nominalFrames / 6)))
         : Math.max(6, Math.min(12, Math.round(nominalFrames / 5)));
 
-  // Give each visual its own Remotion Sequence. Adjacent sequences overlap by
-  // transitionFrames, so videos have a real local timeline and do not restart
-  // or jump when the crossfade boundary is crossed.
-  const shotSpan =
-    shotCount > 1
-      ? (safeDuration + transitionFrames * (shotCount - 1)) / shotCount
-      : safeDuration;
+  const transitionFor = (shot: Shot | undefined, index: number): TransitionStyle => {
+    if (
+      shot?.transition === 'cut' ||
+      shot?.transition === 'crossfade' ||
+      shot?.transition === 'blur_cut'
+    ) {
+      return shot.transition;
+    }
+    return index % 2 === 0 ? 'crossfade' : 'blur_cut';
+  };
 
-  const shotWindows = shots.map((shot, index) => {
-    const start = Math.max(0, Math.round(index * (shotSpan - transitionFrames)));
+  const transitionFramesFor = (style: TransitionStyle): number =>
+    style === 'cut' ? 0 : defaultTransitionFrames;
+
+  // Phase 4: if the Python asset stage attached real TTS-synchronised start/end
+  // times, those become authoritative. Older props still use equal windows.
+  const hasNarrationSync =
+    shots.length > 0 &&
+    shots.every(
+      (shot) =>
+        typeof shot.startSeconds === 'number' &&
+        Number.isFinite(shot.startSeconds) &&
+        typeof shot.endSeconds === 'number' &&
+        Number.isFinite(shot.endSeconds) &&
+        shot.endSeconds > shot.startSeconds,
+    );
+
+  const equalSpan = safeDuration / shotCount;
+  const baseWindows = shots.map((shot, index) => {
+    if (hasNarrationSync) {
+      const start = Math.max(
+        0,
+        Math.min(safeDuration - 1, Math.round((shot.startSeconds || 0) * fps)),
+      );
+      const end = Math.max(
+        start + 1,
+        Math.min(safeDuration, Math.round((shot.endSeconds || 0) * fps)),
+      );
+      return { shot, index, baseStart: start, baseEnd: end };
+    }
+
+    const start = Math.max(0, Math.round(index * equalSpan));
     const end =
       index === shots.length - 1
         ? safeDuration
-        : Math.min(safeDuration, Math.round(start + shotSpan));
+        : Math.min(safeDuration, Math.round((index + 1) * equalSpan));
+    return { shot, index, baseStart: start, baseEnd: Math.max(start + 1, end) };
+  });
+
+  // Crossfade/blur transitions straddle the narration boundary, so the CENTER
+  // of the visual transition lands on the first spoken word of the next beat.
+  // A 'cut' gets zero overlap and happens exactly on that word boundary.
+  const shotWindows = baseWindows.map((base, i) => {
+    const incomingTransition = transitionFor(base.shot, i);
+    const outgoingTransition =
+      i < baseWindows.length - 1
+        ? transitionFor(baseWindows[i + 1].shot, i + 1)
+        : 'cut';
+
+    const incomingTransitionFrames =
+      i === 0 ? 0 : transitionFramesFor(incomingTransition);
+    const outgoingTransitionFrames =
+      i === baseWindows.length - 1
+        ? 0
+        : transitionFramesFor(outgoingTransition);
+
+    const start =
+      i === 0
+        ? 0
+        : Math.max(
+            0,
+            base.baseStart - Math.floor(incomingTransitionFrames / 2),
+          );
+    const end =
+      i === baseWindows.length - 1
+        ? safeDuration
+        : Math.min(
+            safeDuration,
+            base.baseEnd + Math.ceil(outgoingTransitionFrames / 2),
+          );
+
     return {
-      shot,
-      index,
+      ...base,
       start,
+      end,
       duration: Math.max(1, end - start),
+      incomingTransition,
+      outgoingTransition,
+      incomingTransitionFrames,
+      outgoingTransitionFrames,
     };
   });
 
-  const shotBoundaryFrames = shotWindows.slice(1).map((w) => w.start);
+  // Whoosh is anchored to the true narration boundary, not to the beginning
+  // of the overlap window.
+  const shotBoundaries = shotWindows.slice(1).map((window) => ({
+    frame: window.baseStart,
+    transition: window.incomingTransition,
+  }));
 
-  // A tiny focus settle on each incoming Shorts scene softens the hard scene
-  // cut without fading through black or overlapping narration tracks.
   const entryFrames = format === 'shorts' && smoothEntry ? 6 : 0;
   const entryBlur =
     entryFrames > 0
@@ -302,19 +404,25 @@ export const Scene: React.FC<SceneProps> = ({
         <Audio src={staticFile(effectFile)} volume={0.35} />
       )}
 
-      {shotBoundaryFrames.map((boundaryFrame) => (
-        <Sequence
-          key={boundaryFrame}
-          from={Math.max(0, boundaryFrame - Math.round(Math.max(1, transitionFrames) / 2))}
-          durationInFrames={Math.max(4, Math.round(Math.max(1, transitionFrames) * 1.5))}
-          layout="none"
-        >
-          <Audio
-            src={staticFile('audio/sfx/whoosh.mp3')}
-            volume={format === 'shorts' ? 0.14 : 0.22}
-          />
-        </Sequence>
-      ))}
+      {shotBoundaries.map((boundary, index) => {
+        const transitionFrames = transitionFramesFor(boundary.transition);
+        if (transitionFrames <= 0) {
+          return null;
+        }
+        return (
+          <Sequence
+            key={`${boundary.frame}-${index}`}
+            from={Math.max(0, boundary.frame - Math.round(transitionFrames / 2))}
+            durationInFrames={Math.max(4, Math.round(transitionFrames * 1.5))}
+            layout="none"
+          >
+            <Audio
+              src={staticFile('audio/sfx/whoosh.mp3')}
+              volume={format === 'shorts' ? 0.14 : 0.22}
+            />
+          </Sequence>
+        );
+      })}
 
       <AbsoluteFill
         style={{
@@ -323,38 +431,31 @@ export const Scene: React.FC<SceneProps> = ({
         }}
       >
         {shotWindows.length > 0 ? (
-          shotWindows.map((window, i) => {
-            const incoming =
-              window.shot.transition ||
-              (i % 2 === 0 ? 'crossfade' : 'blur_cut');
-            const nextTransition =
-              shotWindows[i + 1]?.shot.transition ||
-              ((i + 1) % 2 === 0 ? 'crossfade' : 'blur_cut');
-            return (
-              <Sequence
-                key={`${window.index}-${window.shot.file}`}
-                from={window.start}
-                durationInFrames={window.duration}
-                layout="none"
-              >
-                <AbsoluteFill>
-                  <ShotLayer
-                    shot={window.shot}
-                    shotIndex={window.index}
-                    shotDurationInFrames={window.duration}
-                    transitionFrames={transitionFrames}
-                    direction={direction}
-                    format={format}
-                    scene={scene}
-                    isFirst={i === 0}
-                    isLast={i === shotWindows.length - 1}
-                    incomingTransition={incoming}
-                    outgoingTransition={nextTransition}
-                  />
-                </AbsoluteFill>
-              </Sequence>
-            );
-          })
+          shotWindows.map((window, i) => (
+            <Sequence
+              key={`${window.index}-${window.shot.file}`}
+              from={window.start}
+              durationInFrames={window.duration}
+              layout="none"
+            >
+              <AbsoluteFill>
+                <ShotLayer
+                  shot={window.shot}
+                  shotIndex={window.index}
+                  shotDurationInFrames={window.duration}
+                  incomingTransitionFrames={window.incomingTransitionFrames}
+                  outgoingTransitionFrames={window.outgoingTransitionFrames}
+                  direction={direction}
+                  format={format}
+                  scene={scene}
+                  isFirst={i === 0}
+                  isLast={i === shotWindows.length - 1}
+                  incomingTransition={window.incomingTransition}
+                  outgoingTransition={window.outgoingTransition}
+                />
+              </AbsoluteFill>
+            </Sequence>
+          ))
         ) : (
           <AbsoluteFill style={{ backgroundColor: '#000000' }} />
         )}
