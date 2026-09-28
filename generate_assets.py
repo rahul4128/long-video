@@ -149,7 +149,8 @@ CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "").strip()
 PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "").strip()
 COVERR_API_KEY = os.environ.get("COVERR_API_KEY", "").strip()
-HUGGINGFACE_API_KEY = os.environ.get("HUGGINGFACE_API_KEY", "").strip()
+HUGGINGFACE_API_KEY = os.environ.get("HUGGINGFACE_API_KEY", "")
+POLLINATIONS_API_KEY = os.environ.get("POLLINATIONS_API_KEY", "").strip()
 FREESOUND_API_KEY = os.environ.get("FREESOUND_API_KEY", "").strip()
 
 os.makedirs("public/images", exist_ok=True)
@@ -1991,7 +1992,7 @@ _AI_IMAGE_PROVIDER_LOCK = threading.Lock()
 
 
 def _ai_provider_failure_limit(name: str) -> int:
-    defaults = {"cloudflare": 2, "huggingface": 1, "pollinations": 1}
+    defaults = {"cloudflare": 2, "huggingface": 2, "pollinations": 2}
     env_name = f"AI_{name.upper()}_FAILURE_LIMIT"
     try:
         return max(1, min(5, int(os.getenv(env_name, str(defaults.get(name, 2))) or defaults.get(name, 2))))
@@ -2159,48 +2160,63 @@ def generate_cloudflare_flux(prompt: str, dest_path: str, aspect_ratio: str = "1
                 with open(dest_path, "wb") as f:
                     f.write(res.content)
                 return True
+        else:
+            body = res.text[:240] if "text" in res.headers.get("content-type", "") or "json" in res.headers.get("content-type", "") else ""
+            print(f"Cloudflare notice: HTTP {res.status_code} {body}", flush=True)
     except Exception as e:
         print(f"Cloudflare error: {e}", flush=True)
     return False
 
 def generate_huggingface_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9") -> bool:
-    """2nd AI-image tier - only runs if HUGGINGFACE_API_KEY is set (harmless
-    no-op otherwise, same pattern as the other optional keys). Uses the same
-    FLUX.1-schnell model family as the Cloudflare tier above (via Hugging
-    Face's serverless Inference Providers), so this is mainly a fallback for
-    when Cloudflare is unset, rate-limited, or briefly erroring - not a
-    different visual style. Get a free token at huggingface.co/settings/tokens
-    (create one with "Make calls to Inference Providers" permission)."""
+    """Generate through current Hugging Face Inference Providers.
+
+    The old /hf-inference/models/... route returned HTTP 410 because
+    hf-inference no longer serves large text-to-image models reliably.
+    InferenceClient(provider="auto") selects an available provider and can
+    fail over between supported backends.
+    """
     if not HUGGINGFACE_API_KEY or not prompt:
         return False
-    url = "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
-    headers = {
-        "Authorization": f"Bearer {HUGGINGFACE_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    clean_text = text_free_prompt(prompt).replace("\"", "").strip()
-    final_prompt = f"{clean_text}, Indian mythological devotional painting, {aspect_ratio} composition, warm divine lighting, highly detailed"
-    width, height = (1024, 576) if aspect_ratio == "16:9" else (576, 1024)
+
     try:
-        res = requests.post(
-            url, headers=headers, timeout=50,
-            json={
-                "inputs": final_prompt[:450],
-                "parameters": {"width": width, "height": height, "num_inference_steps": 4},
-            },
-        )
-        content_type = res.headers.get("content-type", "")
-        if res.status_code == 200 and content_type.startswith("image/"):
-            with open(dest_path, "wb") as f:
-                f.write(res.content)
-            return True
-        if res.status_code != 200:
-            # A cold model (503, "currently loading") or a rate limit (429) both
-            # land here - either way, don't retry-loop, just fall through to the
-            # next tier so a slow/busy HF endpoint never becomes a slow render.
-            print(f"Hugging Face notice: HTTP {res.status_code} - {res.text[:200]}", flush=True)
-    except Exception as e:
-        print(f"Hugging Face notice: {e}", flush=True)
+        from huggingface_hub import InferenceClient
+    except Exception as exc:
+        print(f"Hugging Face notice: InferenceClient unavailable ({exc})", flush=True)
+        return False
+
+    clean_text = text_free_prompt(prompt).replace("\"", "").strip()
+    final_prompt = (
+        f"{clean_text}, Indian mythological devotional cinematic frame, "
+        f"{aspect_ratio} composition, warm divine lighting, highly detailed, no text"
+    )
+    width, height = (1024, 576) if aspect_ratio == "16:9" else (576, 1024)
+
+    # Prefer fast/open models; provider=auto chooses a currently available
+    # serving backend instead of pinning the retired hf-inference route.
+    model_ids = [
+        "black-forest-labs/FLUX.1-schnell",
+        "stabilityai/stable-diffusion-3.5-large-turbo",
+        "Qwen/Qwen-Image",
+    ]
+    client = InferenceClient(provider="auto", api_key=HUGGINGFACE_API_KEY)
+
+    for model_id in model_ids:
+        try:
+            image = client.text_to_image(
+                final_prompt[:700],
+                model=model_id,
+                width=width,
+                height=height,
+                num_inference_steps=4 if "FLUX.1-schnell" in model_id else None,
+            )
+            if image is not None:
+                image.save(dest_path)
+                if _valid_generated_image(dest_path):
+                    print(f"  ✅ Image fetched from Hugging Face provider-auto ({model_id})", flush=True)
+                    return True
+        except Exception as exc:
+            print(f"Hugging Face provider notice ({model_id}): {str(exc)[:220]}", flush=True)
+
     return False
 
 def _valid_generated_image(path: str, min_bytes: int = 8000) -> bool:
@@ -2356,29 +2372,41 @@ def generate_ai_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9",
 
 
 def download_pollinations_fallback(prompt: str, img_dest: str, width: int = 1920, height: int = 1080) -> bool:
-    clean_text = text_free_prompt(prompt).replace("\"", "").strip()[:220]
-    encoded = urllib.parse.quote(f"{clean_text}, Indian devotional painting")
+    """Pollinations current image endpoint with compatibility fallback."""
+    clean_text = text_free_prompt(prompt).replace("\"", "").strip()[:500]
+    encoded = urllib.parse.quote(f"{clean_text}, Indian devotional cinematic frame, no text")
     seed = random.randint(1000, 999999)
-    url = f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&model=turbo&seed={seed}&nologo=true"
+    urls = [
+        f"https://gen.pollinations.ai/image/{encoded}?model=flux&width={width}&height={height}&seed={seed}&nologo=true",
+        f"https://image.pollinations.ai/prompt/{encoded}?width={width}&height={height}&model=flux&seed={seed}&nologo=true",
+    ]
+    headers = dict(HEADERS)
+    if POLLINATIONS_API_KEY:
+        headers["Authorization"] = f"Bearer {POLLINATIONS_API_KEY}"
 
-    for attempt in range(1, 4):
-        try:
-            res = requests.get(url, headers=HEADERS, timeout=30)
-            if res.status_code == 200 and len(res.content) > 8000:
-                with open(img_dest, "wb") as f:
-                    f.write(res.content)
-                if _valid_generated_image(img_dest):
-                    return True
-                try:
-                    os.remove(img_dest)
-                except OSError:
-                    pass
-        except Exception:
-            pass
-        time.sleep(1)
+    for url in urls:
+        for attempt in range(1, 3):
+            try:
+                res = requests.get(url, headers=headers, timeout=45)
+                if res.status_code == 200 and len(res.content) > 8000:
+                    with open(img_dest, "wb") as f:
+                        f.write(res.content)
+                    if _valid_generated_image(img_dest):
+                        print("  ✅ Image fetched from Pollinations", flush=True)
+                        return True
+                    try:
+                        os.remove(img_dest)
+                    except OSError:
+                        pass
+                else:
+                    print(
+                        f"Pollinations notice: HTTP {res.status_code} from {urllib.parse.urlparse(url).netloc}",
+                        flush=True,
+                    )
+            except Exception as exc:
+                print(f"Pollinations notice: {str(exc)[:180]}", flush=True)
+            time.sleep(0.7)
 
-    # Never manufacture a dark placeholder. Returning False lets the caller
-    # continue to its real-stock/local-library fallback instead.
     return False
 
 # -------------------------------------------------------------
