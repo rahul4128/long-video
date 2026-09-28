@@ -47,7 +47,12 @@ export const DevotionalShortsComposition: React.FC<DevotionalVideoProps> = ({
                 fadeOut={index === scenes.length - 1}
                 smoothEntry={index > 0}
               />
-              <Subtitles text={scene.narration_chunk} words={scene.words} format="shorts" />
+              <Subtitles
+                text={scene.narration_chunk}
+                words={scene.words}
+                format="shorts"
+                sceneDurationInFrames={sceneDurationInFrames}
+              />
             </Series.Sequence>
           );
         })}
