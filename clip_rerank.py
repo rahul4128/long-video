@@ -84,3 +84,65 @@ def similarities(prompt: str, image_urls: list):
         print(f"CLIP rerank notice: disabled for this run ({exc})", flush=True)
         _state["failed"] = True
         return None
+
+
+def image_similarities(reference_url: str, image_urls: list):
+    """Cosine similarity of candidate previews to one reference preview.
+
+    Used by Phase 7 for visual continuity and near-duplicate detection.
+    Returns a list aligned with image_urls. None entries mean a preview could
+    not be fetched. The same OpenCLIP model/cache used by semantic reranking
+    is reused, so there is no second model load.
+    """
+    if not enabled() or not reference_url or not image_urls:
+        return None
+    try:
+        import torch
+        from PIL import Image
+
+        with _lock:
+            _load()
+            model, preprocess = _state["model"], _state["preprocess"]
+
+            try:
+                ref_res = requests.get(reference_url, timeout=10)
+                ref_res.raise_for_status()
+                ref_img = preprocess(
+                    Image.open(io.BytesIO(ref_res.content)).convert("RGB")
+                )
+            except Exception:
+                return None
+
+            images, index = [], []
+            for i, url in enumerate(image_urls):
+                if not url:
+                    continue
+                try:
+                    res = requests.get(url, timeout=10)
+                    res.raise_for_status()
+                    images.append(
+                        preprocess(
+                            Image.open(io.BytesIO(res.content)).convert("RGB")
+                        )
+                    )
+                    index.append(i)
+                except Exception:
+                    continue
+
+            if not images:
+                return None
+
+            with torch.no_grad():
+                ref = model.encode_image(ref_img.unsqueeze(0))
+                img = model.encode_image(torch.stack(images))
+                ref = ref / ref.norm(dim=-1, keepdim=True)
+                img = img / img.norm(dim=-1, keepdim=True)
+                sims = (img @ ref.T).squeeze(-1).tolist()
+
+        out = [None] * len(image_urls)
+        for i, score in zip(index, sims):
+            out[i] = float(score)
+        return out
+    except Exception as exc:
+        print(f"CLIP continuity notice: image similarity unavailable ({exc})", flush=True)
+        return None
