@@ -100,8 +100,8 @@ shorts_scenes = shorts_data.get("scenes", []) if isinstance(shorts_data, dict) e
 
 # AI-Director planning is deterministic and works even when the upstream
 # payload has no director fields.
-long_scenes = enrich_scenes(long_scenes)
-shorts_scenes = enrich_scenes(shorts_scenes)
+long_scenes = enrich_scenes(long_scenes, format_name="long")
+shorts_scenes = enrich_scenes(shorts_scenes, format_name="shorts")
 
 # Fallback test scenes for direct workflow_dispatch testing.
 # Keep workflow_dispatch renders inside the same 2:30-3:30 production gate as
@@ -127,8 +127,8 @@ if not shorts_scenes:
 
 # Re-run the director after fallback scene injection so workflow_dispatch
 # test renders receive exactly the same production metadata as normal runs.
-long_scenes = enrich_scenes(long_scenes)
-shorts_scenes = enrich_scenes(shorts_scenes)
+long_scenes = enrich_scenes(long_scenes, format_name="long")
+shorts_scenes = enrich_scenes(shorts_scenes, format_name="shorts")
 
 CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
 CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
@@ -1890,6 +1890,7 @@ async def process():
             "narration_chunk": hindi_display_text(scene.get("text", "")),
             "shots": shots,
             "director": scene.get("director", {}),
+            "visualBeats": scene.get("visualBeats", scene.get("director", {}).get("visualBeats", [])),
             "entertainmentBeat": scene.get("director", {}).get("entertainmentBeat", ""),
             "imageFileName": shots[0]["file"] if shots else "",  # legacy/debug only, see Scene.tsx's resolveShots()
             "soundEffect": scene.get("soundEffect", "none"),
@@ -1913,6 +1914,7 @@ async def process():
             "durationInSeconds": round(duration + 0.2, 2),
             "narration_chunk": hindi_display_text(scene.get("text", "")),
             "shots": shots,
+            "visualBeats": scene.get("visualBeats", scene.get("director", {}).get("visualBeats", [])),
             "imageFileName": shots[0]["file"] if shots else "",  # legacy/debug only, see Scene.tsx's resolveShots()
             "soundEffect": scene.get("soundEffect", "none"),
             "visualEntities": scene.get("visualEntities", scene.get("visual_entities", [])),
@@ -1933,6 +1935,39 @@ async def process():
         bgm_swell_scene_numbers = [max(1, round(len(enriched_long) * 0.7))]
     else:
         bgm_swell_scene_numbers = []
+
+    # Phase-1 visual director report. This is planning metadata only; asset
+    # retrieval still uses the existing scene-level search path until the
+    # next phase explicitly consumes visualBeats.
+    visual_plan = {
+        "directorVersion": 4,
+        "long": [
+            {
+                "scene_number": s.get("scene_number", i + 1),
+                "visualBeatCount": len(s.get("visualBeats", [])),
+                "visualBeats": s.get("visualBeats", []),
+            }
+            for i, s in enumerate(long_scenes)
+        ],
+        "shorts": [
+            {
+                "scene_number": s.get("scene_number", i + 1),
+                "visualBeatCount": len(s.get("visualBeats", [])),
+                "visualBeats": s.get("visualBeats", []),
+            }
+            for i, s in enumerate(shorts_scenes)
+        ],
+    }
+    with open("out/visual_director_plan.json", "w", encoding="utf-8") as f:
+        json.dump(visual_plan, f, ensure_ascii=False, indent=2)
+
+    print(
+        "🎬 Visual Director v4 plan: "
+        f"{sum(x['visualBeatCount'] for x in visual_plan['long'])} long-form beats + "
+        f"{sum(x['visualBeatCount'] for x in visual_plan['shorts'])} Shorts beats. "
+        "Planning only; media selection is unchanged in Phase 1.",
+        flush=True,
+    )
 
     # Save props and metadata
     # On-screen Hindi hook for the first ~1.8 s (HookOverlay.tsx): the
