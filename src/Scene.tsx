@@ -2,6 +2,7 @@ import React from 'react';
 import {
   AbsoluteFill,
   Audio,
+  Easing,
   Img,
   Sequence,
   Video,
@@ -16,14 +17,11 @@ interface SceneProps {
   durationInFrames: number;
   direction: 'zoom-in' | 'pan-right';
   format?: 'long' | 'shorts';
+  fadeIn?: boolean;
+  fadeOut?: boolean;
+  smoothEntry?: boolean;
 }
 
-// Normalizes a scene's visual assets into one ordered shot list, whether it
-// came from the new `shots` field or the legacy single-asset fields (a
-// video filename, one image filename, or an array of image filenames). This
-// is what lets Scene.tsx treat "a scene made of 2 stock clips + 1 AI image
-// top-up" and "an old scene with a single imageFileName" through the exact
-// same rendering path below.
 function resolveShots(scene: SceneItem): Shot[] {
   if (scene.shots && scene.shots.length > 0) {
     return scene.shots;
@@ -38,212 +36,334 @@ function resolveShots(scene: SceneItem): Shot[] {
   return [];
 }
 
+interface ShotLayerProps {
+  shot: Shot;
+  shotIndex: number;
+  shotDurationInFrames: number;
+  transitionFrames: number;
+  direction: 'zoom-in' | 'pan-right';
+  format: 'long' | 'shorts';
+  scene: SceneItem;
+  isFirst: boolean;
+  isLast: boolean;
+  incomingTransition: 'crossfade' | 'blur_cut';
+  outgoingTransition: 'crossfade' | 'blur_cut';
+}
+
+const ShotLayer: React.FC<ShotLayerProps> = ({
+  shot,
+  shotIndex,
+  shotDurationInFrames,
+  transitionFrames,
+  direction,
+  format,
+  scene,
+  isFirst,
+  isLast,
+  incomingTransition,
+  outgoingTransition,
+}) => {
+  const frame = useCurrentFrame();
+  const safeShotDuration = Math.max(1, shotDurationInFrames);
+  const smooth = Easing.inOut(Easing.cubic);
+
+  const entry = isFirst
+    ? 1
+    : interpolate(frame, [0, transitionFrames], [0, 1], {
+        easing: smooth,
+        extrapolateLeft: 'clamp',
+        extrapolateRight: 'clamp',
+      });
+  const exit = isLast
+    ? 1
+    : interpolate(
+        frame,
+        [Math.max(0, safeShotDuration - transitionFrames), safeShotDuration],
+        [1, 0],
+        {
+          easing: smooth,
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+        },
+      );
+  const opacity = Math.min(entry, exit);
+
+  const entryBlur =
+    !isFirst && incomingTransition === 'blur_cut'
+      ? interpolate(frame, [0, transitionFrames], [3.5, 0], {
+          easing: smooth,
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+        })
+      : 0;
+  const exitBlur =
+    !isLast && outgoingTransition === 'blur_cut'
+      ? interpolate(
+          frame,
+          [Math.max(0, safeShotDuration - transitionFrames), safeShotDuration],
+          [0, 3.5],
+          {
+            easing: smooth,
+            extrapolateLeft: 'clamp',
+            extrapolateRight: 'clamp',
+          },
+        )
+      : 0;
+  const blurPx = Math.max(entryBlur, exitBlur);
+
+  const planned = scene.director?.camera;
+  const shotDirection: 'zoom-in' | 'pan-right' =
+    planned === 'pan_left'
+      ? 'pan-right'
+      : planned === 'pan_right'
+        ? 'pan-right'
+        : planned === 'slow_push'
+          ? 'zoom-in'
+          : shotIndex % 2 === 0
+            ? direction
+            : direction === 'zoom-in'
+              ? 'pan-right'
+              : 'zoom-in';
+
+  // Shorts use deliberately gentler travel than long-form. Large 18% zooms
+  // on a 9:16 crop read as jerky; an eased 7-9% push feels much more like a
+  // controlled camera move while still keeping static AI images alive.
+  const isShorts = format === 'shorts';
+  const zoomEnd = scene.director?.camera === 'slow_push'
+    ? (isShorts ? 1.07 : 1.10)
+    : (isShorts ? 1.09 : 1.16);
+  const panStartScale = isShorts ? 1.10 : 1.15;
+  const panEndScale = isShorts ? 1.04 : 1.05;
+  const panDistance = isShorts ? 18 : 30;
+
+  const scale =
+    shotDirection === 'zoom-in'
+      ? interpolate(frame, [0, safeShotDuration], [1.0, zoomEnd], {
+          easing: smooth,
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+        })
+      : interpolate(frame, [0, safeShotDuration], [panStartScale, panEndScale], {
+          easing: smooth,
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+        });
+
+  const translateX =
+    shotDirection === 'pan-right'
+      ? interpolate(
+          frame,
+          [0, safeShotDuration],
+          [scene.director?.camera === 'pan_left' ? panDistance : -panDistance,
+           scene.director?.camera === 'pan_left' ? -panDistance : panDistance],
+          {
+            easing: smooth,
+            extrapolateLeft: 'clamp',
+            extrapolateRight: 'clamp',
+          },
+        )
+      : 0;
+
+  const transform = `scale(${scale}) translateX(${translateX}px)`;
+  const commonStyle: React.CSSProperties = {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    transform,
+    opacity,
+    filter: blurPx > 0 ? `blur(${blurPx}px)` : undefined,
+  };
+
+  if (shot.type === 'video') {
+    return (
+      <Video
+        key={`video-${shotIndex}-${shot.file}`}
+        src={staticFile(`images/${shot.file}`)}
+        style={commonStyle}
+        muted
+        loop
+      />
+    );
+  }
+
+  return (
+    <Img
+      key={`image-${shotIndex}-${shot.file}`}
+      src={staticFile(`images/${shot.file}`)}
+      style={commonStyle}
+    />
+  );
+};
+
 export const Scene: React.FC<SceneProps> = ({
   scene,
   durationInFrames,
   direction,
   format = 'long',
+  fadeIn = true,
+  fadeOut = true,
+  smoothEntry = false,
 }) => {
   const frame = useCurrentFrame();
   const safeDuration = Math.max(30, durationInFrames);
-  const fadeDuration = 12;
+  const fadeDuration = format === 'shorts' ? 7 : 12;
+  const smooth = Easing.inOut(Easing.cubic);
 
-  // Smooth Cross-fade in/out of the WHOLE scene (unchanged from before).
+  // Only fade the edges explicitly requested by the parent. Shorts now fade
+  // only at the beginning/end of the whole video, not at every scene boundary.
+  // This removes the repeated black dip that made the Short feel stitched.
   let opacity = 1;
-  if (frame < fadeDuration) {
-    opacity = frame / fadeDuration;
-  } else if (frame > safeDuration - fadeDuration) {
-    opacity = (safeDuration - frame) / fadeDuration;
+  if (fadeIn && frame < fadeDuration) {
+    opacity = interpolate(frame, [0, fadeDuration], [0, 1], {
+      easing: smooth,
+      extrapolateLeft: 'clamp',
+      extrapolateRight: 'clamp',
+    });
   }
-  opacity = Math.max(0, Math.min(1, opacity));
+  if (fadeOut && frame > safeDuration - fadeDuration) {
+    const out = interpolate(
+      frame,
+      [safeDuration - fadeDuration, safeDuration],
+      [1, 0],
+      {
+        easing: smooth,
+        extrapolateLeft: 'clamp',
+        extrapolateRight: 'clamp',
+      },
+    );
+    opacity = Math.min(opacity, out);
+  }
 
-  // Long and Shorts renders write narration audio under different filename prefixes
-  // (see generate_assets.py: chunk_N.mp3 vs shorts_chunk_N.mp3) - pick the right one.
   const narrationFile =
     format === 'shorts'
       ? `audio/shorts_chunk_${scene.scene_number}.mp3`
       : `audio/chunk_${scene.scene_number}.mp3`;
-
-  // generate_assets.py always guarantees this file exists whenever soundEffect !== 'none'
-  // (a fresh Freesound CC0 clip, a checked-in library fallback, or silence as a last
-  // resort) - see resolve_sound_effect_audio(). Both long-video AND shorts payloads
-  // now carry a soundEffect field (shorts used to have none at all).
   const effectFile = `audio/effects/${format}_effect_${scene.scene_number}.mp3`;
 
-  // --- Multi-shot bookkeeping. THIS IS THE ACTUAL FIX for "stock clip ends,
-  // freezes, narration keeps going": generate_assets.py now sizes the number
-  // of shots (video and/or image, freely mixed) to cover the scene's full
-  // duration - see fetch_video_shots_for_duration() in generate_assets.py -
-  // so a scene's total on-screen time is never longer than its combined
-  // shots. Fully backward-compatible: a single-shot scene (shots.length ===
-  // 1) behaves exactly as the old single-asset code did, just with a
-  // slightly punchier Ken Burns range.
   const shots = resolveShots(scene);
   const shotCount = Math.max(1, shots.length);
-  const shotDurationFrames = safeDuration / shotCount;
-  const transitionFrames = Math.max(4, Math.min(15, shotDurationFrames / 3));
+  const nominalFrames = safeDuration / shotCount;
+  const transitionFrames =
+    shotCount <= 1
+      ? 0
+      : format === 'shorts'
+        ? Math.max(5, Math.min(9, Math.round(nominalFrames / 6)))
+        : Math.max(6, Math.min(12, Math.round(nominalFrames / 5)));
 
-  const currentShot = Math.min(shotCount - 1, Math.floor(frame / shotDurationFrames));
-  const nextShot = Math.min(shotCount - 1, currentShot + 1);
-  const intoCurrentShot = frame - currentShot * shotDurationFrames;
-  const framesToNextShotBoundary = (currentShot + 1) * shotDurationFrames - frame;
+  // Give each visual its own Remotion Sequence. Adjacent sequences overlap by
+  // transitionFrames, so videos have a real local timeline and do not restart
+  // or jump when the crossfade boundary is crossed.
+  const shotSpan =
+    shotCount > 1
+      ? (safeDuration + transitionFrames * (shotCount - 1)) / shotCount
+      : safeDuration;
 
-  // 0 = fully on currentShot, 1 = fully on nextShot - only ramps up in the
-  // last `transitionFrames` of a shot, and only when there IS a distinct
-  // next shot to cross into.
-  const crossFade =
-    nextShot !== currentShot && framesToNextShotBoundary < transitionFrames
-      ? 1 - Math.max(0, framesToNextShotBoundary) / transitionFrames
+  const shotWindows = shots.map((shot, index) => {
+    const start = Math.max(0, Math.round(index * (shotSpan - transitionFrames)));
+    const end =
+      index === shots.length - 1
+        ? safeDuration
+        : Math.min(safeDuration, Math.round(start + shotSpan));
+    return {
+      shot,
+      index,
+      start,
+      duration: Math.max(1, end - start),
+    };
+  });
+
+  const shotBoundaryFrames = shotWindows.slice(1).map((w) => w.start);
+
+  // A tiny focus settle on each incoming Shorts scene softens the hard scene
+  // cut without fading through black or overlapping narration tracks.
+  const entryFrames = format === 'shorts' && smoothEntry ? 6 : 0;
+  const entryBlur =
+    entryFrames > 0
+      ? interpolate(frame, [0, entryFrames], [2.4, 0], {
+          easing: Easing.out(Easing.cubic),
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+        })
       : 0;
-
-  // Cut-style variety: alternate a plain cross-dissolve with a quick
-  // "blur cut" (a short gaussian-blur dip through the transition, like a
-  // fast rack-focus) between shot boundaries, driven by the outgoing shot's
-  // OWN transition hint when generate_assets.py provided one, falling back
-  // to a deterministic alternation by shot index so this never depends on
-  // upstream data being present. Doing this at every cut - not just plain
-  // cross-fade every time - is what keeps a multi-shot scene from feeling
-  // monotonous/workflow-generated.
-  const outgoingTransition = shots[currentShot]?.transition;
-  const useBlurCut = outgoingTransition ? outgoingTransition === 'blur_cut' : currentShot % 2 === 1;
-  const blurPx = useBlurCut ? interpolate(crossFade, [0, 0.5, 1], [0, 6, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }) : 0;
-
-  // A short "whoosh" swipe under each cut - cheap, high-impact cinematic
-  // sound design that plain cross-fades alone don't sell. Shared single
-  // asset (fetched once per run by generate_assets.py's resolve_sound_effect_audio
-  // call for "transition_whoosh"), reused at every boundary in both formats.
-  // Skipped entirely for single-shot scenes (no cut happens).
-  const shotBoundaryFrames: number[] = [];
-  if (shotCount > 1) {
-    for (let i = 1; i < shotCount; i++) {
-      shotBoundaryFrames.push(Math.round(i * shotDurationFrames));
-    }
-  }
-
-  // Ken Burns motion for a single sub-shot, alternating direction both by
-  // the scene's own parity (the `direction` prop, set by the parent
-  // composition) AND by shot index within the scene, so a multi-shot scene
-  // doesn't repeat the exact same pan on every sub-shot. Now applies to
-  // VIDEO shots too (previously video got zero motion treatment at all -
-  // a plain static crop) so real footage reads as intentionally framed
-  // rather than just dropped in.
-  const kenBurnsTransform = (localFrame: number, shotIndex: number): string => {
-    const planned = scene.director?.camera;
-    const shotDirection: 'zoom-in' | 'pan-right' =
-      planned === 'pan_left'
-        ? 'pan-right'
-        : planned === 'pan_right'
-          ? 'pan-right'
-          : planned === 'slow_push'
-            ? 'zoom-in'
-            : shotIndex % 2 === 0 ? direction : direction === 'zoom-in' ? 'pan-right' : 'zoom-in';
-    const scale =
-      shotDirection === 'zoom-in'
-        ? interpolate(localFrame, Array.of(0, shotDurationFrames), Array.of(1.0, scene.director?.camera === 'slow_push' ? 1.10 : 1.18), {
-            extrapolateLeft: 'clamp',
-            extrapolateRight: 'clamp',
-          })
-        : interpolate(localFrame, Array.of(0, shotDurationFrames), Array.of(1.15, 1.05), {
-            extrapolateLeft: 'clamp',
-            extrapolateRight: 'clamp',
-          });
-    const translateX =
-      shotDirection === 'pan-right'
-        ? interpolate(localFrame, Array.of(0, shotDurationFrames), Array.of(scene.director?.camera === 'pan_left' ? 30 : -30, scene.director?.camera === 'pan_left' ? -30 : 30), {
-            extrapolateLeft: 'clamp',
-            extrapolateRight: 'clamp',
-          })
-        : 0;
-    return `scale(${scale}) translateX(${translateX}px)`;
-  };
-
-  // Renders one shot (video or image) with Ken Burns + the given opacity.
-  // `loop` is passed on <Video> as a safety net only: generate_assets.py
-  // sizes shots so each clip's own duration should already cover its
-  // allotted window, but a slightly-short clip (an odd rounding, or a
-  // shorter-than-expected stock hit) now loops seamlessly within its OWN
-  // (much smaller, evenly-split) window instead of freezing - a world
-  // better fallback than the old "one clip, no loop, freezes for the rest
-  // of the whole scene" behavior.
-  const renderShot = (shot: Shot, shotIndex: number, localFrame: number, shotOpacity: number) => {
-    const transform = kenBurnsTransform(localFrame, shotIndex);
-    if (shot.type === 'video') {
-      return (
-        <Video
-          src={staticFile(`images/${shot.file}`)}
-          style={{
-            width: '100%',
-            height: '100%',
-            objectFit: 'cover',
-            transform,
-            opacity: shotOpacity,
-          }}
-          muted
-          loop
-        />
-      );
-    }
-    return (
-      <Img
-        src={staticFile(`images/${shot.file}`)}
-        style={{
-          width: '100%',
-          height: '100%',
-          objectFit: 'cover',
-          transform,
-          opacity: shotOpacity,
-        }}
-      />
-    );
-  };
+  const entryScale =
+    entryFrames > 0
+      ? interpolate(frame, [0, entryFrames], [1.012, 1], {
+          easing: Easing.out(Easing.cubic),
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+        })
+      : 1;
 
   return (
     <AbsoluteFill style={{ opacity, overflow: 'hidden', backgroundColor: '#000000' }}>
-      {/* 1. Scene Audio Track (100% synchronized voiceover per scene) */}
-      <Audio
-        src={staticFile(narrationFile)}
-        volume={1.0}
-      />
+      <Audio src={staticFile(narrationFile)} volume={1.0} />
 
-      {/* 1b. Optional Sound-Effect Layer (temple bell / shankh / om drone / flute swell) */}
       {scene.soundEffect && scene.soundEffect !== 'none' && (
-        <Audio
-          src={staticFile(effectFile)}
-          volume={0.35}
-        />
+        <Audio src={staticFile(effectFile)} volume={0.35} />
       )}
 
-      {/* 1c. Transition whoosh at every shot cut inside this scene */}
       {shotBoundaryFrames.map((boundaryFrame) => (
         <Sequence
           key={boundaryFrame}
-          from={Math.max(0, boundaryFrame - Math.round(transitionFrames / 2))}
-          durationInFrames={Math.round(transitionFrames * 1.5)}
+          from={Math.max(0, boundaryFrame - Math.round(Math.max(1, transitionFrames) / 2))}
+          durationInFrames={Math.max(4, Math.round(Math.max(1, transitionFrames) * 1.5))}
           layout="none"
         >
-          <Audio src={staticFile('audio/sfx/whoosh.mp3')} volume={0.25} />
+          <Audio
+            src={staticFile('audio/sfx/whoosh.mp3')}
+            volume={format === 'shorts' ? 0.14 : 0.22}
+          />
         </Sequence>
       ))}
 
-      {/* 2. Visual Layer: cross-fades (plain, or a quick blur-cut for
-          variety) between an ordered list of video/image sub-shots sized by
-          generate_assets.py to cover this scene's full duration. */}
-      <AbsoluteFill style={{ filter: blurPx > 0 ? `blur(${blurPx}px)` : undefined }}>
-        <AbsoluteFill>
-          {renderShot(shots[currentShot] ?? { type: 'image', file: '' }, currentShot, intoCurrentShot, 1 - crossFade)}
-        </AbsoluteFill>
-        {crossFade > 0 && nextShot !== currentShot && (
-          <AbsoluteFill>
-            {renderShot(shots[nextShot], nextShot, 0, crossFade)}
-          </AbsoluteFill>
+      <AbsoluteFill
+        style={{
+          filter: entryBlur > 0 ? `blur(${entryBlur}px)` : undefined,
+          transform: `scale(${entryScale})`,
+        }}
+      >
+        {shotWindows.length > 0 ? (
+          shotWindows.map((window, i) => {
+            const incoming =
+              window.shot.transition ||
+              (i % 2 === 0 ? 'crossfade' : 'blur_cut');
+            const nextTransition =
+              shotWindows[i + 1]?.shot.transition ||
+              ((i + 1) % 2 === 0 ? 'crossfade' : 'blur_cut');
+            return (
+              <Sequence
+                key={`${window.index}-${window.shot.file}`}
+                from={window.start}
+                durationInFrames={window.duration}
+                layout="none"
+              >
+                <AbsoluteFill>
+                  <ShotLayer
+                    shot={window.shot}
+                    shotIndex={window.index}
+                    shotDurationInFrames={window.duration}
+                    transitionFrames={transitionFrames}
+                    direction={direction}
+                    format={format}
+                    scene={scene}
+                    isFirst={i === 0}
+                    isLast={i === shotWindows.length - 1}
+                    incomingTransition={incoming}
+                    outgoingTransition={nextTransition}
+                  />
+                </AbsoluteFill>
+              </Sequence>
+            );
+          })
+        ) : (
+          <AbsoluteFill style={{ backgroundColor: '#000000' }} />
         )}
       </AbsoluteFill>
 
-      {/* 3. Subtle Cinematic Vignette */}
       <AbsoluteFill
         style={{
           background:
-            'radial-gradient(circle at center, transparent 60%, rgba(0, 0, 0, 0.45) 100%)',
+            'radial-gradient(circle at center, transparent 60%, rgba(0, 0, 0, 0.42) 100%)',
         }}
       />
     </AbsoluteFill>
