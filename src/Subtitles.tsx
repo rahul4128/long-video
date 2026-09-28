@@ -1,5 +1,5 @@
 import React from 'react';
-import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
+import { AbsoluteFill, Easing, interpolate, useCurrentFrame, useVideoConfig } from 'remotion';
 import { loadFont } from '@remotion/google-fonts/NotoSansDevanagari';
 import { WordTiming } from './types';
 
@@ -8,11 +8,9 @@ const { fontFamily } = loadFont();
 interface SubtitlesProps {
   text: string;
   words?: WordTiming[];
+  format?: 'long' | 'shorts';
 }
 
-// Keeps each on-screen caption chunk short enough to read at a glance -
-// roughly matches the phrase-by-phrase style used by high-retention
-// Shorts/Reels captions, rather than one long sentence sitting on screen.
 const MAX_CHUNK_CHARS = 38;
 const MAX_CHUNK_WORDS = 7;
 
@@ -40,18 +38,19 @@ function groupWordsIntoChunks(words: WordTiming[]): WordTiming[][] {
   return chunks;
 }
 
-export const Subtitles: React.FC<SubtitlesProps> = ({ text, words }) => {
+export const Subtitles: React.FC<SubtitlesProps> = ({
+  text,
+  words,
+  format = 'long',
+}) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
   const currentTime = frame / fps;
 
   if (!text) return null;
 
-  // Show one short narration phrase at a time. The active phrase is fully
-  // readable instead of revealing individual words, which keeps the long-form
-  // video cinematic and avoids a karaoke/full-paragraph look.
   const fallbackWords: WordTiming[] = !words || words.length === 0
-    ? (text.match(/[^\\s]+/g) || []).map((word, i, all) => ({
+    ? (text.match(/[^\s]+/g) || []).map((word, i, all) => ({
         word,
         start: (i / Math.max(1, all.length)) * (durationInFrames / fps),
         end: ((i + 1) / Math.max(1, all.length)) * (durationInFrames / fps),
@@ -76,15 +75,31 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ text, words }) => {
     ? activeChunk.map((w) => w.word).join(' ')
     : text;
 
+  // Shorts captions used to snap instantly from one phrase to the next.
+  // Give each phrase a very short eased settle so the typography feels
+  // intentional without creating distracting karaoke-style movement.
+  const chunkStart = activeChunk?.[0]?.start ?? 0;
+  const chunkAgeFrames = Math.max(0, frame - Math.round(chunkStart * fps));
+  const isShorts = format === 'shorts';
+  const enter = isShorts
+    ? interpolate(chunkAgeFrames, [0, 5], [0, 1], {
+        easing: Easing.out(Easing.cubic),
+        extrapolateLeft: 'clamp',
+        extrapolateRight: 'clamp',
+      })
+    : 1;
+  const translateY = isShorts ? interpolate(enter, [0, 1], [12, 0]) : 0;
+  const scale = isShorts ? interpolate(enter, [0, 1], [0.985, 1]) : 1;
+  const captionOpacity = isShorts ? interpolate(enter, [0, 1], [0.45, 1]) : 1;
 
   return (
     <AbsoluteFill
       style={{
         justifyContent: 'flex-end',
         alignItems: 'center',
-        paddingBottom: 70,
-        paddingLeft: 80,
-        paddingRight: 80,
+        paddingBottom: isShorts ? 105 : 70,
+        paddingLeft: isShorts ? 42 : 80,
+        paddingRight: isShorts ? 42 : 80,
         pointerEvents: 'none',
       }}
     >
@@ -93,20 +108,23 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ text, words }) => {
           backgroundColor: 'rgba(15, 10, 5, 0.75)',
           backdropFilter: 'blur(8px)',
           border: '1.5px solid rgba(255, 215, 0, 0.4)',
-          borderRadius: 16,
-          padding: '16px 36px',
-          maxWidth: '88%',
+          borderRadius: isShorts ? 20 : 16,
+          padding: isShorts ? '18px 28px' : '16px 36px',
+          maxWidth: isShorts ? '91%' : '88%',
           textAlign: 'center',
           boxShadow: '0 8px 32px rgba(0, 0, 0, 0.85)',
+          transform: `translateY(${translateY}px) scale(${scale})`,
+          opacity: captionOpacity,
+          willChange: 'transform, opacity',
         }}
       >
         <p
           style={{
             margin: 0,
-            fontSize: 36,
+            fontSize: isShorts ? 43 : 36,
             fontFamily,
             fontWeight: 700,
-            lineHeight: 1.45,
+            lineHeight: isShorts ? 1.38 : 1.45,
           }}
         >
           <span
@@ -114,7 +132,6 @@ export const Subtitles: React.FC<SubtitlesProps> = ({ text, words }) => {
               color: '#FFEAA7',
               textShadow: '0 2px 8px rgba(0,0,0,0.9), 0 0 15px rgba(255,180,0,0.3)',
               display: 'inline-block',
-              opacity: activeChunk ? 1 : 0.9,
             }}
           >
             {captionText}
