@@ -9,6 +9,7 @@ interface SubtitlesProps {
   text: string;
   words?: WordTiming[];
   format?: 'long' | 'shorts';
+  sceneDurationInFrames?: number;
 }
 
 const MAX_CHUNK_CHARS = 38;
@@ -42,9 +43,11 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
   text,
   words,
   format = 'long',
+  sceneDurationInFrames,
 }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
+  const fallbackDurationInFrames = sceneDurationInFrames || durationInFrames;
   const currentTime = frame / fps;
 
   if (!text) return null;
@@ -52,8 +55,8 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
   const fallbackWords: WordTiming[] = !words || words.length === 0
     ? (text.match(/[^\s]+/g) || []).map((word, i, all) => ({
         word,
-        start: (i / Math.max(1, all.length)) * (durationInFrames / fps),
-        end: ((i + 1) / Math.max(1, all.length)) * (durationInFrames / fps),
+        start: (i / Math.max(1, all.length)) * (fallbackDurationInFrames / fps),
+        end: ((i + 1) / Math.max(1, all.length)) * (fallbackDurationInFrames / fps),
       }))
     : [];
 
