@@ -20,7 +20,7 @@ export interface Shot {
   // for the first shot in a scene, which only cross-dissolves in from the
   // previous scene). Scene.tsx alternates crossfade/blur_cut by shot index
   // when this isn't provided, so older props.json files still render fine.
-  transition?: 'crossfade' | 'blur_cut';
+  transition?: 'cut' | 'crossfade' | 'blur_cut';
 }
 export interface VisualBeat {
   beatIndex: number;
