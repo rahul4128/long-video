@@ -2936,6 +2936,450 @@ def sync_visual_beats_to_narration(scene: dict, shots: list, word_timings: list,
     return beats, timed_shots
 
 
+
+# -------------------------------------------------------------
+# 5a. PHASE-8 PRE-RENDER VISUAL QC + TARGETED REPAIR
+# -------------------------------------------------------------
+def _visual_qc_max_repairs() -> int:
+    try:
+        return max(1, min(12, int(os.getenv("VISUAL_QC_MAX_REPAIRS", "8") or 8)))
+    except ValueError:
+        return 8
+
+
+def _visual_qc_repair_min_score() -> float:
+    try:
+        return max(
+            _candidate_min_score(),
+            min(0.85, float(os.getenv("VISUAL_QC_REPAIR_MIN_SCORE", "0.56") or 0.56)),
+        )
+    except ValueError:
+        return max(_candidate_min_score(), 0.56)
+
+
+def _visual_qc_scene_prompt(scene: dict) -> str:
+    prompt = scene.get("imagePrompt") or scene.get("image_prompt") or "Indian devotional story scene"
+    entities = scene.get("visualEntities") or scene.get("visual_entities") or []
+    attributes = scene.get("visualAttributes") or scene.get("visual_attributes") or []
+    strict = bool(scene.get("visualStrict") or scene.get("visual_strict") or entities)
+    if strict and entities:
+        prompt = (
+            f"{prompt}. REQUIRED VISUAL ENTITY: {', '.join(map(str, entities))}. "
+            f"REQUIRED ATTRIBUTES: {', '.join(map(str, attributes))}. "
+            "Do not substitute another deity, generic person, child, animal, statue, or unrelated subject."
+        )
+    return prompt
+
+
+def _visual_qc_shot_key(shot: dict) -> str:
+    source = str(shot.get("source") or "")
+    candidate_id = shot.get("candidateId")
+    if not source or candidate_id in (None, "", "local_library"):
+        return ""
+    return f"{source}:{candidate_id}"
+
+
+def _visual_qc_previous_candidate(shots: list, shot_index: int) -> dict:
+    if shot_index <= 0 or shot_index > len(shots):
+        return {}
+    previous = shots[shot_index - 1]
+    profile = dict(previous.get("continuityProfile") or {})
+    realism = str(profile.get("realism") or "cinematic_realism")
+    return {
+        "source": previous.get("source", "unknown"),
+        "id": previous.get("candidateId") or previous.get("file") or "previous",
+        "style": "animation" if realism == "stylized" else "live",
+        "continuityProfile": profile,
+        # Final props do not intentionally retain stock preview URLs. Phase 8
+        # still gets profile continuity; near-duplicate preview checks already
+        # happened during the first-pass selector.
+        "preview_url": "",
+    }
+
+
+def _visual_qc_inherit_timing(new_shot: dict, old_shot: dict, beat: dict) -> dict:
+    result = dict(new_shot or {})
+    for key in (
+        "startSeconds",
+        "endSeconds",
+        "syncedDurationSeconds",
+        "timingSource",
+        "narrationCue",
+        "cameraMotion",
+        "transition",
+    ):
+        if old_shot.get(key) is not None:
+            result[key] = old_shot.get(key)
+
+    if result.get("startSeconds") is None:
+        result["startSeconds"] = beat.get("actualStartSeconds")
+    if result.get("endSeconds") is None:
+        result["endSeconds"] = beat.get("actualEndSeconds")
+    if result.get("syncedDurationSeconds") is None:
+        try:
+            result["syncedDurationSeconds"] = round(
+                float(result.get("endSeconds") or 0.0)
+                - float(result.get("startSeconds") or 0.0),
+                3,
+            )
+        except Exception:
+            pass
+    if not result.get("timingSource"):
+        result["timingSource"] = beat.get("timingSource", "proportional_fallback")
+    if not result.get("narrationCue"):
+        result["narrationCue"] = beat.get("narrationCue", "")
+    if not result.get("cameraMotion"):
+        result["cameraMotion"] = beat.get("cameraMotion", "")
+    if not result.get("transition"):
+        result["transition"] = beat.get("transition", "cut")
+    return result
+
+
+def _visual_qc_stock_shot(selected: dict, beat: dict, queries: list, filename: str) -> dict:
+    return {
+        "type": "video",
+        "file": filename,
+        "beatIndex": int(beat.get("beatIndex") or 1),
+        "durationTarget": beat.get("durationTarget"),
+        "subject": beat.get("subject", ""),
+        "shotType": beat.get("shotType", ""),
+        "queryUsed": selected.get("query", ""),
+        "source": selected.get("source", "unknown"),
+        "queryCandidates": queries,
+        "selectionScore": selected.get("selectionScore"),
+        "scoreBreakdown": selected.get("scoreBreakdown", {}),
+        "clipSimilarity": selected.get("clipSimilarity"),
+        "continuitySimilarity": selected.get("continuitySimilarity"),
+        "continuityProfile": selected.get("continuityProfile", {}),
+        "continuityFlags": selected.get("continuityFlags", []),
+        "candidateId": selected.get("id"),
+        "cameraMotion": beat.get("cameraMotion", ""),
+        "transition": beat.get("transition", "cut"),
+    }
+
+
+def _visual_qc_generate_replacement(
+    source_scene: dict,
+    beat: dict,
+    shots: list,
+    shot_index: int,
+    orientation: str,
+    format_name: str,
+    scene_number: int,
+    repair_number: int,
+    stock_only: bool = False,
+) -> dict:
+    scene_prompt = _visual_qc_scene_prompt(source_scene)
+    fallback_query = (
+        source_scene.get("videoSearchQuery")
+        or source_scene.get("video_search_query")
+        or ""
+    )
+    queries = _visual_beat_queries(beat, fallback_query)
+    beat_prompt = _visual_beat_prompt(scene_prompt, beat)
+
+    excluded = {
+        key for key in (_visual_qc_shot_key(s) for s in shots) if key
+    }
+    previous_candidate = _visual_qc_previous_candidate(shots, shot_index)
+
+    if queries:
+        filename = (
+            f"qc_{format_name}_scene_{scene_number}_"
+            f"b{int(beat.get('beatIndex') or 1)}_r{repair_number}.mp4"
+        )
+        dest = os.path.join("public/images", filename)
+        selected = select_best_visual_candidate(
+            queries=queries,
+            beat=beat,
+            beat_prompt=beat_prompt,
+            orientation=orientation,
+            dest_path=dest,
+            previous_candidate=previous_candidate,
+            exclude_keys=excluded,
+            minimum_score=_visual_qc_repair_min_score(),
+        )
+        if selected:
+            return _visual_qc_stock_shot(selected, beat, queries, filename)
+
+    if stock_only:
+        return {}
+
+    return _generate_visual_beat_image(
+        scene_prompt,
+        beat,
+        orientation=orientation,
+        base_name=(
+            f"qc_{format_name}_scene_{scene_number}_"
+            f"r{repair_number}"
+        ),
+    )
+
+
+def _visual_qc_find_shot_index(shots: list, target: dict):
+    beat_index = target.get("beatIndex")
+    requested_index = target.get("shotIndex")
+    if (
+        isinstance(requested_index, int)
+        and 0 <= requested_index < len(shots)
+        and (
+            beat_index is None
+            or int(shots[requested_index].get("beatIndex") or requested_index + 1)
+            == int(beat_index)
+        )
+    ):
+        return requested_index
+
+    if beat_index is not None:
+        for index, shot in enumerate(shots):
+            if int(shot.get("beatIndex") or index + 1) == int(beat_index):
+                return index
+    return None
+
+
+def _visual_qc_normalize_timeline(scene: dict):
+    shots = scene.get("shots") or []
+    if not shots:
+        return
+    timed = [
+        shot for shot in shots
+        if isinstance(shot.get("startSeconds"), (int, float))
+        and isinstance(shot.get("endSeconds"), (int, float))
+    ]
+    if not timed:
+        return
+
+    timed.sort(key=lambda shot: float(shot.get("startSeconds") or 0.0))
+    scene_duration = float(scene.get("durationInSeconds") or 0.0)
+    timed[0]["startSeconds"] = 0.0
+
+    for previous, current in zip(timed, timed[1:]):
+        boundary = float(current.get("startSeconds") or 0.0)
+        previous["endSeconds"] = round(boundary, 3)
+        previous["syncedDurationSeconds"] = round(
+            max(0.05, boundary - float(previous.get("startSeconds") or 0.0)),
+            3,
+        )
+
+    if scene_duration > 0:
+        timed[-1]["endSeconds"] = round(scene_duration, 3)
+        timed[-1]["syncedDurationSeconds"] = round(
+            max(
+                0.05,
+                scene_duration - float(timed[-1].get("startSeconds") or 0.0),
+            ),
+            3,
+        )
+
+    scene["shots"] = timed
+
+
+def run_visual_qc_and_repair(
+    source_scenes: list,
+    enriched_scenes: list,
+    format_name: str,
+    orientation: str,
+) -> dict:
+    """Audit final timed shots, repair only failing beats, then re-audit."""
+    before = assess_sequence(
+        enriched_scenes,
+        format_name=format_name,
+        media_root="public/images",
+    )
+    repairs = []
+    budget = _visual_qc_max_repairs()
+    used = 0
+
+    for scene_index, scene_report in enumerate(before.get("scenes", [])):
+        if scene_index >= len(enriched_scenes):
+            continue
+        enriched_scene = enriched_scenes[scene_index]
+        source_scene = (
+            source_scenes[scene_index]
+            if scene_index < len(source_scenes)
+            else {}
+        )
+        scene_number = int(enriched_scene.get("scene_number") or scene_index + 1)
+        shots = enriched_scene.get("shots") or []
+        beats = {
+            int(beat.get("beatIndex") or i + 1): beat
+            for i, beat in enumerate(enriched_scene.get("visualBeats") or [])
+        }
+
+        for target in scene_report.get("repairTargets", []):
+            if used >= budget:
+                break
+
+            beat_index = int(target.get("beatIndex") or 0)
+            beat = beats.get(beat_index)
+            action = target.get("action")
+            reason = target.get("reason")
+            if not beat:
+                continue
+
+            shot_index = _visual_qc_find_shot_index(shots, target)
+            current = shots[shot_index] if shot_index is not None else {}
+
+            if action == "try_stock_only" and current.get("source") != "ai_image":
+                continue
+
+            if action == "soften_short_beat":
+                if shot_index is not None:
+                    current["transition"] = "crossfade"
+                    current["qcAction"] = "soften_short_beat"
+                    current["qcReason"] = reason
+                    repairs.append({
+                        "sceneNumber": scene_number,
+                        "beatIndex": beat_index,
+                        "reason": reason,
+                        "action": "soften_short_beat",
+                        "result": "applied",
+                    })
+                    used += 1
+                continue
+
+            if action == "split_visual" and shot_index is not None:
+                try:
+                    start = float(current.get("startSeconds"))
+                    end = float(current.get("endSeconds"))
+                except Exception:
+                    continue
+                if end - start <= 0.2:
+                    continue
+
+                used += 1
+                replacement = _visual_qc_generate_replacement(
+                    source_scene,
+                    beat,
+                    shots,
+                    shot_index,
+                    orientation,
+                    format_name,
+                    scene_number,
+                    used,
+                    stock_only=False,
+                )
+                if not replacement:
+                    repairs.append({
+                        "sceneNumber": scene_number,
+                        "beatIndex": beat_index,
+                        "reason": reason,
+                        "action": "split_visual",
+                        "result": "no_replacement_available",
+                    })
+                    continue
+
+                midpoint = round(start + (end - start) / 2.0, 3)
+                current["endSeconds"] = midpoint
+                current["syncedDurationSeconds"] = round(midpoint - start, 3)
+                current["qcAction"] = "split_long_hold"
+                current["qcReason"] = reason
+
+                replacement = _visual_qc_inherit_timing(
+                    replacement,
+                    current,
+                    beat,
+                )
+                replacement["startSeconds"] = midpoint
+                replacement["endSeconds"] = end
+                replacement["syncedDurationSeconds"] = round(end - midpoint, 3)
+                replacement["transition"] = "crossfade"
+                replacement["qcAction"] = "split_long_hold"
+                replacement["qcReason"] = reason
+                shots.insert(shot_index + 1, replacement)
+
+                repairs.append({
+                    "sceneNumber": scene_number,
+                    "beatIndex": beat_index,
+                    "reason": reason,
+                    "action": "split_visual",
+                    "result": "repaired",
+                    "replacementFile": replacement.get("file"),
+                    "replacementSource": replacement.get("source"),
+                })
+                continue
+
+            # Missing/weak/duplicate/conflicting visual: retry this beat only.
+            used += 1
+            replacement = _visual_qc_generate_replacement(
+                source_scene,
+                beat,
+                shots,
+                shot_index if shot_index is not None else len(shots),
+                orientation,
+                format_name,
+                scene_number,
+                used,
+                stock_only=(action == "try_stock_only"),
+            )
+
+            if not replacement:
+                repairs.append({
+                    "sceneNumber": scene_number,
+                    "beatIndex": beat_index,
+                    "reason": reason,
+                    "action": action,
+                    "result": "no_replacement_available",
+                })
+                continue
+
+            if shot_index is not None:
+                replacement = _visual_qc_inherit_timing(
+                    replacement,
+                    current,
+                    beat,
+                )
+                replacement["qcAction"] = "replace_failing_beat"
+                replacement["qcReason"] = reason
+                shots[shot_index] = replacement
+            else:
+                replacement = _visual_qc_inherit_timing(
+                    replacement,
+                    {},
+                    beat,
+                )
+                replacement["qcAction"] = "fill_missing_beat"
+                replacement["qcReason"] = reason
+                shots.append(replacement)
+                shots.sort(
+                    key=lambda shot: (
+                        float(shot.get("startSeconds") or 0.0),
+                        int(shot.get("beatIndex") or 0),
+                    )
+                )
+
+            repairs.append({
+                "sceneNumber": scene_number,
+                "beatIndex": beat_index,
+                "reason": reason,
+                "action": action,
+                "result": "repaired",
+                "replacementFile": replacement.get("file"),
+                "replacementSource": replacement.get("source"),
+                "selectionScore": replacement.get("selectionScore"),
+            })
+
+        enriched_scene["shots"] = shots
+        _visual_qc_normalize_timeline(enriched_scene)
+        if shots:
+            enriched_scene["imageFileName"] = shots[0].get("file", "")
+
+    after = assess_sequence(
+        enriched_scenes,
+        format_name=format_name,
+        media_root="public/images",
+    )
+    return {
+        "format": format_name,
+        "repairBudget": budget,
+        "repairsUsed": used,
+        "before": before,
+        "repairs": repairs,
+        "after": after,
+        "ok": after.get("ok", False),
+    }
+
+
 # -------------------------------------------------------------
 # 5b. AUTO-CHAPTERS (YouTube description timestamps)
 # -------------------------------------------------------------
