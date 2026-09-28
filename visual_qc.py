@@ -164,6 +164,13 @@ def assess_scene(scene, format_name="long", media_root="public/images"):
 
         if source == "ai_image":
             ai_indices.append(index)
+        elif source in {"local_continuity_fallback", "local_atmosphere_fallback"}:
+            warnings.append({
+                "code": "network_independent_visual_fallback",
+                "beatIndex": beat_index,
+                "shotIndex": index,
+                "source": source,
+            })
 
         selection_score = shot.get("selectionScore")
         if source not in {"ai_image", "local_library", "unknown"} and selection_score is not None:
