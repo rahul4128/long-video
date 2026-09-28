@@ -36,7 +36,7 @@ raw_payload = os.environ.get("DISPATCH_PAYLOAD", "").strip()
 # Branch-only E2E path used by the temporary push trigger on visual-director-v2.
 # It is never used by normal workflow_dispatch/repository_dispatch runs.
 if (
-    os.getenv("VISUAL_DIRECTOR_E2E", "false").strip().lower() == "true"
+    os.getenv("VISUAL_DIRECTOR_E2E", "False").strip().lower() == "true"
     and raw_payload in ("", "null", "{}")
 ):
     fixture_path = "tests/visual_director_e2e_payload.json"
@@ -2370,7 +2370,7 @@ async def _generate_edge_chunked_audio(clean_text: str, audio_dest: str) -> list
     # across sentences; sentence-by-sentence synthesis resets the pitch contour
     # on every sentence, which is what made narration sound robotic. Set
     # EDGE_TTS_SENTENCE_CHUNKS=true to restore the old behaviour.
-    if os.getenv("EDGE_TTS_SENTENCE_CHUNKS", "false").lower() == "true":
+    if os.getenv("EDGE_TTS_SENTENCE_CHUNKS", "False").lower() == "true":
         chunks = [
             part.strip()
             for part in re.split(r"(?<=[।!?])\s+|(?<=[.!?])\s+", clean_text)
@@ -2500,12 +2500,12 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") 
                     # non-Natasha narration is visible before you upload.
                     print(f"::warning title=Own voice NOT used::IndicF5 failed for {os.path.basename(audio_dest)} ({e}); this scene uses Edge-TTS.", flush=True)
                     traceback.print_exc()
-                    if os.getenv("INDICF5_STRICT", "false").strip().lower() == "true":
+                    if os.getenv("INDICF5_STRICT", "False").strip().lower() == "true":
                         raise RuntimeError(f"INDICF5_STRICT=true: own voice failed ({e}); stopping instead of using Edge-TTS.")
             else:
                 print("IndicF5 notice: engine not installed - falling back to Edge-TTS.", flush=True)
                 print("::warning title=Own voice NOT used::IndicF5 is not installed; narration uses Edge-TTS.", flush=True)
-                if os.getenv("INDICF5_STRICT", "false").strip().lower() == "true":
+                if os.getenv("INDICF5_STRICT", "False").strip().lower() == "true":
                     raise RuntimeError("INDICF5_STRICT=true: IndicF5 engine not installed; stopping instead of using Edge-TTS.")
             engine = "edge"
 
@@ -3747,7 +3747,7 @@ async def process():
         "editorialCues": {
             "typography": "reveal_climax_action_only",
             "soundEffects": "beat_timed",
-            "calmCrossfadeWhoosh": false,
+            "calmCrossfadeWhoosh": False,
         },
         "continuity": {
             "styleProfile": ["realism", "period", "lighting", "palette"],
@@ -3831,7 +3831,7 @@ async def process():
     # On-screen Hindi hook for the first ~1.8 s (HookOverlay.tsx): the
     # thumbnail promise repeated on screen so viewers who clicked see it
     # confirmed instantly - the biggest early-drop fix for Shorts and long.
-    hook_enabled = os.getenv("HOOK_OVERLAY_ENABLED", "true").strip().lower() != "false"
+    hook_enabled = os.getenv("HOOK_OVERLAY_ENABLED", "true").strip().lower() != "False"
     long_hook = pick_hindi(thumbnail_hook_text, seo_metadata.get("thumbnailText"), max_words=6) if hook_enabled else ""
     shorts_hook = pick_hindi(shorts_thumbnail_hook_text, thumbnail_hook_text, max_words=6) if hook_enabled else ""
 
