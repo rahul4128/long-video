@@ -1,0 +1,11 @@
+{
+  "status": "prepared_not_submitted",
+  "duration": 8,
+  "aspectRatio": "9:16",
+  "resolution": "768p",
+  "model": "minimax-h3",
+  "character_reference": "Use the previously generated original Pihu/Puchu character preview as an image ingredient; do not use the uploaded creator's video as generation input.",
+  "prompt": "A polished cinematic 3D-style animated cartoon scene starring ORIGINAL Pihu, a cute stylized human girl with dark brown twin ponytails, brown eyes, small flower hair clips and a soft pink dress. Cozy pastel bedroom, warm window light, gentle depth of field. Pihu is worried because she cannot find her friend Puchu. Her expression evolves naturally: raised worried eyebrows, moist eyes, trembling lower lip, a tiny tear rolls down her cheek. She looks left then back toward camera, blinks naturally, gently clasps and relaxes her fingers, and takes a small breath. All character and environmental elements are a coherent rendered world; organic continuous motion, stable facial identity, realistic soft cloth and hair motion. Slow camera push from medium view to emotional close-up. She speaks directly in Hindi with a gentle expressive voice: 'पुचू, तुम कहाँ हो? मुझे तुम्हारी बहुत याद आ रही है।' Mouth movement follows the spoken words. No narrator, no background voice-over, no floating cutouts, no slideshow, no sprite animation, no logos, watermark, text, captions, montage or inset picture. One continuous 8-second portrait shot. Warm family-friendly emotional storytelling.",
+  "daily_workflow": "Remain paused until a real generated-video sample is reviewed.",
+  "billing": "No credits spent or job submitted. Credit budget must be authorized before submission; exact generation charge is not available as a preflight quote in the exposed tool."
+}
