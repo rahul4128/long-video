@@ -103,10 +103,11 @@ jobs:
           record = json.dumps({k: p[k] for k in ['episode_id','title','summary','emotion_theme']}, ensure_ascii=False)
           if record not in rows:
               h.write_text('\n'.join((rows + [record])[-60:]) + '\n')
+          Path('puchu_pihu/episodes_history.json').write_text(json.dumps({'episodes': h.read_text()}, ensure_ascii=False))
           PY
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add puchu_pihu/episodes_history.txt
+          git add puchu_pihu/episodes_history.txt puchu_pihu/episodes_history.json
           if ! git diff --cached --quiet; then
             git commit -m 'Record completed Puchu Pihu episode'
             git push origin HEAD:puchu-pihu-manual
