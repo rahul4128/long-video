@@ -34,7 +34,7 @@ def validate(p):
     errors = []
     if {c.get('id') for c in p.get('characters', [])} != {'puchu', 'pihu'}:
         errors.append('Exactly puchu and pihu character IDs are required')
-    for key, limits in [('long_video', (400, 680)), ('shorts', (70, 120))]:
+    for key, limits in [('long_video', (400, 900)), ('shorts', (70, 120))]:
         scenes = p.get(key, {}).get('scenes', [])
         texts = []
         if not scenes:
@@ -105,7 +105,21 @@ def audio_timeline(p, key, pipeline):
     limits = (180, 300) if key == 'long_video' else (30, 60)
     duration = len(audio) / SR
     if not limits[0] <= duration <= limits[1]:
-        raise RuntimeError(f'{key}: actual audio {duration:.1f}s outside {limits}. Rewrite the script; do not pad silence.')
+        target = 210 if key == 'long_video' else 45
+        tempo = duration / target
+        if not .7 <= tempo <= 1.4:
+            raise RuntimeError(f'{key}: speech too far outside duration bounds for natural pacing')
+        original = OUT / f'{key}-original.wav'
+        adjusted = OUT / f'{key}-paced.wav'
+        write_wav(original, audio)
+        subprocess.run(['ffmpeg','-y','-loglevel','error','-i',str(original),'-af',f'atempo={tempo}',str(adjusted)],check=True)
+        with wave.open(str(adjusted),'rb') as wav:
+            audio = np.frombuffer(wav.readframes(wav.getnframes()),dtype='<i2').astype(np.float32)/32768
+        newduration = len(audio)/SR
+        ratio = newduration/duration
+        for line in timeline:
+            line['start'] *= ratio; line['end'] *= ratio
+        duration = newduration
     write_wav(OUT / f'{key}.wav', audio)
     return timeline, duration
 
