@@ -11,7 +11,8 @@ import subprocess
 import wave
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont, features
+from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageFilter, features
+import base64, io
 
 ROOT = Path(__file__).parent
 OUT = Path(os.getenv('PUCHU_OUTPUT', 'puchu-output'))
@@ -171,61 +172,25 @@ def bird(d, x, y, scale, who, emotion, talking, t, facing=1):
         d.ellipse(box(-47,-98,-32,-83),fill='#8b79bb')
 
 def background(w,h,scene):
-    palette = scene.get('background','garden').lower()
-    sky = '#fee8d9' if palette == 'sunset' else '#d4e6ee' if palette == 'rain' else '#dff3ee'
-    im = Image.new('RGB',(w,h),sky); d = ImageDraw.Draw(im)
-    d.ellipse((w*.72,h*.08,w*.86,h*.08+w*.14),fill='#ffe5a1')
-    d.ellipse((-w*.25,h*.48,w*.85,h*1.3),fill='#c1d8b8')
-    d.ellipse((w*.2,h*.5,w*1.3,h*1.4),fill='#aec9a7')
-    # A consistent cozy treehouse set.
-    d.rounded_rectangle((w*.06,h*.22,w*.31,h*.59),radius=18,fill='#d9b597')
-    d.polygon([(w*.035,h*.24),(w*.185,h*.12),(w*.335,h*.24)],fill='#bb937e')
-    d.rounded_rectangle((w*.15,h*.3,w*.25,h*.43),radius=12,fill='#ffe5bb')
-    d.line((w*.20,h*.3,w*.20,h*.43),fill='#bb937e',width=5)
-    d.rounded_rectangle((w*.035,h*.69,w*.965,h*.735),radius=15,fill='#ad8b72')
-    for i in range(10):
-        xx=(i*.113+.035)*w; yy=h*(.76+(i%3)*.03)
-        d.line((xx,yy,xx,yy+h*.06),fill='#799978',width=3)
-        d.ellipse((xx-7,yy-7,xx+7,yy+7),fill=['#e8b9bd','#fff0c6','#baa8d3'][i%3])
+    atlas = Image.open(io.BytesIO(base64.b64decode((ROOT/'cartoon_atlas.b64').read_text()))).convert('RGB')
+    phase=scene.get('phase','setup')
+    idx={'setup':0,'conflict':1,'care':2,'reconcile':4,'payoff':5}.get(phase,0)
+    if phase=='care' and scene.get('prop') in ['blanket','umbrella']: idx=3
+    cw,ch=atlas.width//3,atlas.height//2
+    panel=atlas.crop(((idx%3)*cw,(idx//3)*ch,(idx%3+1)*cw,(idx//3+1)*ch))
+    im=ImageOps.fit(panel,(w,h)).filter(ImageFilter.GaussianBlur(24))
+    size=int(min(w,h)*.94)
+    art=panel.resize((size,size),Image.Resampling.LANCZOS)
+    im.paste(art,((w-size)//2,int(h*.16) if h>w else (h-size)//2))
     return im
 
 def frame(base, scene, line, t, title, thumbnail=False):
-    im=base.copy(); w,h=im.size; d=ImageDraw.Draw(im)
-    vertical=h>w; scale=w/(490 if vertical else 730)
-    phase=scene.get('phase','setup')
-    closeness= .14 if phase in ['reconcile','care','payoff'] else .20
-    movement=scene.get('movement','idle')
-    shift=math.sin(t*.6)*w*.025 if movement=='approach' else 0
-    yy=h*(.49 if vertical else .49)
-    bird(d,w*(.5-closeness)+shift,yy,scale,'puchu',line.get('emotion',''),line.get('speaker')=='puchu',t,1)
-    bird(d,w*(.5+closeness)-shift,yy,scale,'pihu',line.get('emotion',''),line.get('speaker')=='pihu',t,-1)
-    prop=scene.get('prop','heart')
-    x=w*.5; y=yy+scale*60
-    if prop=='flower':
-        d.line((x,y,x,y+scale*70),fill='#70a27e',width=max(2,int(scale*4)))
-        for i in range(5):
-            a=i*math.tau/5; xx=x+math.cos(a)*scale*17; yy2=y+math.sin(a)*scale*17
-            d.ellipse((xx-scale*15,yy2-scale*15,xx+scale*15,yy2+scale*15),fill='#efb3bd')
-        d.ellipse((x-scale*11,y-scale*11,x+scale*11,y+scale*11),fill='#ffe5a1')
-    elif prop in ['berry','food','tea']:
-        d.ellipse((x-scale*35,y+scale*20,x+scale*35,y+scale*35),fill='#f6e6cc')
-        if prop=='tea':
-            d.rounded_rectangle((x-scale*20,y-scale*5,x+scale*20,y+scale*25),radius=9,fill='#bea7d6')
-        else:
-            for dx in [-14,12,0]:
-                d.ellipse((x+(dx-10)*scale,y+(5-abs(dx))*scale,x+(dx+10)*scale,y+(25-abs(dx))*scale),fill='#cc8794')
-    elif prop=='umbrella':
-        d.pieslice((x-scale*120,y-scale*265,x+scale*120,y-scale*100),180,360,fill='#b7a0d6')
-        d.line((x,y-scale*183,x,y),fill='#8b798e',width=max(2,int(5*scale)))
-    elif prop=='blanket':
-        d.rounded_rectangle((w*.25,h*.6,w*.75,h*.7),radius=25,fill='#bca8d6')
-    if phase in ['care','reconcile','payoff'] or thumbnail:
-        for i in range(3):
-            heart(d,w*(.45+i*.05),h*.29+math.sin(t+i)*8,scale*(11+i*3),'#eaa6af')
-    if scene.get('background')=='rain':
-        for i in range(32):
-            rx=(i*117%w); ry=((i*81+t*110)%(h*.72))
-            d.line((rx,ry,rx-6,ry+18),fill='#a6bdce',width=2)
+    w,h=base.size
+    zoom=1.0+.018*(1+math.sin(t*.18))
+    enlarged=base.resize((round(w*zoom),round(h*zoom)),Image.Resampling.BICUBIC)
+    x=(enlarged.width-w)//2; y=(enlarged.height-h)//2
+    im=enlarged.crop((x,y,x+w,y+h)); d=ImageDraw.Draw(im)
+    vertical=h>w
     f=font(round(w*(.045 if vertical else .030)))
     small=font(round(w*.024))
     d.text((w*.045,h*.035),'पुचू और पिहू',font=small,fill='#596e68')
