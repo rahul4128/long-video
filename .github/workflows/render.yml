@@ -1,492 +1,119 @@
-name: Render Devotional Video (Long + Shorts)
-
+name: Puchu & Pihu - Manual Upload Package
 on:
-  repository_dispatch:
-    types: [trigger-render-long]
   workflow_dispatch:
     inputs:
       payload:
-        description: 'Make.com render payload JSON'
+        description: Complete story JSON from Primary Make
         required: true
         type: string
       pipeline:
-        description: 'Pipeline label'
-        required: false
-        default: 'office-make-clone'
+        description: Pipeline label
+        default: puchu-pihu-manual
         type: string
-      qc_verdict:
-        description: 'Agent QC verdict'
-        required: false
-        type: string
-      agent_critique:
-        description: 'Agent critique'
-        required: false
-        type: string
-      scout_note:
-        description: 'Live scout note'
-        required: false
-        type: string
-
+permissions:
+  contents: write
 concurrency:
   group: canva-token-rotation
   cancel-in-progress: false
-
 jobs:
-  # ---------------------------------------------------------------
-  # JOB 1: Generate all assets (images/video clips, narration audio,
-  # sound effects, thumbnail). Python-only - no Node.js needed here,
-  # so this job no longer wastes time installing Node/npm at all.
-  # ---------------------------------------------------------------
-  generate-assets:
+  render:
+    if: github.ref_name == 'puchu-pihu-manual'
     runs-on: ubuntu-latest
-    # Needed so the "Persist clip-usage history" step below can push
-    # used_clips_history.json back to the repo (see generate_assets.py's
-    # clip-usage-history section for why this file exists).
-    permissions:
-      contents: write
+    timeout-minutes: 60
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Static Python syntax check
-        run: python -m py_compile content_qc.py director.py generate_assets.py audio_engine.py qc.py scripts/canva_asset_bridge.py
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v7
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      # Caches the downloaded .deb files, keyed on the package list below.
-      # Only re-downloads from the network if you change the package list
-      # (i.e. edit the "key" or the packages themselves) - otherwise this
-      # step restores from cache and apt-get skips the network fetch.
-      - name: Install System Dependencies (ffmpeg)
+          cache: pip
+          cache-dependency-path: puchu_pihu/requirements.txt
+      - name: Install render and Hindi font dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg espeak-ng
-
-      - name: Install Python Dependencies
-        run: pip install -r requirements.txt
-
-      - name: Install Canva token rotation dependency
-        run: pip install pynacl
-
-      - name: Authenticate Canva and rotate refresh token
+          sudo apt-get install -y --no-install-recommends ffmpeg espeak-ng fonts-noto-core
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r puchu_pihu/requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: puchu-kokoro-hindi-v1
+      - name: Validate story before model loading
+        env:
+          DISPATCH_PAYLOAD: ${{ inputs.payload }}
+        run: python puchu_pihu/render.py --validate-only
+      - name: Narrate, animate both formats, and check measured duration
+        env:
+          DISPATCH_PAYLOAD: ${{ inputs.payload }}
+          HF_TOKEN: ${{ secrets.HUGGINGFACE_API_KEY }}
+          TOKENIZERS_PARALLELISM: 'false'
+        run: python puchu_pihu/render.py
+      - name: Optional Canva authentication
+        id: canva_auth
+        if: success()
+        continue-on-error: true
         env:
           CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
           CANVA_CLIENT_SECRET: ${{ secrets.CANVA_CLIENT_SECRET }}
           CANVA_REFRESH_TOKEN: ${{ secrets.CANVA_REFRESH_TOKEN }}
           REPO_SECRETS_TOKEN: ${{ secrets.REPO_SECRETS_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python scripts/refresh_canva_token.py
-
-      - name: Generate Unified Assets (4K B-Roll + FLUX.1 + Voiceover)
-        env:
-          DISPATCH_PAYLOAD: ${{ inputs.payload || toJson(github.event.client_payload) }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
-          COVERR_API_KEY: ${{ secrets.COVERR_API_KEY }}
-          HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
-          FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
-          CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
-          CANVA_ASSET_BRIDGE_ENABLED: 'true'
-        run: python generate_assets.py
-
-      - name: Preserve final thumbnails in Canva
-        env:
-          CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
-          CANVA_ASSET_BRIDGE_ENABLED: 'true'
-        run: python scripts/canva_asset_bridge.py
-
-      - name: Upload content QC report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: content-qc-${{ github.run_id }}
-          path: out/content_qc_report.json
-          if-no-files-found: ignore
-          retention-days: 7
-
-      # Commits used_clips_history.json (written by generate_assets.py's
-      # save_clip_history()) back to the repo, so a LATER run can see which
-      # stock clips this run used and avoid repeating them (this is what
-      # actually fixes "same clip in two videos" - the history has to
-      # survive between separate workflow runs, and each run gets a fresh
-      # ephemeral runner, so persisting it in the repo is the simplest place
-      # that's already writable via this job's GITHUB_TOKEN). Uses
-      # pull --rebase before pushing since another run could theoretically
-      # be committing at the same time; if the push still loses a race this
-      # step logs it and moves on rather than failing the whole render.
-      - name: Persist clip-usage history (avoid repeating recent clips)
-        if: always()
+        run: python puchu_pihu/refresh_canva_token.py
+      - name: Send completed assets to Canva for manual finishing
+        if: success()
+        continue-on-error: true
+        run: python puchu_pihu/canva_finish.py
+      - name: Build downloadable ZIP
+        if: success()
         run: |
-          if [ ! -f used_clips_history.json ]; then
-            echo "No used_clips_history.json produced (no stock clips fetched this run) - nothing to commit."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add used_clips_history.json
-          if git diff --cached --quiet; then
-            echo "No change to used_clips_history.json - nothing to commit."
-            exit 0
-          fi
-          git commit -m "Update clip-usage history (run ${{ github.run_id }})"
-          for attempt in 1 2 3; do
-            if git pull --rebase --autostash origin "${{ github.ref_name }}" && git push origin HEAD:"${{ github.ref_name }}"; then
-              echo "Pushed clip-usage history update."
-              exit 0
-            fi
-            echo "Push attempt $attempt failed, retrying..."
-            sleep 5
-          done
-          echo "::warning::Could not push used_clips_history.json after 3 attempts (non-fatal - dedup just won't see this run's clips next time)."
-
-      # Hand the generated files off to the two render jobs below. Short
-      # retention since this is only needed for the rest of this one run.
-      - name: Upload generated assets
-        uses: actions/upload-artifact@v7
+          python - <<'PY'
+          import zipfile
+          from pathlib import Path
+          root = Path('puchu-output')
+          with zipfile.ZipFile(root / 'manual-upload-package.zip', 'w', zipfile.ZIP_DEFLATED) as z:
+              for p in root.iterdir():
+                  if p.is_file() and p.suffix in {'.mp4', '.jpg', '.srt', '.json', '.md'}:
+                      z.write(p, p.name)
+          PY
+      - name: Upload finished package
+        if: success()
+        uses: actions/upload-artifact@v4
         with:
-          name: generated-assets-${{ github.run_id }}
+          name: puchu-pihu-manual-${{ github.run_id }}
+          path: puchu-output/manual-upload-package.zip
+          retention-days: 30
+          if-no-files-found: error
+      - name: Upload diagnostic reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: puchu-pihu-qc-${{ github.run_id }}
           path: |
-            public/images
-            public/audio
-            public/props.json
-            public/props_shorts.json
-            public/thumbnail_props.json
-            public/thumbnail_props_shorts.json
-            out/thumbnail.jpg
-            out/thumbnail_shorts.jpg
-            out/metadata.json
-            out/content_qc_report.json
-            out/canva_assets.json
-          retention-days: 1
-
-  # ---------------------------------------------------------------
-  # JOB 2 & JOB 3: Render the long video and the shorts video.
-  # Both only depend on generate-assets, NOT on each other, so GitHub
-  # runs them on two separate runners AT THE SAME TIME instead of one
-  # after another - this is the main speed win for render time.
-  # ---------------------------------------------------------------
-  render-long:
-    needs: generate-assets
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-
-      # Skips "npm install" completely on a cache hit - only reinstalls
-      # when package.json / package-lock.json actually change.
-      - name: Install Node.js Dependencies
-        run: npm install
-
-      - name: Install System Dependencies (ffmpeg + fonts)
+            puchu-output/*qc.json
+            puchu-output/*ffmpeg.log
+          retention-days: 7
+      - name: Keep successful episode history on this branch
+        if: success()
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-core fonts-deva
-
-      - name: Download generated assets
-        uses: actions/download-artifact@v7
-        with:
-          name: generated-assets-${{ github.run_id }}
-
-      - name: Render Long Video with Remotion
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = json.loads(Path('puchu-output/story.json').read_text())
+          h = Path('puchu_pihu/episodes_history.txt')
+          rows = h.read_text().splitlines()
+          record = json.dumps({k: p[k] for k in ['episode_id','title','summary','emotion_theme']}, ensure_ascii=False)
+          if record not in rows:
+              h.write_text('\n'.join((rows + [record])[-60:]) + '\n')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add puchu_pihu/episodes_history.txt
+          if ! git diff --cached --quiet; then
+            git commit -m 'Record completed Puchu Pihu episode'
+            git push origin HEAD:puchu-pihu-manual
+          fi
+      - name: Download instructions
+        if: success()
         run: |
-          npx remotion render DevotionalComposition out/final_video.mp4 --props=public/props.json --concurrency=$(nproc)
-
-      - name: Upload Video Artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: devotional-video-${{ github.run_id }}
-          path: out/final_video.mp4
-          retention-days: 14
-
-  render-shorts:
-    needs: generate-assets
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-
-      - name: Install Node.js Dependencies
-        run: npm install
-
-      - name: Install System Dependencies (ffmpeg + fonts)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-core fonts-deva
-
-      - name: Download generated assets
-        uses: actions/download-artifact@v7
-        with:
-          name: generated-assets-${{ github.run_id }}
-
-      - name: Render Shorts Video with Remotion
-        run: |
-          npx remotion render DevotionalShortsComposition out/final_video_shorts.mp4 --props=public/props_shorts.json --concurrency=$(nproc)
-
-      - name: Upload Shorts Video Artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: devotional-shorts-${{ github.run_id }}
-          path: out/final_video_shorts.mp4
-          retention-days: 14
-
-  # ---------------------------------------------------------------
-  # JOB 4: Render the final thumbnail - the plain AI background image
-  # (already produced by generate-assets) with a bold Hindi hook-text
-  # overlay, rendered through Remotion/Chromium via `npx remotion still`
-  # so Devanagari script shapes correctly (this is the same rendering
-  # pipeline that already renders Subtitles.tsx's captions correctly -
-  # a plain image-editing text overlay risks garbled conjuncts/matras).
-  # Only depends on generate-assets, so it runs in parallel with the two
-  # video render jobs above rather than adding to the critical path.
-  # ---------------------------------------------------------------
-  render-thumbnail:
-    needs: generate-assets
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-
-      - name: Install Node.js Dependencies
-        run: npm install
-
-      - name: Install System Dependencies (ffmpeg + fonts)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-core fonts-deva
-
-      - name: Download generated assets
-        uses: actions/download-artifact@v7
-        with:
-          name: generated-assets-${{ github.run_id }}
-
-      - name: Render Thumbnail (background image + bold Hindi hook-text overlay)
-        run: |
-          npx remotion still ThumbnailComposition out/thumbnail.jpg --props=public/thumbnail_props.json
-
-      - name: Upload Thumbnail Artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: devotional-thumbnail-${{ github.run_id }}
-          path: out/thumbnail.jpg
-          retention-days: 1
-
-  # ---------------------------------------------------------------
-  # JOB 4b: Same idea as JOB 4, but for the Shorts-specific 9:16
-  # thumbnail (its own background image + hook text - see
-  # ShortsThumbnailComposition.tsx / generate_assets.py's
-  # `shorts_thumbnail` handling). Previously Shorts had no dedicated
-  # thumbnail render at all. Runs in parallel with everything else.
-  # ---------------------------------------------------------------
-  render-thumbnail-shorts:
-    needs: generate-assets
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '24'
-
-      - name: Install Node.js Dependencies
-        run: npm install
-
-      - name: Install System Dependencies (ffmpeg + fonts)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-core fonts-deva
-
-      - name: Download generated assets
-        uses: actions/download-artifact@v7
-        with:
-          name: generated-assets-${{ github.run_id }}
-
-      - name: Render Shorts Thumbnail (background image + bold Hindi hook-text overlay)
-        run: |
-          npx remotion still ShortsThumbnailComposition out/thumbnail_shorts_final.jpg --props=public/thumbnail_props_shorts.json
-
-      - name: Upload Shorts Thumbnail Artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: devotional-thumbnail-shorts-${{ github.run_id }}
-          path: out/thumbnail_shorts_final.jpg
-          retention-days: 1
-
-  # ---------------------------------------------------------------
-  # JOB 4c: Automated media QC. Verifies final videos, thumbnails and every
-  # generated narration/effect file with ffprobe before publishing.
-  # ---------------------------------------------------------------
-  media-qc:
-    needs: [generate-assets, render-long, render-shorts, render-thumbnail, render-thumbnail-shorts]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-      - name: Install ffmpeg
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg
-      - name: Download generated assets
-        uses: actions/download-artifact@v7
-        with:
-          name: generated-assets-${{ github.run_id }}
-      - name: Download long video
-        uses: actions/download-artifact@v7
-        with:
-          name: devotional-video-${{ github.run_id }}
-          path: out
-      - name: Download shorts video
-        uses: actions/download-artifact@v7
-        with:
-          name: devotional-shorts-${{ github.run_id }}
-          path: out
-      - name: Download long thumbnail
-        uses: actions/download-artifact@v7
-        with:
-          name: devotional-thumbnail-${{ github.run_id }}
-          path: out
-      - name: Download shorts thumbnail
-        uses: actions/download-artifact@v7
-        with:
-          name: devotional-thumbnail-shorts-${{ github.run_id }}
-          path: out
-      - name: Run automated media QC
-        run: python qc.py
-      - name: Upload QC report
-        uses: actions/upload-artifact@v7
-        with:
-          name: media-qc-${{ github.run_id }}
-          path: out/qc_report.json
-          retention-days: 14
-
-  # ---------------------------------------------------------------
-  # JOB 5: Once both video renders and both thumbnail renders are done,
-  # publish a GitHub Release carrying the long video, the shorts video
-  # and both text-overlaid thumbnails as public, no-auth-required
-  # download links, then notify the Make.com scenario (one webhook
-  # call, handles both videos) so it uploads both to YouTube with
-  # title/description/thumbnail and files each into its playlist.
-  # ---------------------------------------------------------------
-  publish-and-notify:
-    needs: [generate-assets, render-long, render-shorts, render-thumbnail, render-thumbnail-shorts, media-qc]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Download generated assets (metadata)
-        uses: actions/download-artifact@v7
-        with:
-          name: generated-assets-${{ github.run_id }}
-          path: assets
-
-      - name: Download long video
-        uses: actions/download-artifact@v7
-        with:
-          name: devotional-video-${{ github.run_id }}
-          path: video
-
-      - name: Download shorts video
-        uses: actions/download-artifact@v7
-        with:
-          name: devotional-shorts-${{ github.run_id }}
-          path: shorts
-
-      - name: Download rendered thumbnail (with hook-text overlay)
-        uses: actions/download-artifact@v7
-        with:
-          name: devotional-thumbnail-${{ github.run_id }}
-          path: thumbnail_final
-
-      - name: Download rendered Shorts thumbnail (with hook-text overlay)
-        uses: actions/download-artifact@v7
-        with:
-          name: devotional-thumbnail-shorts-${{ github.run_id }}
-          path: thumbnail_shorts_final
-
-      - name: Create GitHub Release with video + thumbnail assets
-        id: release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -e
-          TAG="devotional-${{ github.run_id }}"
-          gh release create "$TAG" \
-            "video/final_video.mp4" \
-            "shorts/final_video_shorts.mp4" \
-            "thumbnail_final/thumbnail.jpg" \
-            "thumbnail_shorts_final/thumbnail_shorts_final.jpg" \
-            --repo "${{ github.repository }}" \
-            --title "Devotional upload $TAG" \
-            --notes "Automated release - source assets for the Make.com YouTube upload webhook."
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Look up public download URLs for the release assets
-        id: assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -e
-          TAG="${{ steps.release.outputs.tag }}"
-          JSON=$(gh api "repos/${{ github.repository }}/releases/tags/$TAG")
-          echo "long_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="final_video.mp4") | .browser_download_url')" >> "$GITHUB_OUTPUT"
-          echo "shorts_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="final_video_shorts.mp4") | .browser_download_url')" >> "$GITHUB_OUTPUT"
-          echo "thumb_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="thumbnail.jpg") | .browser_download_url')" >> "$GITHUB_OUTPUT"
-          echo "shorts_thumb_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="thumbnail_shorts_final.jpg") | .browser_download_url')" >> "$GITHUB_OUTPUT"
-
-      - name: Notify Make.com (uploads long video + Shorts to YouTube)
-        env:
-          MAKE_WEBHOOK_URL: ${{ secrets.MAKE_YOUTUBE_WEBHOOK_URL }}
-        run: |
-          set -e
-          jq -n \
-            --arg releaseTag "${{ steps.release.outputs.tag }}" \
-            --arg longUrl "${{ steps.assets.outputs.long_url }}" \
-            --arg shortsUrl "${{ steps.assets.outputs.shorts_url }}" \
-            --arg thumbUrl "${{ steps.assets.outputs.thumb_url }}" \
-            --arg shortsThumbUrl "${{ steps.assets.outputs.shorts_thumb_url }}" \
-            --slurpfile meta "assets/out/metadata.json" \
-            '{
-              releaseTag: $releaseTag,
-              long_video: {
-                downloadUrl: $longUrl,
-                title: $meta[0].long_video_title,
-                description: $meta[0].long_video_description,
-                tags: $meta[0].tags
-              },
-              shorts: {
-                downloadUrl: $shortsUrl,
-                title: $meta[0].shorts_title,
-                description: $meta[0].shorts_description,
-                tags: $meta[0].hashtags,
-                thumbnailUrl: $shortsThumbUrl
-              },
-              thumbnail: {
-                downloadUrl: $thumbUrl
-              }
-            }' > payload.json
-          curl -sS -f -X POST -H "Content-Type: application/json" \
-            --data @payload.json "$MAKE_WEBHOOK_URL"
+          echo '## Your manual upload package is ready' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Download the puchu-pihu-manual artifact below. Unzip to get long_story.mp4, short_reel.mp4, one thumbnail, Hindi subtitles, and upload copy. Nothing is sent to YouTube or Instagram.' >> "$GITHUB_STEP_SUMMARY"
+          cat puchu-output/canva_notes.md >> "$GITHUB_STEP_SUMMARY"
