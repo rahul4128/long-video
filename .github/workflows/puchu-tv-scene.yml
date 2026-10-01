@@ -1,0 +1,43 @@
+name: Puchu Pihu 2D Rig Scene Prototype
+on:
+  push:
+    branches: [puchu-pihu-tv-animation-test]
+    paths: [.github/workflows/puchu-tv-scene.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: puchu_pihu/requirements.txt
+      - name: Install renderer and Hindi voice
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg espeak-ng
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r puchu_pihu/requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: puchu-kokoro-hindi-v1
+      - name: Render character dialogue and articulated scene
+        env:
+          HF_TOKEN: ${{ secrets.HUGGINGFACE_API_KEY }}
+          TOKENIZERS_PARALLELISM: 'false'
+        run: python tv_cartoon_test/scene.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Puchu-Pihu-2D-rig-scene
+          path: |
+            tv_cartoon_test/output/Puchu_Pihu_2D_scene.mp4
+            tv_cartoon_test/output/scene_qc.json
+            tv_cartoon_test/output/scene_timeline.json
+            tv_cartoon_test/output/contact_sheet.jpg
+          retention-days: 30
