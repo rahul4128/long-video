@@ -1,4 +1,4 @@
-"""CPU-only lovebird animation. No social publishing. Fail closed on weak scripts/audio."""
+"""CPU-only AI sprite character animation. No social publishing. Fail closed on weak scripts/audio."""
 import argparse
 import bisect
 import hashlib
@@ -13,10 +13,12 @@ import wave
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageFilter, features
 import base64, io
+from functools import lru_cache
+import motion
 
 ROOT = Path(__file__).parent
 OUT = Path(os.getenv('PUCHU_OUTPUT', 'puchu-output'))
-FPS = 15
+FPS = 24
 SR = 24000
 VOICE = {'puchu': 'hm_omega', 'pihu': 'hf_alpha', 'narrator': 'hf_beta'}
 
@@ -123,6 +125,7 @@ def audio_timeline(p, key, pipeline):
     write_wav(OUT / f'{key}.wav', audio)
     return timeline, duration
 
+@lru_cache(maxsize=12)
 def font(size):
     paths = ['/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf',
              '/usr/share/fonts/opentype/noto/NotoSansDevanagari-Regular.ttf']
@@ -187,25 +190,11 @@ def bird(d, x, y, scale, who, emotion, talking, t, facing=1):
         d.ellipse(box(-47,-98,-32,-83),fill='#8b79bb')
 
 def background(w,h,scene):
-    atlas = Image.open(io.BytesIO(base64.b64decode((ROOT/'cartoon_atlas.b64').read_text()))).convert('RGB')
-    phase=scene.get('phase','setup')
-    idx={'setup':0,'conflict':1,'care':2,'reconcile':4,'payoff':5}.get(phase,0)
-    if phase=='care' and scene.get('prop') in ['blanket','umbrella']: idx=3
-    cw,ch=atlas.width//3,atlas.height//2
-    panel=atlas.crop(((idx%3)*cw,(idx//3)*ch,(idx%3+1)*cw,(idx//3+1)*ch))
-    im=ImageOps.fit(panel,(w,h)).filter(ImageFilter.GaussianBlur(24))
-    size=int(min(w,h)*.94)
-    art=panel.resize((size,size),Image.Resampling.LANCZOS)
-    im.paste(art,((w-size)//2,int(h*.16) if h>w else (h-size)//2))
-    return im
+    return motion.background(w,h,scene)
 
 def frame(base, scene, line, t, title, thumbnail=False):
-    w,h=base.size
-    zoom=1.0+.018*(1+math.sin(t*.18))
-    enlarged=base.resize((round(w*zoom),round(h*zoom)),Image.Resampling.BICUBIC)
-    x=(enlarged.width-w)//2; y=(enlarged.height-h)//2
-    im=enlarged.crop((x,y,x+w,y+h)); d=ImageDraw.Draw(im)
-    vertical=h>w
+    im=motion.animate(base,scene,line,t,thumbnail)
+    w,h=im.size; d=ImageDraw.Draw(im); vertical=h>w
     f=font(round(w*(.045 if vertical else .030)))
     small=font(round(w*.024))
     d.text((w*.045,h*.035),'पुचू और पिहू',font=small,fill='#596e68')
@@ -234,6 +223,15 @@ def render_video(p,key,timeline,duration,preview=False):
     if preview: w,h=(640,360) if key=='long_video' else (360,640)
     scenes=p[key]['scenes']; backgrounds=[background(w,h,s) for s in scenes]
     starts=[x['start'] for x in timeline]
+    scene_starts={}
+    for entry in timeline: scene_starts.setdefault(entry['scene'],entry['start'])
+    with wave.open(str(OUT/f'{key}.wav'),'rb') as wav:
+        speech=np.frombuffer(wav.readframes(wav.getnframes()),dtype='<i2').astype(np.float32)/32768
+    energies=[]
+    for n in range(math.ceil(duration*FPS)):
+        samples=speech[int(n*SR/FPS):int((n+1)*SR/FPS)]
+        energies.append(float(np.sqrt(np.mean(samples*samples))) if len(samples) else 0)
+    reference=max(.01,float(np.percentile(energies,85)))
     output=OUT/('long_story.mp4' if key=='long_video' else 'short_reel.mp4')
     pages=[caption_pages(x['text'],w,h>w) for x in timeline]
     srt=[]; subnum=1
@@ -253,6 +251,8 @@ def render_video(p,key,timeline,duration,preview=False):
             chunks=pages[i]; progress=(t-line['start'])/max(.01,line['end']-line['start'])
             line['text']=chunks[min(len(chunks)-1,int(max(0,progress)*len(chunks)))]
             si=line['scene']
+            line['scene_t']=t-scene_starts[si]
+            line['mouth']=min(1,energies[n]/reference)
             proc.stdin.write(frame(backgrounds[si],scenes[si],line,t,p['title']).tobytes())
         proc.stdin.close()
         if proc.wait()!=0: raise RuntimeError(f'ffmpeg failed: {key}')
@@ -288,7 +288,7 @@ def main():
           p['thumbnail']['thumbnailText'],True).save(OUT/'thumbnail.jpg',quality=95)
     (OUT/'story.json').write_text(json.dumps(p,ensure_ascii=False,indent=2))
     (OUT/'metadata.json').write_text(json.dumps(p['seo_metadata'],ensure_ascii=False,indent=2))
-    (OUT/'media_qc.json').write_text(json.dumps({'passed':True,'outputs':outputs},indent=2))
+    (OUT/'media_qc.json').write_text(json.dumps({'passed':True,'outputs':outputs,'animation':'AI sprite poses: walking, blinking, gestures, voice-reactive mouths; not phoneme lip sync','fps':FPS},indent=2))
     meta=p['seo_metadata']
     pack=f"# Puchu & Pihu — manual upload package\n\n## YouTube long\n{meta['long_video_title']}\n\n{meta['long_video_description']}\n\n## YouTube Short\n{meta['shorts_title']}\n\n{meta['shorts_description']}\n\n## Instagram Reel\n{meta['instagram_caption']}\n\n## Tags\n{', '.join(meta.get('tags',[]))}\n\n## Hashtags\n{' '.join(meta.get('hashtags',[]))}\n\nFiles: long_story.mp4, short_reel.mp4, thumbnail.jpg, and two SRT files. Review both videos before publishing. Captions use phrase-level estimated timing.\n"
     (OUT/'upload_pack.md').write_text(pack,encoding='utf-8')
