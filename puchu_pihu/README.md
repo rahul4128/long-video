@@ -1,17 +1,7 @@
-# Puchu & Pihu — manual upload workflow
+# Puchu & Pihu daily cartoon stories
 
-Primary Make scenario 7709916 fetches episode history, generates a Hindi story package with Gemini, parses JSON, and dispatches the existing render.yml workflow with ref=puchu-pihu-manual. All implementation changes live on that separate branch.
+Primary Make scenario 7709916 runs daily at 07:00 Asia/Kolkata. Gemini writes an original Hindi long story and a complete Short using episode history. GitHub Actions generates Hindi voices, subtitles, 1280x720 and 1080x1920 videos, a thumbnail and upload metadata. Canva finishing and a downloadable manual upload package follow. No social publishing is performed.
 
-The renderer uses original procedural 2D lovebirds, expressive eyes, beak movement during dialogue, wing movement, bobbing, props and backgrounds. This is simple limited animation, not generative cinematic video or phoneme-accurate lip sync. Character appearance stays fixed. Scene counts vary with the script.
+The fixed human cartoon characters are Puchu (blue hoodie) and Pihu (pink dress, twin ponytails). Six reusable AI-generated 3D-style illustrations are stored in cartoon_atlas.b64; the renderer composes them with gentle camera zooms. This is illustrated video, not full 3D character motion or lip synchronization. Daily episodes reuse these artwork scenes and must match their actions.
 
-Kokoro provides three Hindi voices locally on the GitHub CPU runner. Output duration follows measured audio, never the model's declared duration. Content QC rejects Romanized Hindi, short scripts, missing speaker IDs and duplicate lines. Media QC checks actual duration, dimensions and audio streams. A failed QC does not produce a finished package.
-
-Download the puchu-pihu-manual artifact from the completed GitHub Actions run. It contains a ZIP with long_story.mp4 (1280×720), short_reel.mp4 (1080×1920), one shared thumbnail.jpg, two Hindi SRT files, story.json, metadata.json, upload_pack.md and QC reports. The Short is also the Instagram Reel. Nothing uploads to social media.
-
-The optional Canva step uses existing CANVA_CLIENT_ID, CANVA_CLIENT_SECRET, CANVA_REFRESH_TOKEN and REPO_SECRETS_TOKEN repository secrets. Refresh token rotation is serialized with the existing canva-token-rotation concurrency group. The new rotated token is persisted through the established secret rotation script. If Canva authentication or upload fails, downloadable files remain available and can be imported manually. It uploads the two finished videos and creates one editable shared-thumbnail design; Canva does not generate daily cinematic character animation in this workflow.
-
-Completed episode summaries are kept in episodes_history.txt on this branch, capped at the latest 60. This avoids the Make data-store organization-context failure. Daily Make activation should happen after a complete end-to-end render passes.
-
-Review both videos, voice pronunciation, caption placement, character actions and thumbnail crop before manual publishing. Inspect available Make/Gemini/GitHub quotas; the workflow uses the services' existing allowances and cannot guarantee unlimited free operation.
-
-Current validation: Python compilation, workflow YAML parsing, malformed payload rejection and both landscape/vertical encoder smoke tests passed. Gemini 2.5 Flash generation and JSON parsing passed in the isolated prototype. Full production narration, Hindi font output, Canva upload and Actions artifacts await the Primary Make GitHub credential authorization; first full test failed at history fetch with HTTP 401. Final daily scenario is inactive pending that test.
+The main and office workflows are separate. This workflow lives on branch puchu-pihu-manual. Previous flat-art production passed content/media checks; the cartoon upgrade must be checked in its own workflow run.
