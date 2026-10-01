@@ -5,8 +5,21 @@ import math
 from functools import lru_cache
 from pathlib import Path
 from PIL import Image, ImageOps, ImageDraw
+import numpy as np
 
 ROOT = Path(__file__).parent
+
+def validate_assets():
+    checks = {}
+    for character in ['puchu','pihu']:
+        for name,a,b in [('blink',0,1),('speech_gesture',2,3),('walk_steps',4,5),('sulking',0,6)]:
+            first=np.asarray(sprite(character,a,256)).astype('int16')
+            second=np.asarray(sprite(character,b,256)).astype('int16')
+            checks[f'{character}_{name}']=bool(np.mean(np.max(np.abs(first-second),axis=2)>25)>.005)
+    alpha=np.asarray(atlas('motion_characters.b64'))[:,:,3]
+    checks['transparent_characters']=bool(np.mean(alpha==0)>.15 and np.mean(alpha>240)>.15)
+    if not all(checks.values()): raise RuntimeError(f'Character motion asset QC rejected: {checks}')
+    return {'passed':True,'checks':checks,'animation':'sprite poses and voice-reactive mouth movement','exact_phoneme_lip_sync':False}
 
 @lru_cache(maxsize=4)
 def atlas(name):
