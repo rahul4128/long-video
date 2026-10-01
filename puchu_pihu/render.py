@@ -71,17 +71,18 @@ def write_wav(path, samples):
 
 def audio_timeline(p, key, pipeline):
     timeline, parts, now = [], [], 0.
+    speed = .92 if key == 'long_video' else 1.02
     cache = OUT / 'audio-cache'; cache.mkdir(parents=True, exist_ok=True)
     for index, scene in enumerate(p[key]['scenes']):
         for line in spoken(scene):
             text = line['text'].strip(); speaker = line['speaker']
-            digest = hashlib.sha256((speaker + text).encode()).hexdigest()
+            digest = hashlib.sha256((speaker + str(speed) + text).encode()).hexdigest()
             path = cache / f'{digest}.npy'
             if path.exists():
                 audio = np.load(path)
             else:
                 chunks = []
-                for result in pipeline(text, voice=VOICE[speaker], speed=1.02):
+                for result in pipeline(text, voice=VOICE[speaker], speed=speed):
                     a = result.audio if hasattr(result, 'audio') else result[2]
                     if a is not None:
                         chunks.append(a.detach().cpu().numpy() if hasattr(a, 'detach') else np.asarray(a))
