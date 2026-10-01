@@ -34,7 +34,7 @@ def validate(p):
     errors = []
     if {c.get('id') for c in p.get('characters', [])} != {'puchu', 'pihu'}:
         errors.append('Exactly puchu and pihu character IDs are required')
-    for key, limits in [('long_video', (400, 900)), ('shorts', (70, 120))]:
+    for key, limits in [('long_video', (400, 1200)), ('shorts', (70, 120))]:
         scenes = p.get(key, {}).get('scenes', [])
         texts = []
         if not scenes:
@@ -105,7 +105,7 @@ def audio_timeline(p, key, pipeline):
     limits = (180, 300) if key == 'long_video' else (30, 60)
     duration = len(audio) / SR
     if not limits[0] <= duration <= limits[1]:
-        target = 210 if key == 'long_video' else 45
+        target = (285 if duration > 300 else 190) if key == 'long_video' else (55 if duration > 60 else 35)
         tempo = duration / target
         if not .7 <= tempo <= 1.4:
             raise RuntimeError(f'{key}: speech too far outside duration bounds for natural pacing')
