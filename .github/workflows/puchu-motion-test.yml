@@ -1,0 +1,55 @@
+name: Puchu Pihu Motion Integration Test
+on:
+  push:
+    branches: [puchu-pihu-manual]
+    paths: [.github/workflows/puchu-motion-test.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  motion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: puchu_pihu/requirements.txt
+      - name: Install animation and Hindi voice dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg espeak-ng fonts-noto-core
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r puchu_pihu/requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: puchu-kokoro-hindi-v1
+      - name: Check story and motion assets
+        run: |
+          python puchu_pihu/render.py --validate-only
+          PYTHONPATH=puchu_pihu python -c "import motion; print(motion.validate_assets())"
+      - name: Render full Hindi long and Short with character motion
+        env:
+          HF_TOKEN: ${{ secrets.HUGGINGFACE_API_KEY }}
+          TOKENIZERS_PARALLELISM: 'false'
+        run: python puchu_pihu/render.py
+      - name: Package motion videos
+        run: |
+          cd puchu-output
+          zip -j ../Puchu_Pihu_animated_package.zip *.mp4 *.jpg *.srt *.json *.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Puchu-Pihu-animated-videos
+          path: Puchu_Pihu_animated_package.zip
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Puchu-Pihu-motion-QC
+          path: |
+            puchu-output/*qc.json
+            puchu-output/*ffmpeg.log
+          retention-days: 7
