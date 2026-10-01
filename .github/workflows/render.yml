@@ -94,6 +94,8 @@ jobs:
       - name: Keep successful episode history on this branch
         if: success()
         run: |
+          git fetch origin puchu-pihu-manual
+          git checkout -B puchu-pihu-manual origin/puchu-pihu-manual
           python - <<'PY'
           import json
           from pathlib import Path
