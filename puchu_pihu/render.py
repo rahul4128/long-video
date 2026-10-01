@@ -277,6 +277,7 @@ def main():
     if errors: raise RuntimeError('Content QC rejected: '+'; '.join(errors))
     if args.validate_only: print('Content QC passed'); return
     if not features.check('raqm'): raise RuntimeError('Pillow must include RAQM for Hindi captions')
+    (OUT/'motion_qc.json').write_text(json.dumps(motion.validate_assets(),indent=2))
     from kokoro import KPipeline
     import torch
     torch.set_num_threads(2)
