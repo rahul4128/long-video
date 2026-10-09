@@ -1710,10 +1710,10 @@ def _visual_beat_queries(beat: dict, fallback_query: str = "") -> list:
     """
     configured_limit = int(os.getenv("VISUAL_BEAT_MAX_QUERIES", "3") or 3)
     limit = max(1, min(4, configured_limit))
-    fallback = re.sub(r"\\s+", " ", str(fallback_query or "")).strip()
+    fallback = re.sub(r"\s+", " ", str(fallback_query or "")).strip()
     specific = []
     for raw in (beat.get("queries") or []):
-        query = re.sub(r"\\s+", " ", str(raw or "")).strip()
+        query = re.sub(r"\s+", " ", str(raw or "")).strip()
         if not query or is_generic_stock_query(query):
             continue
         if query.casefold() not in {q.casefold() for q in specific}:
@@ -1723,7 +1723,7 @@ def _visual_beat_queries(beat: dict, fallback_query: str = "") -> list:
     # are vague ('person looking') or contain only broad generic subjects.
     # Limit of 1-4 queries does not silently drop the useful scene context.
     vague_beat_queries = not specific or all(
-        re.search(r"\\b(person|hands|dancer)\\b", q, flags=re.IGNORECASE)
+        re.search(r"\b(person|hands|dancer)\b", q, flags=re.IGNORECASE)
         and len(q.split()) <= 4
         for q in specific
     )
