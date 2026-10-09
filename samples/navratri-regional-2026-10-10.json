@@ -1,0 +1,216 @@
+{
+  "long_video": {
+    "scenes": [
+      {
+        "scene_number": 1,
+        "text": "गुजरात में नृत्य का गोल घेरा। बंगाल में कला से सजा पंडाल। तमिलनाडु के घर में गुड़ियों की सीढ़ियाँ। तीन नज़ारे इतने अलग, तो त्योहार का रिश्ता कहाँ है? शरद नवरात्रि के आसपास इन उत्सवों में स्थानीय कला, लोगों का साथ और देवी के प्रति श्रद्धा दिखाई देती है। चलिए, इस फर्क को करीब से देखते हैं।",
+        "mediaType": "video",
+        "imagePrompt": "Navratri regional celebrations Gujarat garba circle, Bengali Durga Puja pandal and Tamil Nadu stepped Golu doll display; three clearly separated views, accurate regional contexts; documentary illustration, 16:9, no text, no logos, no claimed real event",
+        "videoSearchQuery": "Gujarat Navratri garba dance",
+        "soundEffect": "none",
+        "visualStrict": true,
+        "visualEntities": [
+          "Gujarat garba",
+          "West Bengal Durga Puja pandal",
+          "Tamil Nadu Golu stepped doll display"
+        ]
+      },
+      {
+        "scene_number": 2,
+        "text": "पहला पड़ाव गुजरात। गरबा में लोग तालियाँ बजाते हुए घेरे में कदम मिलाते हैं। यहाँ भक्ति केवल शांत बैठने से व्यक्त नहीं होती; संगीत और सामूहिक नृत्य भी उसका रूप बनते हैं। गरबा देवी की शक्ति से जुड़ा नवरात्रि का नृत्य है। रंगीन कपड़े दृश्य को खूबसूरत बनाते हैं, लेकिन असली आकर्षण है साथ चलती लय। दर्शक भी उसी ऊर्जा को महसूस करता है। अब कल्पना कीजिए, इसी उत्सव के समय अगली जगह नृत्य का घेरा नहीं, एक विशाल कलात्मक मंडप आपका इंतज़ार कर रहा हो।",
+        "mediaType": "video",
+        "imagePrompt": "Gujarat Navratri adults performing authentic circular garba clapping dance in chaniya choli and kediyu festive attire, central lit lamp vessel; documentary illustration, 16:9, no text, no logos, no claimed real event",
+        "videoSearchQuery": "Gujarat garba circle Navratri",
+        "soundEffect": "none",
+        "visualStrict": true,
+        "visualEntities": [
+          "Gujarat garba"
+        ]
+      },
+      {
+        "scene_number": 3,
+        "text": "बंगाल में दुर्गा पूजा का पंडाल उस मंडप को अलग पहचान देता है। वहाँ देवी की प्रतिमा के साथ सजावट, शिल्प और लोगों का जुटना उत्सव का हिस्सा है। एक कलाकार मिट्टी को आकार देता है, दूसरा रंग और सजावट से वातावरण बनाता है। आप केवल एक तस्वीर देखकर आगे नहीं बढ़ते; उस रचना को करीब से देखते हैं। यही कारण है कि यहाँ कला और श्रद्धा साथ दिखाई देती हैं। लेकिन तीसरा पड़ाव इस भव्य सार्वजनिक दृश्य से अलग है। वहाँ कहानी देखने के लिए किसी बड़े पंडाल में जाना भी जरूरी नहीं।",
+        "mediaType": "video",
+        "imagePrompt": "West Bengal Durga Puja artisan pavilion decorations and clay Durga idol craftsmanship, respectful accurate regional iconography; documentary illustration, 16:9, no text, no logos, no claimed real event",
+        "videoSearchQuery": "Kolkata Durga Puja pandal",
+        "soundEffect": "none",
+        "visualStrict": true,
+        "visualEntities": [
+          "West Bengal Durga Puja pandal"
+        ]
+      },
+      {
+        "scene_number": 4,
+        "text": "तमिलनाडु में नवरात्रि की गोलू परंपरा में घरों में गुड़ियों और छोटी आकृतियों की सजावट देखने को मिलती है। सीढ़ीनुमा प्रदर्शन में पौराणिक कहानियाँ और अलग विषय दिखाए जा सकते हैं। यहाँ ध्यान दीजिए, छोटी आकृतियाँ भी पूरी कहानी सामने रख सकती हैं। मिलने आने वाले लोगों के लिए यह सजावट बातचीत का कारण बनती है। गुजरात का उत्सव शरीर की लय से दिखा, बंगाल का बड़े कलात्मक मंडप से, और यहाँ छोटे दृश्यों से। हर घर की सजावट एक जैसी हो, ऐसा कोई नियम नहीं।",
+        "mediaType": "video",
+        "imagePrompt": "Tamil Nadu Navarathri Golu stepped display of miniature dolls at home, mythological figurine tableaux and visitors; documentary illustration, 16:9, no text, no logos, no claimed real event",
+        "videoSearchQuery": "Tamil Nadu Navaratri Golu dolls",
+        "soundEffect": "none",
+        "visualStrict": true,
+        "visualEntities": [
+          "Golu stepped doll display"
+        ]
+      },
+      {
+        "scene_number": 5,
+        "text": "तो क्या तीनों उत्सवों का अर्थ बिल्कुल एक है? स्थानीय परंपराएँ और पूजा की विधियाँ अलग हैं। उन्हें एक जैसा बताना इन फर्कों को मिटा देगा। फिर भी दर्शक को साझा अनुभव मिल सकता है: लोग कला और श्रद्धा दूसरों के साथ बाँटते हैं। कहीं नृत्य में, कहीं पंडाल में, कहीं घर की सजावट में। यह जुड़ाव हमारी व्याख्या है, परंपराओं की उत्पत्ति का दावा नहीं।",
+        "mediaType": "video",
+        "imagePrompt": "Three separate documentary views: Gujarat garba circle, Kolkata Durga Puja pandal, Tamil Nadu stepped Golu display; no blended costumes; documentary illustration, 16:9, no text, no logos, no claimed real event",
+        "videoSearchQuery": "Gujarat garba festival",
+        "soundEffect": "none",
+        "visualStrict": true,
+        "visualEntities": [
+          "Gujarat garba",
+          "West Bengal Durga Puja pandal",
+          "Tamil Nadu Golu stepped doll display"
+        ]
+      },
+      {
+        "scene_number": 6,
+        "text": "इस बार किसी दूसरे क्षेत्र का उत्सव देखें, तो केवल यह मत पूछिए कि हमारी तरह क्यों नहीं मनाते। देखिए, वहाँ लोग कहानी कैसे कहते हैं, कौन सी कला सामने आती है और किस तरह साथ जुटते हैं। तीन उदाहरण पूरे भारत की सूची नहीं हैं; ऐसी और भी परंपराएँ हैं। आपके यहाँ नवरात्रि का सबसे यादगार दृश्य कौन सा है? कमेंट में अपना क्षेत्र और अनुभव बताइए। अगली कड़ी में गरबा के घेरे के बीच रखे दीप वाले पात्र की परंपरा समझेंगे। ऐसी उत्सव यात्राओं के लिए सब्सक्राइब कीजिए।",
+        "mediaType": "video",
+        "imagePrompt": "Indian festival visitors observing Gujarat garba respectfully, joyful community scene; documentary illustration, 16:9, no text, no logos, no claimed real event",
+        "videoSearchQuery": "Gujarat Navratri garba community",
+        "soundEffect": "none",
+        "visualStrict": true,
+        "visualEntities": [
+          "Gujarat garba"
+        ]
+      }
+    ]
+  },
+  "shorts": {
+    "scenes": [
+      {
+        "scene_number": 1,
+        "text": "कहीं गरबा, कहीं दुर्गा पूजा, कहीं गुड़ियों की सीढ़ियाँ! यह फर्क क्यों?",
+        "mediaType": "video",
+        "imagePrompt": "Navratri regional celebrations Gujarat garba circle, Bengali Durga Puja pandal and Tamil Nadu stepped Golu doll display; three clearly separated views, accurate regional contexts; documentary illustration, vertical 9:16, no text, no logos, no claimed real event",
+        "videoSearchQuery": "Gujarat Navratri garba dance",
+        "soundEffect": "none",
+        "visualStrict": true,
+        "visualEntities": [
+          "Gujarat garba",
+          "West Bengal Durga Puja pandal",
+          "Tamil Nadu Golu stepped doll display"
+        ]
+      },
+      {
+        "scene_number": 2,
+        "text": "गुजरात में नवरात्रि का गरबा भक्ति को सामूहिक नृत्य में व्यक्त करता है।",
+        "mediaType": "video",
+        "imagePrompt": "Gujarat Navratri adults performing authentic circular garba clapping dance in chaniya choli and kediyu festive attire, central lit lamp vessel; documentary illustration, vertical 9:16, no text, no logos, no claimed real event",
+        "videoSearchQuery": "Gujarat garba circle Navratri",
+        "soundEffect": "none",
+        "visualStrict": true,
+        "visualEntities": [
+          "Gujarat garba"
+        ]
+      },
+      {
+        "scene_number": 3,
+        "text": "बंगाल की दुर्गा पूजा में पंडाल, प्रतिमाएँ और कला उत्सव का हिस्सा हैं।",
+        "mediaType": "video",
+        "imagePrompt": "West Bengal Durga Puja artisan pavilion decorations and clay Durga idol craftsmanship, respectful accurate regional iconography; documentary illustration, vertical 9:16, no text, no logos, no claimed real event",
+        "videoSearchQuery": "Kolkata Durga Puja pandal",
+        "soundEffect": "none",
+        "visualStrict": true,
+        "visualEntities": [
+          "West Bengal Durga Puja pandal"
+        ]
+      },
+      {
+        "scene_number": 4,
+        "text": "तमिलनाडु की गोलू परंपरा में सजाई गई गुड़ियाँ कहानियाँ दिखाती हैं।",
+        "mediaType": "video",
+        "imagePrompt": "Tamil Nadu Navarathri Golu stepped display of miniature dolls at home, mythological figurine tableaux and visitors; documentary illustration, vertical 9:16, no text, no logos, no claimed real event",
+        "videoSearchQuery": "Tamil Nadu Navaratri Golu dolls",
+        "soundEffect": "none",
+        "visualStrict": true,
+        "visualEntities": [
+          "Golu stepped doll display"
+        ]
+      },
+      {
+        "scene_number": 5,
+        "text": "स्थानीय परंपराएँ अलग हैं, इसलिए दृश्य अलग। आपके यहाँ कैसा जश्न है? कमेंट में बताइए!",
+        "mediaType": "video",
+        "imagePrompt": "Indian festival visitors observing Gujarat garba respectfully, joyful community scene; documentary illustration, vertical 9:16, no text, no logos, no claimed real event",
+        "videoSearchQuery": "Gujarat Navratri garba community",
+        "soundEffect": "none",
+        "visualStrict": true,
+        "visualEntities": [
+          "Gujarat garba"
+        ]
+      }
+    ]
+  },
+  "thumbnail": {
+    "thumbnailText": "एक पर्व, ३ जश्न!",
+    "imagePrompt": "Three distinct accurate views Gujarat circular garba dancers, West Bengal Durga Puja decorated pandal, Tamil Nadu stepped Golu miniature dolls. Bold colorful documentary collage, no written text, no logos; ample clean space for Hindi overlay"
+  },
+  "shorts_thumbnail": {
+    "thumbnailText": "एक पर्व, ३ जश्न!",
+    "imagePrompt": "Three distinct accurate views Gujarat circular garba dancers, West Bengal Durga Puja decorated pandal, Tamil Nadu stepped Golu miniature dolls. Bold colorful documentary collage, no written text, no logos; ample clean space for Hindi overlay"
+  },
+  "seo_metadata": {
+    "long_video_title": "एक नवरात्रि, तीन अनोखे जश्न! कहीं गरबा, कहीं पंडाल, कहीं गोलू",
+    "shorts_title": "एक नवरात्रि, भारत में तीन अलग जश्न!",
+    "long_video_description": "गुजरात के गरबा, बंगाल की दुर्गा पूजा और तमिलनाडु की गोलू परंपरा के जरिए क्षेत्रीय उत्सवों की यात्रा। स्थानीय विधियाँ अलग हैं; साझा जुड़ाव की बात प्रस्तोता की व्याख्या है।\nस्रोत:\nhttps://ich.unesco.org/en/RL/garba-of-gujarat-01962\nhttps://ich.unesco.org/en/RL/durga-puja-in-kolkata-00703\nhttps://utsav.gov.in/view-event/navarathiri-festival\nदृश्य में स्टॉक फुटेज और एआई चित्र हो सकते हैं; ये किसी विशेष वास्तविक आयोजन का प्रमाण नहीं।",
+    "shorts_description": "नवरात्रि के आसपास तीन क्षेत्रीय परंपराएँ: गरबा, दुर्गा पूजा और गोलू। आपके क्षेत्र का उत्सव कैसा है?\nस्रोत:\nhttps://ich.unesco.org/en/RL/garba-of-gujarat-01962\nhttps://ich.unesco.org/en/RL/durga-puja-in-kolkata-00703\nhttps://utsav.gov.in/view-event/navarathiri-festival",
+    "tags": [
+      "नवरात्रि",
+      "गरबा",
+      "दुर्गा पूजा",
+      "गोलू",
+      "Navratri",
+      "Indian festivals"
+    ],
+    "hashtags": [
+      "#नवरात्रि",
+      "#गरबा",
+      "#दुर्गापूजा"
+    ],
+    "titleVariants": [
+      "एक नवरात्रि, तीन अनोखे जश्न!",
+      "नृत्य, पंडाल और गुड़ियाँ: नवरात्रि के तीन रंग",
+      "आपके शहर से कितनी अलग है इन जगहों की नवरात्रि?"
+    ],
+    "thumbnailConcepts": [
+      "Three clearly separated regional scenes; एक पर्व, ३ जश्न!",
+      "Garba foreground with pandal and Golu inset; इतना अलग क्यों?",
+      "Large Golu miniature dolls contrasting with garba crowd; नवरात्रि के तीन रंग"
+    ],
+    "primaryKeyword": "नवरात्रि",
+    "secondaryKeywords": [
+      "गरबा",
+      "दुर्गा पूजा",
+      "गोलू",
+      "गुजरात",
+      "बंगाल",
+      "तमिलनाडु"
+    ],
+    "cta": "कमेंट में अपना क्षेत्र और उत्सव का अनुभव बताइए; अगली उत्सव यात्रा के लिए सब्सक्राइब कीजिए।"
+  },
+  "_meta": {
+    "experiment_id": "navratri-regional-private-2026-10-10",
+    "content_role": "discovery",
+    "entertainment_angle": "Fast contrast between dance, public art and miniature storytelling",
+    "fun_with_fact_angle": "Three regional expressions explained without universal ritual claims",
+    "festival_priority": "high",
+    "festival_angle": "Upcoming autumn festival regional discovery",
+    "experiment_hypothesis": "Regional visual contrast and participatory question may improve early retention; unproven",
+    "next_episode_angle": "Garba central lamp vessel tradition; source before publishing",
+    "retention_adaptation": "Immediate contrast; scene-end transitions; answer paid off in scene five",
+    "shorts_funnel_hook": "Three regional forms, complete standalone answer",
+    "long_video_continuation": "Long explores artistic expression and distinguishes interpretation from origins",
+    "climax_scene_number": 5,
+    "review_status": "editorially reviewed draft; not Make council approved",
+    "sources": [
+      "https://ich.unesco.org/en/RL/garba-of-gujarat-01962",
+      "https://ich.unesco.org/en/RL/durga-puja-in-kolkata-00703",
+      "https://utsav.gov.in/view-event/navarathiri-festival"
+    ],
+    "privacy": "private"
+  }
+}
