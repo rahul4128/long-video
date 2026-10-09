@@ -42,24 +42,17 @@ This is a **human editorial preference for the first test**, NOT an output the M
 
 The Short must completely answer its own question and not be a teaser requiring the Long.
 
-## Google Flow clips — prepared for ChatGPT Work, not generated here
+## Existing pipeline — updated 2026-10-10
 
-**IMPORTANT:** Google Flow Free is only accessible through its authenticated UI in a separately opened permitted browser session. GitHub Actions cannot automatically generate clips from Flow; Work must create/export them first. Do not claim credits were used without an actual successful Flow export. Set clips without identifiable real people or logos. Keep shots 5–10 sec, photorealistic, natural camera movement, no subtitles, no captions, no music baked into the clip, no lip sync. Narration and licensed music are added later by our pipeline.
+User removed Google Flow from this sample. Use the existing Kokoro narration, stock footage matching, AI image fallback, captions, thumbnails and Remotion render pipeline. No external hook MP4s or preliminary clip Release are required.
 
-### FLOW PROMPT — Long hook (16:9, export as hook-long.mp4)
-
-"Photorealistic cinematic 16:9 eight-second festival documentary B-roll, respectful joyful Navratri night in Gujarat, wide circular Garba dance formation with a diverse group of Indian adults in detailed colorful traditional Gujarati festive outfits, rhythmic coordinated footwork and twirling, rich red, gold and turquoise decorations, hanging warm lantern lights, natural crowd movement, camera glides dynamically sideways then gently rises to reveal the whole glowing circle, genuine documentary realism, high-quality faces and hands, culturally credible dance attire, visually striking first frame, sharp details and pleasing motion blur, no copyrighted logos, no written text, no subtitles, no watermark, no generated dialogue, no music audio, no overly rapid jump cuts, no unsafe action. Do not depict a specific real event or real person."
-
-### FLOW PROMPT — Shorts hook (9:16, export as hook-shorts.mp4)
-
-"Photorealistic vertical 9:16 eight-second cinematic documentary B-roll of a West Bengal Durga Puja decorated public pandal during evening festivities, expressive visitors in elegant contemporary Bengali festive outfits looking upward with wonder, elaborate floral and fabric decorations, respectful visually accurate Durga iconography when visible, warm festive lights, crowd in the background and lively movement, camera starts very close to illuminated colorful decorations and pushes forward to reveal the full majestic pandal interior, vibrant but realistic composition, dynamic attention-grabbing first second, sharp faces and clean detailed hands, no written text, no subtitles, no watermark, no copyrighted signage, no generated speech or music. Fictional generic scene, not a documentary claim about a particular real location."
+Keep both Make scenarios paused; do not run further Make retries for this preparation.
 
 ## Required handoff to render
 
-1. Produce **approved structured payload JSON** with the existing Make Final Judge schema (6 Long scenes and 5 Shorts scenes) for this exact editorial concept. Do NOT send `{}` as payload; that invokes irrelevant fallback.
-2. In signed-in Google Flow UI, export the two specified MP4s and confirm filenames, orientation and cultural accuracy. Use only free credits if available.
-3. Publish those MP4s as assets in a NEW GitHub Release at `https://github.com/rahul4128/long-video/releases`. Do not invent URLs; record exact returned asset URLs.
-4. In GitHub Actions `.github/workflows/render.yml` on branch `office-make-clone`, run manually with `payload` set to the approved JSON, `flow_clips_json` containing the **actual two GitHub Release asset URLs**, `flow_clips_strict=true`, and `privacy=private`.
-5. Check `out/flow_clip_report.json` for `applied` entries in Long scene 1 and Shorts scene 1; watch both outputs and inspect Hindi narration, subtitles, music rights, factual clarity and thumbnail. A private YouTube upload occurs only if the separately configured webhook is active; never claim an upload from a successful render alone.
+1. Prepare and review a fully structured production-schema payload for this same concept (6 Long scenes, 5 Shorts scenes). The outline above is not an approved payload. Never dispatch an empty payload.
+2. Use .github/workflows/render.yml on office-make-clone with privacy=private, flow_clips_json empty, and flow_clips_strict=false. Empty Flow input preserves the original stock/AI asset generation.
+3. Inspect content QC and final media QC, then watch both outputs for Hindi narration, captions, regional accuracy, visual relevance and pacing.
+4. Verify the upload webhook honors privacyStatus=private before permitting a YouTube upload. The workflow publishes downloadable GitHub Release assets independently of YouTube privacy; do not call these private assets without checking repository visibility.
 
-If private YouTube upload settings or release MP4s are not confirmed, **stop before rendering**. Do not activate production scenario or publicly publish anything.
+Current status: brief updated; no sample render dispatched; no approved structured payload saved by this update. Production stays paused.
