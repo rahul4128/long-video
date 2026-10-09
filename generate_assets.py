@@ -2143,6 +2143,27 @@ def create_local_visual_fallback(dest_path: str, orientation: str,
     return ""
 
 
+def _story_visual_style(prompt: str) -> str:
+    """Use culturally appropriate visuals without forcing paintings onto real festivals.
+
+    Real celebrations, families, food, dance and city life work better as authentic
+    documentary imagery. Scriptural/mythological illustrations still use devotional
+    art, not a generic modern photograph of a deity.
+    """
+    s = (prompt or "").casefold()
+    real_world = ("garba", "golu", "pandal", "festival dance", "street celebration",
+                  "home decoration", "family festival", "family gathering", "dance performance",
+                  "real-life", "real life", "market", "fashion", "folk dance")
+    sacred_art = ("mythological", "divine illustration", "devotional painting",
+                  "deity painting", "scriptural illustration", "ancient epic",
+                  "bal krishna", "child krishna", "mythic", "illustration of goddess")
+    if any(word in s for word in real_world):
+        return "photorealistic, respectful Indian festival documentary, authentic region and clothing"
+    if any(word in s for word in sacred_art):
+        return "beautiful traditional Indian devotional painting, reverent accurate mythological iconography"
+    return "cinematic photorealistic culturally authentic Indian scene, realistic faces and details"
+
+
 def generate_cloudflare_flux(prompt: str, dest_path: str, aspect_ratio: str = "16:9") -> bool:
     if not CLOUDFLARE_ACCOUNT_ID or not CLOUDFLARE_API_TOKEN:
         return False
@@ -2152,7 +2173,7 @@ def generate_cloudflare_flux(prompt: str, dest_path: str, aspect_ratio: str = "1
         "Content-Type": "application/json"
     }
     clean_text = text_free_prompt(prompt).replace("\"", "").strip()
-    final_prompt = f"{clean_text}, Indian mythological devotional painting, {aspect_ratio} composition, warm divine lighting, highly detailed"
+    final_prompt = f"{clean_text}, {_story_visual_style(clean_text)}, {aspect_ratio} composition, warm accurate lighting, highly detailed"
 
     try:
         res = requests.post(url, headers=headers, json={"prompt": final_prompt[:450], "steps": 4}, timeout=50)
@@ -2195,7 +2216,7 @@ def generate_huggingface_image(prompt: str, dest_path: str, aspect_ratio: str = 
 
     clean_text = text_free_prompt(prompt).replace("\"", "").strip()
     final_prompt = (
-        f"{clean_text}, Indian mythological devotional cinematic frame, "
+        f"{clean_text}, {_story_visual_style(clean_text)}, "
         f"{aspect_ratio} composition, warm divine lighting, highly detailed, no text"
     )
     width, height = (1024, 576) if aspect_ratio == "16:9" else (576, 1024)
@@ -2283,7 +2304,7 @@ def generate_hf_fallback_model(prompt: str, dest_path: str, model_id: str,
     url = f"https://router.huggingface.co/hf-inference/models/{model_id}"
     width, height = (1024, 576) if aspect_ratio == "16:9" else (576, 1024)
     clean_text = text_free_prompt(prompt).replace("\"", "").strip()
-    final_prompt = f"{clean_text}, Indian mythological devotional painting, {aspect_ratio} composition, warm divine lighting, highly detailed"
+    final_prompt = f"{clean_text}, {_story_visual_style(clean_text)}, {aspect_ratio} composition, warm accurate lighting, highly detailed"
     try:
         res = requests.post(
             url,
@@ -2959,7 +2980,8 @@ def process_long_scene_visual(scene_info):
         )
 
     # Backward-compatible scene-level fallback.
-    should_try_video = (media_type == "video") or (media_type == "auto" and idx % 2 == 0)
+    # First Long scene must try accurate motion footage too; no stock mismatch is allowed.
+    should_try_video = (media_type == "video") or (media_type == "auto" and (idx == 1 or idx % 2 == 0))
     narration_text = scene.get("text") or scene.get("narration_chunk", "")
     target_seconds = estimate_scene_duration_seconds(narration_text)
 
