@@ -27,6 +27,8 @@ jobs:
           python-version: '3.11'
       - name: Python syntax checks
         run: python -m py_compile generate_assets.py director.py visual_qc.py content_qc.py scripts/validate_native_visuals.py
+      - name: Test instructional-visual evidence guard
+        run: python -m unittest discover -s tests -p 'test_native_visual_guard.py'
       - name: Verify native render and review safety contracts
         run: |
           python - <<'PY'
