@@ -55,7 +55,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Static Python syntax check
-        run: python -m py_compile content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py
+        run: python -m py_compile content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v7
@@ -122,6 +122,9 @@ jobs:
           CLIP_RERANK_ENABLED: ${{ vars.CLIP_RERANK_ENABLED || 'true' }}
           HOOK_OVERLAY_ENABLED: ${{ vars.HOOK_OVERLAY_ENABLED || 'true' }}
         run: python generate_assets.py
+
+      - name: Fail closed if Long or Shorts scene visuals are missing
+        run: python scripts/validate_native_visuals.py
 
       - name: Upload content QC report
         if: always()
@@ -613,7 +616,9 @@ jobs:
         continue-on-error: true
         env:
           MAKE_WEBHOOK_URL: ${{ secrets.MAKE_YOUTUBE_WEBHOOK_URL }}
-          YOUTUBE_PRIVACY: ${{ inputs.privacy || vars.YOUTUBE_PRIVACY || 'public' }}
+          # Private review by default for either Make repository_dispatch or manual tests.
+          # Public upload requires a separate explicit and reviewed workflow decision.
+          YOUTUBE_PRIVACY: ${{ inputs.privacy || 'private' }}
         run: |
           set -e
           if [ -z "$MAKE_WEBHOOK_URL" ]; then
