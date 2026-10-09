@@ -30,6 +30,11 @@ on:
         description: 'YouTube privacy for this run: public, unlisted or private (use private/unlisted when you want to polish in Canva first)'
         required: false
         type: string
+      review_approved:
+        description: 'Explicit human approval to publish the release and notify YouTube (defaults to review-only draft)'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: canva-token-rotation
@@ -571,13 +576,18 @@ jobs:
           python scripts/youtube_pack.py
           cat out/youtube_pack.md >> "$GITHUB_STEP_SUMMARY" || true
 
-      - name: Create GitHub Release with video + thumbnail assets
+      - name: Create review-only draft release with video + thumbnail assets
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
+          REVIEW_APPROVED: ${{ inputs.review_approved || 'false' }}
         run: |
           set -e
           TAG="devotional-${{ github.run_id }}"
+          RELEASE_FLAGS=(--draft)
+          if [ "$REVIEW_APPROVED" = "true" ]; then
+            RELEASE_FLAGS=()
+          fi
           # "Re-run failed jobs" keeps the same run_id: replace this run's old
           # release instead of failing with "release already exists".
           gh release delete "$TAG" --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
@@ -593,10 +603,11 @@ jobs:
             "thumbnail_shorts_final/thumbnail_shorts_final.jpg" \
             --repo "${{ github.repository }}" \
             --title "Devotional upload $TAG" \
+            "${RELEASE_FLAGS[@]}" \
             --notes-file release_notes.md
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Look up public download URLs for the release assets
+      - name: Look up asset URLs (draft releases are not publicly downloadable)
         id: assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -612,7 +623,8 @@ jobs:
       # Uploads are manual: with no MAKE_YOUTUBE_WEBHOOK_URL secret this step
       # just skips. If the secret exists but the webhook is dead, it only warns -
       # it can never turn a finished run red.
-      - name: Notify Make.com (uploads long video + Shorts to YouTube)
+      - name: Notify Make.com ONLY after explicit review approval
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.review_approved == true }}
         continue-on-error: true
         env:
           MAKE_WEBHOOK_URL: ${{ secrets.MAKE_YOUTUBE_WEBHOOK_URL }}
