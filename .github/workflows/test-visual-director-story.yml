@@ -1,0 +1,55 @@
+name: Validate Visual Director Story and Native Media
+
+on:
+  push:
+    branches: [visual-director-v2]
+    paths:
+      - '.github/workflows/render.yml'
+      - 'generate_assets.py'
+      - 'visual_qc.py'
+      - 'director.py'
+      - 'scripts/validate_native_visuals.py'
+      - 'data/festival_routes_compact_2026.txt'
+      - '.github/workflows/test-visual-director-story.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  story-and-media:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Python syntax checks
+        run: python -m py_compile generate_assets.py director.py visual_qc.py content_qc.py scripts/validate_native_visuals.py
+      - name: Verify native render and review safety contracts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          w = Path('.github/workflows/render.yml').read_text()
+          s = Path('generate_assets.py').read_text()
+          calendar = Path('data/festival_routes_compact_2026.txt').read_text()
+          assert 'python generate_assets.py' in w
+          assert 'python scripts/validate_native_visuals.py' in w
+          assert 'visual_qc.py' in w
+          assert 'out/visual_qc_report.json' in w
+          assert "YOUTUBE_PRIVACY: ${{ inputs.privacy || 'private' }}" in w
+          assert 'flow_clip_ingest' not in w
+          assert 'flow_clips_json:' not in w
+          assert '_story_visual_style' in s
+          assert 'sync_visual_beats_to_narration' in s
+          assert '(idx == 1 or idx % 2 == 0)' in s
+          assert '2026-10-10' in calendar
+          print('OK: director v2, source-linked festival, native visuals, private output')
+          PY
+      - name: Missing visual props must fail closed
+        run: |
+          if python scripts/validate_native_visuals.py; then
+            echo 'ERROR: validator should reject absent scene props'; exit 1
+          fi
+          echo 'OK: incomplete assets block rendering'
