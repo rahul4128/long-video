@@ -9,6 +9,8 @@ on:
       - 'visual_qc.py'
       - 'director.py'
       - 'scripts/validate_native_visuals.py'
+      - 'scripts/visual_evidence.py'
+      - 'tests/test_native_visual_guard.py'
       - 'data/festival_routes_compact_2026.txt'
       - '.github/workflows/test-visual-director-story.yml'
   workflow_dispatch:
@@ -26,7 +28,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Python syntax checks
-        run: python -m py_compile generate_assets.py director.py visual_qc.py content_qc.py scripts/validate_native_visuals.py
+        run: python -m py_compile generate_assets.py director.py visual_qc.py content_qc.py scripts/validate_native_visuals.py scripts/visual_evidence.py
       - name: Test instructional-visual evidence guard
         run: python -m unittest discover -s tests -p 'test_native_visual_guard.py'
       - name: Verify native render and review safety contracts
@@ -44,6 +46,9 @@ jobs:
           assert 'flow_clip_ingest' not in w
           assert 'flow_clips_json:' not in w
           assert '_story_visual_style' in s
+          assert 'detect_instructional_category' in s
+          assert 'is_generic_stock_query' in s
+          assert 'validate_demonstration_evidence' in Path('scripts/validate_native_visuals.py').read_text()
           assert 'sync_visual_beats_to_narration' in s
           assert '(idx == 1 or idx % 2 == 0)' in s
           assert '2026-10-10' in calendar
