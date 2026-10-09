@@ -1,10 +1,12 @@
 """Smoke tests for Google Flow clip injection; zero network / Gemini usage."""
+import io
 import json
 import os
 import shutil
 import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -25,8 +27,9 @@ class TestFlowImport(unittest.TestCase):
         )
 
     def test_clip_applied_and_existing_narration_preserved(self):
-        if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
-            self.skipTest("Requires ffmpeg and ffprobe")
+        for binary in ("ffmpeg", "ffprobe"):
+            if not shutil.which(binary):
+                self.fail(f"REQUIRED binary unavailable: {binary}; the video-insertion smoke test must never skip")
         with tempfile.TemporaryDirectory() as tmp:
             original = Path.cwd()
             os.chdir(tmp)
@@ -65,7 +68,19 @@ class TestFlowImport(unittest.TestCase):
                     scenes = json.loads(Path(props_file).read_text())["scenes"]
                     self.assertEqual(scenes[0]["shots"][0]["file"], f"flow_{fmt}_scene_1.mp4")
                     self.assertEqual(scenes[0]["shots"][0]["type"], "video")
-                    self.assertTrue(Path(f"public/images/flow_{fmt}_scene_1.mp4").is_file())
+                    output = Path(f"public/images/flow_{fmt}_scene_1.mp4")
+                    self.assertTrue(output.is_file())
+                    probe = json.loads(subprocess.check_output([
+                        "ffprobe", "-v", "error", "-select_streams", "v:0",
+                        "-show_entries", "stream=width,height,codec_name",
+                        "-of", "json", str(output),
+                    ], text=True))
+                    stream = probe["streams"][0]
+                    self.assertEqual(stream["codec_name"], "h264")
+                    self.assertEqual(
+                        (stream["width"], stream["height"]),
+                        (1280, 720) if fmt == "long" else (720, 1280),
+                    )
                 long_scene = json.loads(Path("public/props.json").read_text())["scenes"]
                 self.assertEqual(long_scene[0]["narration_chunk"], "आज की पूजा")
                 self.assertEqual(long_scene[0]["shots"][1]["file"], "original2.mp4")
@@ -88,8 +103,13 @@ class TestFlowImport(unittest.TestCase):
                 Path("public/props_shorts.json").write_text('{"scenes":[]}')
                 manifest = {"long": [{"scene": 1, "url":
                     "https://github.com/rahul4128/long-video/releases/download/flow-test/bad.mp4"}]}
+                # The 404 is deliberate: verify fallback without emitting
+                # a misleading GitHub Actions warning for expected behavior.
                 with patch.object(ingest, "download_release", side_effect=ValueError("404")):
-                    report = ingest.run(manifest, strict=False)
+                    output = io.StringIO()
+                    with redirect_stdout(output):
+                        report = ingest.run(manifest, strict=False)
+                self.assertIn("404", output.getvalue())
                 self.assertEqual(len(report["failed"]), 1)
                 scenes = json.loads(Path("public/props.json").read_text())["scenes"]
                 self.assertEqual(scenes[0]["shots"][0]["file"], "original.jpg")

@@ -19,10 +19,15 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Check FFmpeg availability
+      - name: Install FFmpeg and verify prerequisites
         run: |
-          ffmpeg -version | head -n 1
-          ffprobe -version | head -n 1
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          command -v ffmpeg
+          command -v ffprobe
+          ffmpeg -hide_banner -version | sed -n '1p'
+          ffprobe -hide_banner -version | sed -n '1p'
       - name: Python syntax
         run: python -m py_compile scripts/flow_clip_ingest.py tests/test_flow_clip_ingest.py
       - name: Generate synthetic Flow-style sample and verify scene injection
