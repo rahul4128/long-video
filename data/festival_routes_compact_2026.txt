@@ -1,0 +1,74 @@
+VERIFIED DATE OPPORTUNITY DIGEST | Asia/Kolkata | India | generated from source-linked festival_routes_2026.json
+COVERAGE 2026-09-27 through 2026-11-24. For outside dates, use fresh festival news/panchang evidence; never invent dates. Event day/tithi/muhurat varies by region.
+READING RULE: Select the line matching TODAY_IST. PREPARATION means useful planning for the upcoming event; ACTIVE means today's celebration; FINAL_DAY means last event day. The 'idea' is merely an optional creative seed, NOT a quota or mandatory topic.
+EDITORIAL PRIORITY: one strong real human reason to watch: concern about an actual avoidable mistake, achievable benefit, cultural excitement/entertainment, curiosity, social belonging or emotional reward. Garba is one example only. No invented supernatural threats, false rewards, unlicensed music or guaranteed blessings.
+EVENT SOURCES:
+sharad-navratri-2026 | 2026-10-11..2026-10-19 | https://www.drikpanchang.com/navratri/navratri-date.html?lang=en
+vijayadashami-2026 | 2026-10-20..2026-10-20 | https://timesofindia.indiatimes.com/religion/festivals/navratri-2026-start-end-date-is-ghatasthapana-on-october-10-or-11-check-the-full-tithi-schedule/articleshow/134767429.cms
+karwa-chauth-2026 | 2026-10-29..2026-10-29 | https://www.drikpanchang.com/festivals/karwa-chauth/karwa-chauth-date-time.html?geoname-id=1273294
+diwali-2026 | 2026-11-08..2026-11-08 | https://www.drikpanchang.com/festivals/lakshmipuja/festivals-lakshmipuja-timings.html?geoname-id=1271951
+govardhan-2026 | 2026-11-10..2026-11-10 | https://www.drikpanchang.com/festivals/govardhan-puja/govardhan-puja-date-time.html?geoname-id=1261481&year=2026
+bhai-dooj-2026 | 2026-11-11..2026-11-11 | https://www.drikpanchang.com/calendars/hindu/hinducalendar.html?geoname-id=8519
+chhath-2026 | 2026-11-13..2026-11-16 | https://www.drikpanchang.com/chhath/chhath-puja-calendar.html?geoname-id=1261481&year=2026
+tulsi-vivah-2026 | 2026-11-21..2026-11-21 | https://www.drikpanchang.com/calendars/hindu/hinducalendar.html?geoname-id=8519
+kartik-purnima-2026 | 2026-11-24..2026-11-24 | https://www.drikpanchang.com/calendars/hindu/hinducalendar.html?geoname-id=8519
+DAY ROUTES:
+2026-09-27 | sharad-navratri-2026 | PREPARATION | start=2026-10-11 | end=2026-10-19 | seed=गरबा के आसान स्टेप्स, पहली बार जाने वालों की तैयारी, नवरात्रि संगीत और लोक परंपरा
+2026-09-28 | sharad-navratri-2026 | PREPARATION | start=2026-10-11 | end=2026-10-19 | seed=डांडिया और गरबा के बीच अंतर, सांस्कृतिक उत्पत्ति, युवक-युवतियों के उत्सव अनुभव
+2026-09-29 | sharad-navratri-2026 | PREPARATION | start=2026-10-11 | end=2026-10-19 | seed=नवरात्रि पूजा और घटस्थापना की व्यावहारिक तैयारी, सामग्री, आरती और परिवार-परंपराएं
+2026-09-30 | sharad-navratri-2026 | PREPARATION | start=2026-10-11 | end=2026-10-19 | seed=व्रत का खाना, भोग और रोज़मर्रा के सवाल; पोषण/स्वास्थ्य पर बेबुनियाद दावे नहीं
+2026-10-01 | sharad-navratri-2026 | PREPARATION | start=2026-10-11 | end=2026-10-19 | seed=गरबा की ड्रेस और रंग, बजट में त्योहार की तैयारी, वास्तविक त्योहार के दृश्य
+2026-10-02 | sharad-navratri-2026 | PREPARATION | start=2026-10-11 | end=2026-10-19 | seed=देवी के स्वरूप का अर्थ, भावनात्मक और प्रेरणादायक सीख, वास्तविक प्रश्न
+2026-10-03 | sharad-navratri-2026 | PREPARATION | start=2026-10-11 | end=2026-10-19 | seed=उचित पूजा-विधि, आम भूल और समाधान, डराना या झूठी सज़ा नहीं
+2026-10-04 | sharad-navratri-2026 | PREPARATION | start=2026-10-11 | end=2026-10-19 | seed=गरबा के आसान स्टेप्स, पहली बार जाने वालों की तैयारी, नवरात्रि संगीत और लोक परंपरा
+2026-10-05 | sharad-navratri-2026 | PREPARATION | start=2026-10-11 | end=2026-10-19 | seed=डांडिया और गरबा के बीच अंतर, सांस्कृतिक उत्पत्ति, युवक-युवतियों के उत्सव अनुभव
+2026-10-06 | sharad-navratri-2026 | PREPARATION | start=2026-10-11 | end=2026-10-19 | seed=नवरात्रि पूजा और घटस्थापना की व्यावहारिक तैयारी, सामग्री, आरती और परिवार-परंपराएं
+2026-10-07 | sharad-navratri-2026 | PREPARATION | start=2026-10-11 | end=2026-10-19 | seed=व्रत का खाना, भोग और रोज़मर्रा के सवाल; पोषण/स्वास्थ्य पर बेबुनियाद दावे नहीं
+2026-10-08 | sharad-navratri-2026 | PREPARATION | start=2026-10-11 | end=2026-10-19 | seed=गरबा की ड्रेस और रंग, बजट में त्योहार की तैयारी, वास्तविक त्योहार के दृश्य
+2026-10-09 | sharad-navratri-2026 | PREPARATION | start=2026-10-11 | end=2026-10-19 | seed=देवी के स्वरूप का अर्थ, भावनात्मक और प्रेरणादायक सीख, वास्तविक प्रश्न
+2026-10-10 | sharad-navratri-2026 | PREPARATION | start=2026-10-11 | end=2026-10-19 | seed=उचित पूजा-विधि, आम भूल और समाधान, डराना या झूठी सज़ा नहीं
+2026-10-11 | sharad-navratri-2026 | ACTIVE | start=2026-10-11 | end=2026-10-19 | seed=गरबा के आसान स्टेप्स, पहली बार जाने वालों की तैयारी, नवरात्रि संगीत और लोक परंपरा
+2026-10-12 | sharad-navratri-2026 | ACTIVE | start=2026-10-11 | end=2026-10-19 | seed=डांडिया और गरबा के बीच अंतर, सांस्कृतिक उत्पत्ति, युवक-युवतियों के उत्सव अनुभव
+2026-10-13 | sharad-navratri-2026 | ACTIVE | start=2026-10-11 | end=2026-10-19 | seed=नवरात्रि पूजा और घटस्थापना की व्यावहारिक तैयारी, सामग्री, आरती और परिवार-परंपराएं
+2026-10-14 | sharad-navratri-2026 | ACTIVE | start=2026-10-11 | end=2026-10-19 | seed=व्रत का खाना, भोग और रोज़मर्रा के सवाल; पोषण/स्वास्थ्य पर बेबुनियाद दावे नहीं
+2026-10-15 | sharad-navratri-2026 | ACTIVE | start=2026-10-11 | end=2026-10-19 | seed=गरबा की ड्रेस और रंग, बजट में त्योहार की तैयारी, वास्तविक त्योहार के दृश्य
+2026-10-16 | sharad-navratri-2026 | ACTIVE | start=2026-10-11 | end=2026-10-19 | seed=देवी के स्वरूप का अर्थ, भावनात्मक और प्रेरणादायक सीख, वास्तविक प्रश्न
+2026-10-17 | sharad-navratri-2026 | ACTIVE | start=2026-10-11 | end=2026-10-19 | seed=उचित पूजा-विधि, आम भूल और समाधान, डराना या झूठी सज़ा नहीं
+2026-10-18 | sharad-navratri-2026 | ACTIVE | start=2026-10-11 | end=2026-10-19 | seed=गरबा के आसान स्टेप्स, पहली बार जाने वालों की तैयारी, नवरात्रि संगीत और लोक परंपरा
+2026-10-19 | sharad-navratri-2026 | FINAL_DAY | start=2026-10-11 | end=2026-10-19 | seed=डांडिया और गरबा के बीच अंतर, सांस्कृतिक उत्पत्ति, युवक-युवतियों के उत्सव अनुभव
+2026-10-20 | vijayadashami-2026 | FINAL_DAY | start=2026-10-20 | end=2026-10-20 | seed=दशहरे की परंपराओं के सही अर्थ और समाज-सांस्कृतिक विविधताएं
+2026-10-21 | karwa-chauth-2026 | PREPARATION | start=2026-10-29 | end=2026-10-29 | seed=व्रत की तैयारियां, सरगी, थाली और परिवार की परंपराएं
+2026-10-22 | karwa-chauth-2026 | PREPARATION | start=2026-10-29 | end=2026-10-29 | seed=नए कपल्स के आम सवाल, उत्सव का अनुभव और देखभाल
+2026-10-23 | karwa-chauth-2026 | PREPARATION | start=2026-10-29 | end=2026-10-29 | seed=चाँद देखने का अर्थ और शहर के अनुसार समय का सत्यापन
+2026-10-24 | karwa-chauth-2026 | PREPARATION | start=2026-10-29 | end=2026-10-29 | seed=गैर-आलोचनात्मक परंपरा जानकारी और स्वस्थ सीमाएं
+2026-10-25 | karwa-chauth-2026 | PREPARATION | start=2026-10-29 | end=2026-10-29 | seed=व्रत की तैयारियां, सरगी, थाली और परिवार की परंपराएं
+2026-10-26 | karwa-chauth-2026 | PREPARATION | start=2026-10-29 | end=2026-10-29 | seed=नए कपल्स के आम सवाल, उत्सव का अनुभव और देखभाल
+2026-10-27 | karwa-chauth-2026 | PREPARATION | start=2026-10-29 | end=2026-10-29 | seed=चाँद देखने का अर्थ और शहर के अनुसार समय का सत्यापन
+2026-10-28 | karwa-chauth-2026 | PREPARATION | start=2026-10-29 | end=2026-10-29 | seed=गैर-आलोचनात्मक परंपरा जानकारी और स्वस्थ सीमाएं
+2026-10-29 | karwa-chauth-2026 | FINAL_DAY | start=2026-10-29 | end=2026-10-29 | seed=व्रत की तैयारियां, सरगी, थाली और परिवार की परंपराएं
+2026-10-30 | diwali-2026 | PREPARATION | start=2026-11-08 | end=2026-11-08 | seed=घर की पूजा की तैयारी और चरण, स्थानीय मुहूर्त स्रोत से सत्यापित
+2026-10-31 | diwali-2026 | PREPARATION | start=2026-11-08 | end=2026-11-08 | seed=दीये, रोशनी और परंपराओं का सांस्कृतिक मतलब
+2026-11-01 | diwali-2026 | PREPARATION | start=2026-11-08 | end=2026-11-08 | seed=दीवाली की रात: व्यावहारिक सुरक्षा और परिवार के संग त्योहार
+2026-11-02 | diwali-2026 | PREPARATION | start=2026-11-08 | end=2026-11-08 | seed=युवा-फ्रेंडली बजट रंगोली और सजावट, अच्छे विजुअल्स
+2026-11-03 | diwali-2026 | PREPARATION | start=2026-11-08 | end=2026-11-08 | seed=घर की पूजा की तैयारी और चरण, स्थानीय मुहूर्त स्रोत से सत्यापित
+2026-11-04 | diwali-2026 | PREPARATION | start=2026-11-08 | end=2026-11-08 | seed=दीये, रोशनी और परंपराओं का सांस्कृतिक मतलब
+2026-11-05 | diwali-2026 | PREPARATION | start=2026-11-08 | end=2026-11-08 | seed=दीवाली की रात: व्यावहारिक सुरक्षा और परिवार के संग त्योहार
+2026-11-06 | diwali-2026 | PREPARATION | start=2026-11-08 | end=2026-11-08 | seed=युवा-फ्रेंडली बजट रंगोली और सजावट, अच्छे विजुअल्स
+2026-11-07 | diwali-2026 | PREPARATION | start=2026-11-08 | end=2026-11-08 | seed=घर की पूजा की तैयारी और चरण, स्थानीय मुहूर्त स्रोत से सत्यापित
+2026-11-08 | diwali-2026 | FINAL_DAY | start=2026-11-08 | end=2026-11-08 | seed=दीये, रोशनी और परंपराओं का सांस्कृतिक मतलब
+2026-11-09 | govardhan-2026 | PREPARATION | start=2026-11-10 | end=2026-11-10 | seed=अन्नकूट में क्या चढ़ाएं और घर पर कैसे मनाएं
+2026-11-10 | govardhan-2026 | FINAL_DAY | start=2026-11-10 | end=2026-11-10 | seed=कृष्ण की गोवर्धन कथा का भावनात्मक, शिक्षाप्रद अर्थ
+2026-11-11 | bhai-dooj-2026 | FINAL_DAY | start=2026-11-11 | end=2026-11-11 | seed=युवाओं के लिए छोटे बजट में भाई दूज सरप्राइज
+2026-11-12 | chhath-2026 | PREPARATION | start=2026-11-13 | end=2026-11-16 | seed=छठ में लोकगीत और सांस्कृतिक अर्थ: संगीत इस्तेमाल हेतु अनुमति आवश्यक
+2026-11-13 | chhath-2026 | ACTIVE | start=2026-11-13 | end=2026-11-16 | seed=घाट के दृश्य, परिवार से दूर रहने वालों का भावनात्मक जुड़ाव
+2026-11-14 | chhath-2026 | ACTIVE | start=2026-11-13 | end=2026-11-16 | seed=छठ की विधि, आम गलतफहमी और उसका समाधान; स्वास्थ्य जोखिम पर सतर्कता
+2026-11-15 | chhath-2026 | ACTIVE | start=2026-11-13 | end=2026-11-16 | seed=छठ पूजा में युवाओं की भूमिका, घाट और परंपराएं
+2026-11-16 | chhath-2026 | FINAL_DAY | start=2026-11-13 | end=2026-11-16 | seed=नहाय खाय, खरना, संध्या अर्घ्य, उषा अर्घ्य: दिन के हिसाब से उपयोगी तैयारी
+2026-11-17 | tulsi-vivah-2026 | PREPARATION | start=2026-11-21 | end=2026-11-21 | seed=युवाओं के लिए तुलसी-पूजा सजावट, सम्मानजनक आयोजन विचार
+2026-11-18 | tulsi-vivah-2026 | PREPARATION | start=2026-11-21 | end=2026-11-21 | seed=तुलसी विवाह की सरल घर-परंपराएं
+2026-11-19 | tulsi-vivah-2026 | PREPARATION | start=2026-11-21 | end=2026-11-21 | seed=देवउठनी का अर्थ, सांस्कृतिक कहानी और उत्सव तैयारी
+2026-11-20 | tulsi-vivah-2026 | PREPARATION | start=2026-11-21 | end=2026-11-21 | seed=युवाओं के लिए तुलसी-पूजा सजावट, सम्मानजनक आयोजन विचार
+2026-11-21 | tulsi-vivah-2026 | FINAL_DAY | start=2026-11-21 | end=2026-11-21 | seed=तुलसी विवाह की सरल घर-परंपराएं
+2026-11-22 | kartik-purnima-2026 | PREPARATION | start=2026-11-24 | end=2026-11-24 | seed=युवाओं के लिए सांस्कृतिक रोशनी सजावट और सुरक्षा
+2026-11-23 | kartik-purnima-2026 | PREPARATION | start=2026-11-24 | end=2026-11-24 | seed=कार्तिक पूर्णिमा का अर्थ, परिवार में उत्सव के उपाय
+2026-11-24 | kartik-purnima-2026 | FINAL_DAY | start=2026-11-24 | end=2026-11-24 | seed=देव दीपावली की दीप-परंपरा और शानदार दृश्य
