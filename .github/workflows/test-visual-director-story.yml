@@ -43,6 +43,9 @@ jobs:
           assert 'visual_qc.py' in w
           assert 'out/visual_qc_report.json' in w
           assert "YOUTUBE_PRIVACY:" in w and "inputs.privacy || 'private'" in w
+          assert "RELEASE_FLAGS=(--draft)" in w
+          assert "review_approved == true" in w
+          assert "github.event_name == 'workflow_dispatch'" in w
           assert 'flow_clip_ingest' not in w
           assert 'flow_clips_json:' not in w
           assert '_story_visual_style' in s
