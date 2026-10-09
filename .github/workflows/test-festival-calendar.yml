@@ -1,0 +1,37 @@
+name: Test Festival Priority Calendar
+
+on:
+  push:
+    branches: [office-make-clone]
+    paths:
+      - 'data/festival_routes_2026.json'
+      - 'tests/test_festival_routes.py'
+      - '.github/workflows/test-festival-calendar.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-routes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate dated festival router and competing Garba topics
+        run: python -m unittest discover -s tests -p 'test_festival_routes.py' -v
+      - name: Confirm Make can fetch public calendar source
+        run: |
+          set -euo pipefail
+          curl -fLSs --retry 3 --max-time 45 \
+            'https://raw.githubusercontent.com/rahul4128/long-video/office-make-clone/data/festival_routes_2026.json' \
+            -o /tmp/festival_routes_remote.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          local = json.loads(Path('data/festival_routes_2026.json').read_text())
+          remote = json.loads(Path('/tmp/festival_routes_remote.json').read_text())
+          assert local['daily'] == remote['daily'], 'Remote source differs from checked-in daily routes'
+          assert remote['daily']['2026-10-09']['festival_id'] == 'sharad-navratri-2026'
+          print('Make calendar URL reachable; date-indexed routes are current.')
+          PY
