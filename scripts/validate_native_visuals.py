@@ -53,60 +53,29 @@ def verify_shot(kind, scene_num, shot):
             raise ValueError(f"{kind} scene {scene_num}: unreadable MP4 {filename}: {exc}") from exc
 
 
+from visual_evidence import (
+    detect_instructional_category,
+    validate_demonstration_evidence,
+)
+
+
 def _requires_precise_action_footage(titles):
-    """Physical movement lessons need a verified demonstration, not generic B-roll.
-
-    This does not ban Garba or dance content. Cultural stories, history, festivals
-    and celebration footage continue to work normally. It applies when a video's
-    central promise is to TEACH named dance steps or choreography.
-    """
-    text = " ".join(str(x or "") for x in titles).casefold()
-    dance = any(x in text for x in (
-        "गरबा", "डांडिया", "डांस", "नृत्य", "garba", "dandiya", "dance", "dancing",
-    ))
-    instruction = bool(re.search(
-        r"स्टेप|कदम.*(?:सीख|सिख)|(?:सीख|सिख).*कदम|"
-        r"\\bstep(?:s)?\\b|\\bfootwork\\b|\\bchoreograph|"
-        r"(?:सीख|सिख).*नाच|(?:सीख|सिख).*डांस",
-        text, flags=re.IGNORECASE,
-    ))
-    return dance and instruction
+    """Compatibility helper used by older tests."""
+    return detect_instructional_category(titles) is not None
 
 
-def validate_tutorial_visual_evidence(titles, report):
-    """Reject unverified choreography demonstrations before public/private delivery.
-
-    A stock search for a generic person, hands or dancer does not prove the
-    movement shown matches a narrated Garba step. This checks only available
-    source/query evidence; even a PASS still requires a human video review.
-    """
-    if not _requires_precise_action_footage(titles):
-        return
-    if not isinstance(report, dict):
-        raise ValueError("Instructional dance topic needs visual search evidence")
-    for kind in ("long", "shorts"):
-        scenes = report.get(kind) or []
-        videos = [
-            shot for scene in scenes for shot in (scene.get("shots") or [])
-            if shot.get("type") == "video"
-        ]
-        specific = [
-            shot for shot in videos
-            if any(token in str(shot.get("queryUsed") or "").casefold() for token in (
-                "garba", "dandiya", "गरबा", "डांडिया",
-                "footwork", "dance steps", "choreography",
-            ))
-            and float(shot.get("selectionScore") or 0) >= 0.65
-        ]
-        if len(specific) < 2:
-            raise ValueError(
-                f"{kind}: title promises precise dance steps but no confirmed "
-                f"technique-relevant visual examples ({len(specific)} specific clips; "
-                f"{len(videos)} total). Generic person/hands/dancer footage or AI "
-                "stills cannot verify a real choreography lesson. Choose a "
-                "non-instructional culture/celebration story or provide real "
-                "reviewable demonstrations."
-            )
+def validate_tutorial_visual_evidence(titles, report, *, long_scenes=None,
+                                      shorts_scenes=None, manifest_path=None,
+                                      media_root=MEDIA_ROOT):
+    """Use actual file-hash-pinned review, NEVER stock search title/score alone."""
+    validate_demonstration_evidence(
+        titles,
+        long_scenes or [],
+        shorts_scenes or [],
+        report,
+        manifest_path or ROOT / "public" / "verified_action_clips.json",
+        media_root,
+    )
 
 
 def main():
@@ -131,12 +100,18 @@ def main():
             print(f"Native visuals OK: {kind} scene {i}, {len(shots)} shot(s)", flush=True)
     if counts["images"] + counts["videos"] == 0:
         raise ValueError("Native visuals: no shots at all")
-    titles = []
-    for _, filename in FILES:
-        titles.append(json.loads(filename.read_text(encoding="utf-8")).get("title", ""))
+    props = [json.loads(filename.read_text(encoding="utf-8")) for _, filename in FILES]
+    titles = [data.get("title", "") for data in props]
     reportfile = ROOT / "out" / "visual_search_report.json"
     report = json.loads(reportfile.read_text(encoding="utf-8")) if reportfile.is_file() else None
-    validate_tutorial_visual_evidence(titles, report)
+    validate_tutorial_visual_evidence(
+        titles, report,
+        long_scenes=props[0]["scenes"],
+        shorts_scenes=props[1]["scenes"],
+        manifest_path=os.environ.get("ACTION_DEMONSTRATION_MANIFEST")
+                      or ROOT / "public" / "verified_action_clips.json",
+        media_root=MEDIA_ROOT,
+    )
     print(f"SUCCESS: native media validated; {counts['videos']} stock/local clips, {counts['images']} AI/stock images", flush=True)
 
 
