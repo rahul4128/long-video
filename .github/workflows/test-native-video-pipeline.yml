@@ -1,0 +1,48 @@
+name: Validate Native Video Generation Path
+
+on:
+  push:
+    branches: [office-make-clone]
+    paths:
+      - '.github/workflows/render.yml'
+      - 'generate_assets.py'
+      - 'scripts/validate_native_visuals.py'
+      - '.github/workflows/test-native-video-pipeline.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Compile video pipeline and validator
+        run: python -m py_compile generate_assets.py scripts/validate_native_visuals.py content_qc.py
+      - name: Confirm complete native-only render path and private sample guard
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          w = Path(".github/workflows/render.yml").read_text()
+          a = Path("generate_assets.py").read_text()
+          assert "python generate_assets.py" in w
+          assert "python scripts/validate_native_visuals.py" in w
+          assert "python scripts/flow_clip_ingest.py" not in w
+          assert "flow_clips_json:" not in w
+          assert "github.event_name == 'workflow_dispatch' && 'private'" in w
+          assert 'fetch_multi_source_video' in a
+          assert 'generate_ai_image' in a
+          assert '(idx == 1 or idx % 2 == 0)' in a
+          print("OK: stock/AI scene generation, QC and private dispatch; Google Flow not needed")
+          PY
+      - name: Validator fails closed with missing props
+        run: |
+          if python scripts/validate_native_visuals.py; then
+            echo "ERROR: validator passed without generated assets"; exit 1
+          fi
+          echo "OK: missing scenes correctly fail"
