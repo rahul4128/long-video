@@ -853,7 +853,17 @@ def generate_cloudflare_flux(prompt: str, dest_path: str, aspect_ratio: str = "1
         "Content-Type": "application/json"
     }
     clean_text = text_free_prompt(prompt).replace("\"", "").strip()
-    final_prompt = f"{clean_text}, Indian mythological devotional painting, {aspect_ratio} composition, warm divine lighting, highly detailed"
+    # Never force a mythology-painting style onto real festival culture, youth
+    # entertainment, outfits, food or human-interest scenes. Preserve explicit
+    # visual identity restrictions supplied by the content director.
+    style = (
+        "photorealistic documentary quality, culturally authentic Indian festival"
+        if not any(w in clean_text.lower() for w in (
+            "mythological painting", "traditional painting", "devotional illustration",
+            "ancient epic painting", "divine illustration",
+        )) else "rich traditional Indian mythological devotional painting"
+    )
+    final_prompt = f"{clean_text}, {style}, {aspect_ratio} composition, visually dynamic, natural detailed lighting, sharp image"
 
     try:
         res = requests.post(url, headers=headers, json={"prompt": final_prompt[:450], "steps": 4}, timeout=50)
@@ -1538,7 +1548,9 @@ def process_long_scene_visual(scene_info):
         words = [w for w in prompt.split() if w.lower() not in ["the", "a", "an", "and", "with", "in", "on", "of", "cinematic", "16:9", "lighting", "shot"]]
         video_query = " ".join(words[:4])
 
-    should_try_video = (media_type == "video") or (media_type == "auto" and idx % 2 == 0)
+    # Prioritize real, correctly matched motion in the first five seconds.
+    # Preserve visualStrict metadata checks; if no precise stock exists, use AI frames.
+    should_try_video = (media_type == "video") or (media_type == "auto" and (idx == 1 or idx % 2 == 0))
 
     narration_text = scene.get("text") or scene.get("narration_chunk", "")
     target_seconds = estimate_scene_duration_seconds(narration_text)
