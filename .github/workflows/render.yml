@@ -584,7 +584,9 @@ jobs:
         continue-on-error: true
         env:
           MAKE_WEBHOOK_URL: ${{ secrets.MAKE_YOUTUBE_WEBHOOK_URL }}
-          YOUTUBE_PRIVACY: ${{ inputs.privacy || vars.YOUTUBE_PRIVACY || 'public' }}
+          # Manual/Make workflow_dispatch runs are private until editorial approval.
+          # A repository_dispatch can still use the configured channel policy.
+          YOUTUBE_PRIVACY: ${{ inputs.privacy || (github.event_name == 'workflow_dispatch' && 'private') || vars.YOUTUBE_PRIVACY || 'private' }}
         run: |
           set -e
           if [ -z "$MAKE_WEBHOOK_URL" ]; then
