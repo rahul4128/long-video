@@ -31,22 +31,22 @@ _SKILLS = {
 _INSTRUCTION = re.compile(
     r"स्टेप|सीख|सिख|कैसे (?:करें|बनाएं|बनाएँ|करे)|"
     r"फुटवर्क|कदम|विधि|रेसिपी|ट्यूटोरियल|"
-    r"\\bstep(?:s)?\\b|\\bhow to\\b|\\blearn\\b|"
-    r"\\btutorial\\b|\\btechnique\\b|\\bexercise\\b",
+    r"\bstep(?:s)?\b|\bhow to\b|\blearn\b|"
+    r"\btutorial\b|\btechnique\b|\bexercise\b",
     flags=re.IGNORECASE,
 )
 _ACTION = re.compile(
     r"स्टेप|कदम|सीख|सिख|फुटवर्क|रेसिपी|विधि|"
-    r"\\bstep(?:s)?\\b|\\bfootwork\\b|\\bmove\\b|"
-    r"\\bposture\\b|\\bpose\\b|\\btechnique\\b|"
-    r"\\binstruction\\b|\\btutorial\\b",
+    r"\bstep(?:s)?\b|\bfootwork\b|\bmove\b|"
+    r"\bposture\b|\bpose\b|\btechnique\b|"
+    r"\binstruction\b|\btutorial\b",
     flags=re.IGNORECASE,
 )
 
 
 def is_generic_stock_query(query: str) -> bool:
     """Exclude very broad queries, which repeatedly led to unrelated clips."""
-    q = re.sub(r"\\s+", " ", str(query or "").casefold()).strip()
+    q = re.sub(r"\s+", " ", str(query or "").casefold()).strip()
     return q in GENERIC_STOCK_QUERIES
 
 
