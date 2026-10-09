@@ -30,15 +30,6 @@ on:
         description: 'YouTube privacy for this run: public, unlisted or private (use private/unlisted when you want to polish in Canva first)'
         required: false
         type: string
-      flow_clips_json:
-        description: 'Optional JSON: {"long":[{"scene":1,"url":"https://github.com/rahul4128/long-video/releases/download/flow-YYYY-MM-DD/hook-long.mp4"}],"shorts":[...]}'
-        required: false
-        type: string
-      flow_clips_strict:
-        description: 'Fail the render if an explicitly supplied Flow clip cannot be imported'
-        required: false
-        default: false
-        type: boolean
 
 concurrency:
   group: canva-token-rotation
@@ -64,7 +55,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Static Python syntax check
-        run: python -m py_compile content_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/flow_clip_ingest.py
+        run: python -m py_compile content_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v7
@@ -125,16 +116,12 @@ jobs:
           HOOK_OVERLAY_ENABLED: ${{ vars.HOOK_OVERLAY_ENABLED || 'true' }}
         run: python generate_assets.py
 
-      # Flow clips are optional. The input may be supplied for a single manual
-      # run or via Make's repository_dispatch client_payload.flow_clips field.
-      # No clips => original stock/AI images and video logic remains unchanged.
-      # See scripts/flow_clip_ingest.py and docs/GOOGLE_FLOW_IMPORT.md.
-      - name: Add saved Google Flow clips to selected scenes
-        env:
-          FLOW_CLIPS_JSON: ${{ inputs.flow_clips_json || '' }}
-          FLOW_CLIPS_STRICT: ${{ inputs.flow_clips_strict || 'false' }}
-          DISPATCH_PAYLOAD: ${{ inputs.payload || toJson(github.event.client_payload) }}
-        run: python scripts/flow_clip_ingest.py
+      # Native visual pipeline: Pexels/Pixabay/Coverr/Wikimedia/local stock,
+      # then Cloudflare/Hugging Face AI images and fallback sub-shots.
+      # generate_assets.py already builds the full Long and Shorts props;
+      # no external browser-generated video files or clip imports needed.
+      - name: Validate complete native scene visuals before rendering
+        run: python scripts/validate_native_visuals.py
 
       - name: Upload content QC report
         if: always()
@@ -197,7 +184,6 @@ jobs:
             out/metadata.json
             out/content_qc_report.json
             out/canva_assets.json
-            out/flow_clip_report.json
           retention-days: 1
 
   # ---------------------------------------------------------------
