@@ -19,6 +19,7 @@ from sfx_engine import resolve_sound_effect_audio
 from visual_matcher import extract_visual_requirements, candidate_is_accurate
 from content_qc import validate_payload, fact_check_items
 from visual_qc import assess_sequence
+from scripts.visual_evidence import detect_instructional_category, is_generic_stock_query
 from storyteller import build_prosody_map, prepare_storyteller_text
 from hindi_text import to_spoken_hindi, hindi_display_text, pick_hindi, text_free_prompt, has_latin, best_hindi_title
 try:
@@ -80,6 +81,27 @@ _fixed_shorts_title = best_hindi_title(seo_metadata.get("shorts_title"), _fixed_
 if _fixed_shorts_title:
     seo_metadata["shorts_title"] = _fixed_shorts_title
 payload["seo_metadata"] = seo_metadata
+
+# Technical fact-check: an AI image or a stock query cannot prove choreography,
+# yoga/exercise movement, recipe technique, or a hands-on craft step.
+# Stop BEFORE expensive API/media calls when the script promises demonstrations
+# but no independently reviewed exact source clip manifest was prepared.
+_demo_category = detect_instructional_category([
+    seo_metadata.get("long_video_title", ""),
+    seo_metadata.get("shorts_title", ""),
+])
+if _demo_category and not os.path.isfile(
+    os.environ.get("ACTION_DEMONSTRATION_MANIFEST")
+    or "public/verified_action_clips.json"
+):
+    raise ValueError(
+        f"Instructional {_demo_category} episode needs approved motion footage "
+        "with real, human-reviewed step matching. A YouTube/stock search for "
+        "'person', 'dancer' or 'hands', a CLIP similarity score and synthetic "
+        "stills cannot teach verified technique. Either supply approved clips "
+        "with a SHA256 manifest or choose a visual cultural story that does "
+        "not promise exact physical instructions."
+    )
 thumbnail_data = payload.get("thumbnail", {})
 # Shorts-specific 9:16 thumbnail (own background image + hook text) - see
 # the Make.com prompt's new `shorts_thumbnail` field and section 2c below.
@@ -1680,28 +1702,39 @@ def _visual_beat_prompt(scene_prompt: str, beat: dict) -> str:
 
 
 def _visual_beat_queries(beat: dict, fallback_query: str = "") -> list:
-    """Return an ordered, de-duplicated query bundle for one visual beat.
+    """Use action/topic-specific text; never lead with 'person' or 'hands'.
 
-    Phase 2 deliberately tries several director-authored beat queries but
-    still selects the first acceptable stock result. Multi-candidate semantic
-    reranking is a later phase.
+    The previous director gave 'person', 'hands' and 'dancer' priority over
+    the subject-specific festival query, and those generic clips won the
+    ranking despite being irrelevant to the narrated technique.
     """
     configured_limit = int(os.getenv("VISUAL_BEAT_MAX_QUERIES", "3") or 3)
     limit = max(1, min(4, configured_limit))
-
-    queries = []
+    fallback = re.sub(r"\\s+", " ", str(fallback_query or "")).strip()
+    specific = []
     for raw in (beat.get("queries") or []):
-        q = re.sub(r"\s+", " ", str(raw or "")).strip()
-        if q and q.lower() not in {x.lower() for x in queries}:
-            queries.append(q)
-        if len(queries) >= limit:
-            break
+        query = re.sub(r"\\s+", " ", str(raw or "")).strip()
+        if not query or is_generic_stock_query(query):
+            continue
+        if query.casefold() not in {q.casefold() for q in specific}:
+            specific.append(query)
 
-    fallback_query = re.sub(r"\s+", " ", str(fallback_query or "")).strip()
-    if fallback_query and fallback_query.lower() not in {x.lower() for x in queries}:
-        queries.append(fallback_query)
-
-    return queries[:limit]
+    # Put the fully contextual director scene query first when beat suggestions
+    # are vague ('person looking') or contain only broad generic subjects.
+    # Limit of 1-4 queries does not silently drop the useful scene context.
+    vague_beat_queries = not specific or all(
+        re.search(r"\\b(person|hands|dancer)\\b", q, flags=re.IGNORECASE)
+        and len(q.split()) <= 4
+        for q in specific
+    )
+    if fallback and not is_generic_stock_query(fallback):
+        if vague_beat_queries:
+            specific.insert(0, fallback)
+        elif fallback.casefold() not in {q.casefold() for q in specific}:
+            specific.append(fallback)
+    # A stock search must contain useful scene context; if it doesn't, choose
+    # a story-specific AI visual rather than an unrelated generic stock clip.
+    return list(dict.fromkeys(specific))[:limit]
 
 
 def _generate_visual_beat_image(scene_prompt: str, beat: dict, orientation: str,
@@ -1874,7 +1907,11 @@ def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
                 # mythology scenes intentionally skip this fuzzy filename match.
                 requirements = extract_visual_requirements(" ".join(queries), beat_prompt)
                 local_terms = " ".join(queries)
-                if not requirements.get("strict") and fetch_local_library_video(local_terms, dest):
+                if (
+                    not requirements.get("strict")
+                    and any(not is_generic_stock_query(q) for q in queries)
+                    and fetch_local_library_video(local_terms, dest)
+                ):
                     shot = {
                         "type": "video",
                         "file": filename,
