@@ -47,7 +47,7 @@ def validate_release_url(url):
     if (parsed.scheme != "https" or parsed.netloc != "github.com"
             or not parts.startswith(RELEASE_PREFIX) or parsed.query or parsed.fragment):
         raise ValueError("Only HTTPS Release asset URLs from rahul4128/long-video are permitted")
-    if len(parts.split("/")) < 8 or any(c in parts for c in ["..", "%2f", "%2F"]):
+    if len(parts.split("/")) < 7 or any(c in parts for c in ["..", "%2f", "%2F"]):
         raise ValueError("Malformed GitHub Release asset URL")
     if not parts.lower().endswith(".mp4"):
         raise ValueError("The release asset must be an MP4")
