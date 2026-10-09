@@ -1,0 +1,29 @@
+name: Test Google Flow Clip Import
+
+on:
+  pull_request:
+    branches: [office-make-clone]
+    paths:
+      - 'scripts/flow_clip_ingest.py'
+      - 'tests/test_flow_clip_ingest.py'
+      - '.github/workflows/render.yml'
+      - '.github/workflows/test-flow-clip-import.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-flow-clips:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check FFmpeg availability
+        run: |
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
+      - name: Python syntax
+        run: python -m py_compile scripts/flow_clip_ingest.py tests/test_flow_clip_ingest.py
+      - name: Generate synthetic Flow-style sample and verify scene injection
+        run: python -m unittest discover -s tests -p 'test_flow_clip_ingest.py' -v
