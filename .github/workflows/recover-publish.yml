@@ -15,7 +15,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
   actions: read
 
 concurrency:
@@ -39,15 +39,18 @@ jobs:
           set -euo pipefail
           [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]] || exit 1
           [[ "$RELEASE_ID" =~ ^[0-9]+$ ]] || exit 1
-          RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN")
+          echo "Checking source workflow run $SOURCE_RUN"
+          RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN") || { echo "::error::Cannot access source workflow run $SOURCE_RUN"; exit 1; }
           echo "$RUN" | jq -e --arg branch "$GITHUB_REF_NAME" '.head_branch == $branch' >/dev/null
-          JOBS=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN/jobs?per_page=100")
+          echo "Checking upstream job results"
+          JOBS=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN/jobs?per_page=100") || { echo "::error::Cannot access source workflow jobs"; exit 1; }
           for job in generate-assets render-long render-shorts render-thumbnail render-thumbnail-shorts media-qc; do
             echo "$JOBS" | jq -e --arg name "$job" '.jobs | any(.name == $name and .conclusion == "success")' >/dev/null || {
               echo "::error::Required upstream job did not succeed: $job"; exit 1;
             }
           done
-          JSON=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")
+          echo "Checking draft release $RELEASE_ID"
+          JSON=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID") || { echo "::error::Cannot access draft release $RELEASE_ID with GITHUB_TOKEN"; exit 1; }
           echo "$JSON" | jq -e --arg tag "devotional-$SOURCE_RUN" '.tag_name == $tag and .draft == true' >/dev/null
           for name in final_video.mp4 final_video_shorts.mp4 thumbnail.jpg thumbnail_shorts_final.jpg; do
             echo "$JSON" | jq -e --arg name "$name" '.assets | any(.name == $name and .size > 0)' >/dev/null || {
