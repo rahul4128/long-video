@@ -582,39 +582,53 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REVIEW_APPROVED: ${{ inputs.review_approved || 'false' }}
         run: |
-          set -e
+          set -euo pipefail
           TAG="devotional-${{ github.run_id }}"
-          RELEASE_FLAGS=(--draft)
-          if [ "$REVIEW_APPROVED" = "true" ]; then
-            RELEASE_FLAGS=()
+          # Draft releases are not reliably accessible through the tag lookup API.
+          # Reuse an existing release on job retry instead of deleting its assets.
+          RELEASE_ID=$(gh api "repos/${{ github.repository }}/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -n 1)
+          if [ -z "$RELEASE_ID" ]; then
+            RELEASE_FLAGS=(--draft)
+            if [ "$REVIEW_APPROVED" = "true" ]; then
+              RELEASE_FLAGS=()
+            fi
+            {
+              cat out/youtube_pack.md 2>/dev/null || echo "_YouTube pack not generated._"
+              echo
+              cat out/canva_notes.md 2>/dev/null || echo "_Canva finishing not run._"
+            } > release_notes.md
+            gh release create "$TAG" \
+              "video/final_video.mp4" \
+              "shorts/final_video_shorts.mp4" \
+              "thumbnail_final/thumbnail.jpg" \
+              "thumbnail_shorts_final/thumbnail_shorts_final.jpg" \
+              --repo "${{ github.repository }}" \
+              --title "Devotional upload $TAG" \
+              "${RELEASE_FLAGS[@]}" \
+              --notes-file release_notes.md
+            RELEASE_ID=$(gh api "repos/${{ github.repository }}/releases" --paginate \
+              --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -n 1)
+          else
+            echo "Reusing existing release ID $RELEASE_ID for $TAG"
           fi
-          # "Re-run failed jobs" keeps the same run_id: replace this run's old
-          # release instead of failing with "release already exists".
-          gh release delete "$TAG" --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
-          {
-            cat out/youtube_pack.md 2>/dev/null || echo "_YouTube pack not generated._"
-            echo
-            cat out/canva_notes.md 2>/dev/null || echo "_Canva finishing not run._"
-          } > release_notes.md
-          gh release create "$TAG" \
-            "video/final_video.mp4" \
-            "shorts/final_video_shorts.mp4" \
-            "thumbnail_final/thumbnail.jpg" \
-            "thumbnail_shorts_final/thumbnail_shorts_final.jpg" \
-            --repo "${{ github.repository }}" \
-            --title "Devotional upload $TAG" \
-            "${RELEASE_FLAGS[@]}" \
-            --notes-file release_notes.md
+          test -n "$RELEASE_ID"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
 
       - name: Look up asset URLs (draft releases are not publicly downloadable)
         id: assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -e
-          TAG="${{ steps.release.outputs.tag }}"
-          JSON=$(gh api "repos/${{ github.repository }}/releases/tags/$TAG")
+          set -euo pipefail
+          JSON=$(gh api "repos/${{ github.repository }}/releases/${{ steps.release.outputs.release_id }}")
+          for NAME in final_video.mp4 final_video_shorts.mp4 thumbnail.jpg thumbnail_shorts_final.jpg; do
+            echo "$JSON" | jq -e --arg name "$NAME" '.assets | any(.name == $name and .size > 0)' > /dev/null || {
+              echo "::error::Missing or empty release asset: $NAME"
+              exit 1
+            }
+          done
           echo "long_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="final_video.mp4") | .browser_download_url')" >> "$GITHUB_OUTPUT"
           echo "shorts_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="final_video_shorts.mp4") | .browser_download_url')" >> "$GITHUB_OUTPUT"
           echo "thumb_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="thumbnail.jpg") | .browser_download_url')" >> "$GITHUB_OUTPUT"
