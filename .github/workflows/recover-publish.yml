@@ -1,0 +1,105 @@
+name: Recover Devotional Publish and Notify
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Original successful render run ID'
+        required: true
+        default: '37984052299'
+        type: string
+      release_id:
+        description: 'Existing draft release ID'
+        required: true
+        default: '408309605'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: devotional-publish-recovery-${{ inputs.source_run_id }}
+  cancel-in-progress: false
+
+jobs:
+  publish-and-notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate source run and existing draft release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.source_run_id }}
+          RELEASE_ID: ${{ inputs.release_id }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$RELEASE_ID" =~ ^[0-9]+$ ]] || exit 1
+          RUN=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN")
+          echo "$RUN" | jq -e --arg branch "$GITHUB_REF_NAME" '.head_branch == $branch' >/dev/null
+          JOBS=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN/jobs?per_page=100")
+          for job in generate-assets render-long render-shorts render-thumbnail render-thumbnail-shorts media-qc; do
+            echo "$JOBS" | jq -e --arg name "$job" '.jobs | any(.name == $name and .conclusion == "success")' >/dev/null || {
+              echo "::error::Required upstream job did not succeed: $job"; exit 1;
+            }
+          done
+          JSON=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID")
+          echo "$JSON" | jq -e --arg tag "devotional-$SOURCE_RUN" '.tag_name == $tag and .draft == true' >/dev/null
+          for name in final_video.mp4 final_video_shorts.mp4 thumbnail.jpg thumbnail_shorts_final.jpg; do
+            echo "$JSON" | jq -e --arg name "$name" '.assets | any(.name == $name and .size > 0)' >/dev/null || {
+              echo "::error::Missing release asset: $name"; exit 1;
+            }
+          done
+          echo "tag=devotional-$SOURCE_RUN" >> "$GITHUB_OUTPUT"
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+          echo "Existing release validated; draft remains private." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Restore source metadata artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "generated-assets-$SOURCE_RUN" --dir assets
+          test -s assets/out/metadata.json
+          python -m json.tool assets/out/metadata.json >/dev/null
+
+      - name: Build YouTube upload pack
+        env:
+          PACK_METADATA_JSON: assets/out/metadata.json
+          PACK_OUTPUT: out/youtube_pack.md
+        run: |
+          mkdir -p out
+          python scripts/youtube_pack.py
+          cat out/youtube_pack.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Export verified release asset metadata for review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ inputs.release_id }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" \
+            --jq '{id,tag_name,draft,assets:[.assets[]|{id,name,size,url}]}' \
+            > out/release_assets.json
+          cat out/release_assets.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload recovered review pack
+        uses: actions/upload-artifact@v4
+        with:
+          name: devotional-recovery-${{ inputs.source_run_id }}
+          path: |
+            out/youtube_pack.md
+            out/release_assets.json
+          retention-days: 14
+
+      - name: Confirm review-only completion
+        run: |
+          echo "Recovery succeeded: existing draft release and upload metadata validated." >> "$GITHUB_STEP_SUMMARY"
+          echo "No media re-render, no release deletion, no Make notification, no YouTube upload." >> "$GITHUB_STEP_SUMMARY"
