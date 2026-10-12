@@ -114,6 +114,31 @@ def build(meta: dict) -> str:
     else:
         lines += ["- No specific dates/verses/overclaims detected. Still skim the script once."]
 
+    # Story strategy is embedded in the existing _meta.decisionBasis text.
+    strategy_keys = ("CONTENT_BUCKET", "PLAYLIST_NAME", "SERIES_NAME", "TARGET_AUDIENCE",
+                     "TOPIC_LONGEVITY", "VIEWER_QUESTION", "VIEWER_MOTIVATION",
+                     "EVENT_DATE", "PUBLISH_BEFORE", "DATE_SOURCE", "HOOK_0_5S",
+                     "RETENTION_BEATS", "EMOTIONAL_PAYOFF", "SUBSCRIBER_REASON",
+                     "RELATED_NEXT_EPISODE", "ANALYTICS_HYPOTHESIS", "SOURCE_REFERENCES")
+    strategy = {}
+    for line in str(m.get("decisionBasis") or "").splitlines():
+        line = line.strip().lstrip("- ").strip()
+        for key in strategy_keys:
+            if line.startswith(key + "=") or line.startswith(key + ":"):
+                strategy[key] = line[len(key) + 1:].strip()
+                break
+    lines += ["", "## 5. Story strategy and playlist placement", ""]
+    if strategy:
+        for key in strategy_keys:
+            lines.append(f"- **{key}**: {strategy.get(key) or 'NOT PROVIDED — review before upload'}")
+    else:
+        lines += ["- **Story strategy:** NOT PROVIDED — check metadata and choose playlist manually."]
+    lines += ["", "**Creator checklist**",
+              "- Confirm the suggested playlist exists in YouTube Studio.",
+              "- Add each video to a relevant topical playlist; link the Short to the Long.",
+              "- Verify event dates and regional variations before publishing.",
+              "- Track 7/30/90-day performance by content bucket, excluding one-off outliers."]
+
     if m:
         lines += ["", "<details><summary>Agent notes (experiment / critique)</summary>", ""]
         lines += [f"- **{k}**: {v}" for k, v in m.items()]
