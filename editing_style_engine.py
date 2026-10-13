@@ -135,11 +135,23 @@ def select_edit_style(context=None, scenes=None):
     context = context if isinstance(context, dict) else {}
     narrative_style, reason = infer_story_style(context, scenes)
     meta = context.get("_meta") if isinstance(context.get("_meta"), dict) else {}
-    declared = meta.get("editing_style")
+    # Make's existing schema passes _meta.decisionBasis unchanged. Let the
+    # story council add an EDIT_STYLE marker there; do not alter JSON mapping.
+    basis = str(meta.get("decisionBasis") or "")[:10000]
+    match = re.search(r"(?:^|\\n)\\s*EDIT_STYLE\\s*[:=]\\s*([a-z_]+)", basis, re.I)
+    declared = meta.get("editing_style") or (match.group(1) if match else None)
+    compatible_hints = {
+        "cinematic_devotional": set(STYLES),
+        "curiosity_reveal": {"curiosity_reveal", "presenter_explainer"},
+        "presenter_explainer": {"presenter_explainer", "curiosity_reveal"},
+        "emotional_story": {"emotional_story", "cinematic_devotional"},
+        "festival_energy": {"festival_energy", "curiosity_reveal"},
+    }
     if isinstance(declared, str):
         requested = ALIASES.get(declared.strip().lower(), declared.strip().lower())
-        if requested in STYLES and requested == narrative_style:
-            reason = "script_editorial_intent"
+        if requested in compatible_hints[narrative_style]:
+            narrative_style = requested
+            reason = "script_style_from_existing_make_payload"
     trend, trend_reason = _recent_signal_winner(meta.get("editing_style_signals"))
     selected = narrative_style
     # Preserve story-topic fit. A fast festival edit must not be imposed on an
