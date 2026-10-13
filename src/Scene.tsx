@@ -377,6 +377,19 @@ export const Scene: React.FC<SceneProps> = ({
     opacity = Math.min(opacity, out);
   }
 
+  // Narration takes priority: duck score under spoken words, fade in/out at
+  // scene boundaries and lift slightly only during pauses or reveals.
+  const localSeconds = frame / fps;
+  const words = scene.words || [];
+  const speaking = !words.length || words.some(
+    (word) => localSeconds >= word.start - 0.14 && localSeconds <= word.end + 0.14
+  );
+  const peak = scene.musicMood === 'revelation' || scene.musicMood === 'uplifting';
+  const unduckedVolume = peak ? 0.105 : 0.075;
+  const musicVolume = (speaking ? 0.34 : 1) * unduckedVolume *
+    Math.min(1, frame / Math.max(1, fps * 0.45),
+      (safeDuration - frame) / Math.max(1, fps * 0.65));
+
   const narrationFile =
     format === 'shorts'
       ? `audio/shorts_chunk_${scene.scene_number}.mp3`
@@ -536,6 +549,13 @@ export const Scene: React.FC<SceneProps> = ({
   return (
     <AbsoluteFill style={{ opacity, overflow: 'hidden', backgroundColor: '#000000' }}>
       <Audio src={staticFile(narrationFile)} volume={1.0} />
+      {scene.musicFile && (
+        <Audio
+          src={staticFile(`audio/${scene.musicFile}`)}
+          volume={Math.max(0, musicVolume)}
+          loop
+        />
+      )}
 
       {scene.soundEffect && scene.soundEffect !== 'none' && (
         <Audio src={staticFile(effectFile)} volume={0.35} />
