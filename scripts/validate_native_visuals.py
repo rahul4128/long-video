@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from image_framing import framing_issue
 
 ROOT = Path(__file__).resolve().parents[1]
 MEDIA_ROOT = ROOT / "public" / "images"
@@ -33,6 +34,10 @@ def verify_shot(kind, scene_num, shot):
     if mediatype == "image":
         if not (head.startswith(b"\xff\xd8\xff") or head.startswith(b"\x89PNG\r\n\x1a\n") or head[:4] == b"RIFF" and head[8:12] == b"WEBP"):
             raise ValueError(f"{kind} scene {scene_num}: not a valid image signature {filename}")
+        target_ratio = "9:16" if kind == "Shorts" else "16:9"
+        issue = framing_issue(str(path), target_ratio)
+        if issue:
+            raise ValueError(f"{kind} scene {scene_num}: invalid image framing {filename}: {issue}")
     else:
         if len(head) < 12 or head[4:8] != b"ftyp":
             raise ValueError(f"{kind} scene {scene_num}: not an MP4 container {filename}")
@@ -100,6 +105,14 @@ def main():
             print(f"Native visuals OK: {kind} scene {i}, {len(shots)} shot(s)", flush=True)
     if counts["images"] + counts["videos"] == 0:
         raise ValueError("Native visuals: no shots at all")
+    # Thumbnail images are separate from the scene props but must obey the
+    # same aspect rules before the Remotion thumbnail jobs begin.
+    for filename, target_ratio in (("thumbnail.jpg", "16:9"),
+                                   ("thumbnail_shorts.jpg", "9:16")):
+        image = MEDIA_ROOT / filename
+        issue = framing_issue(str(image), target_ratio)
+        if issue:
+            raise ValueError(f"Thumbnail {filename}: invalid image framing: {issue}")
     props = [json.loads(filename.read_text(encoding="utf-8")) for _, filename in FILES]
     titles = [data.get("title", "") for data in props]
     reportfile = ROOT / "out" / "visual_search_report.json"
