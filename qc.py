@@ -90,6 +90,36 @@ def check_duration(p, path, duration):
     return ok
 
 
+
+def visual_integrity(path, label, streams):
+    """Check dimensions and extended black screens; brief fades are allowed."""
+    errors, warnings = [], []
+    video = next((x for x in streams if x.get("codec_type") == "video"), {})
+    w, h = int(video.get("width") or 0), int(video.get("height") or 0)
+    if not w or not h:
+        errors.append("video dimensions missing")
+    elif label == "Short" and not (0.54 <= w / h <= 0.59):
+        errors.append(f"Short must be approximately 9:16; got {w}x{h}")
+    elif label == "long video" and not (1.72 <= w / h <= 1.82):
+        errors.append(f"Long must be approximately 16:9; got {w}x{h}")
+    command = ["ffmpeg", "-hide_banner", "-nostats", "-i", path,
+               "-vf", "blackdetect=d=2.5:pix_th=0.08:pic_th=0.98",
+               "-an", "-f", "null", "-"]
+    try:
+        r = subprocess.run(command, capture_output=True, text=True, timeout=180)
+        if r.returncode:
+            warnings.append("black-screen analysis unavailable")
+        else:
+            import re
+            spans = re.findall(r"black_start:([0-9.]+)\\s+black_end:([0-9.]+)\\s+black_duration:([0-9.]+)", r.stderr)
+            for start, end, length in spans:
+                if float(length) >= 3.0:
+                    errors.append(f"extended black-screen interval {start}-{end}s ({length}s)")
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        warnings.append(f"black-screen analysis unavailable: {exc}")
+    return errors, warnings
+
+
 def check(path, kind):
     if not os.path.exists(path):
         return {"path": path, "ok": False, "error": "missing"}
@@ -119,6 +149,15 @@ def check(path, kind):
             p["ok"] = False
             p["error"] = "no audio track"
         p["ok"] = check_duration(p, path, duration) and p["ok"]
+        label = DURATION_RULES[path][1]
+        integrity_errors, integrity_warnings = visual_integrity(path, label, streams)
+        p["visualIntegrityErrors"] = integrity_errors
+        p["visualIntegrityWarnings"] = integrity_warnings
+        if integrity_errors:
+            p["ok"] = False
+            p["error"] = "; ".join(filter(None, [p.get("error"), *integrity_errors]))
+        for warning in integrity_warnings:
+            print(f"::warning::{warning}")
     return p
 
 
