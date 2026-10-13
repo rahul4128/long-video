@@ -14,6 +14,7 @@ import {
 import { Shot, SceneItem } from './types';
 import { EditorialAccent } from './EditorialAccent';
 import { EditFx } from './EditFx';
+import { VerifiedComparison, VerifiedPrivacyBlur } from './ConditionalEditSkills';
 
 interface SceneProps {
   scene: SceneItem;
@@ -675,6 +676,8 @@ export const Scene: React.FC<SceneProps> = ({
                   incomingTransition={window.incomingTransition}
                   outgoingTransition={window.outgoingTransition}
                 />
+                <VerifiedComparison shot={window.shot} format={format} />
+                <VerifiedPrivacyBlur shot={window.shot} />
                 <EditFx
                   format={format}
                   spotlight={window.shot.editSpotlight}
