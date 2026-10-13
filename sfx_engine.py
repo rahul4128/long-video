@@ -63,6 +63,39 @@ def _download_freesound(effect_name: str, output_path: str) -> bool:
         print(f"Freesound SFX notice ({effect_name}): {exc}", flush=True)
     return False
 
+def _approved_local_sfx(effect_name: str, output_path: str) -> bool:
+    """Use only manually approved, licensed effects; never scrape Mixkit.
+
+    Set APPROVED_SFX_DIR to a directory containing manifest.json and audio files.
+    Manifest: {"temple_bell": {"file": "bell.wav", "license": "Mixkit Sound Effects Free License", "source_url": "https://mixkit.co/..."}}
+    Each file must be independently downloaded and its commercial-use license verified.
+    """
+    import json
+    import shutil
+    root = os.environ.get("APPROVED_SFX_DIR", "").strip()
+    if not root or not effect_name.replace("_", "").replace("-", "").isalnum():
+        return False
+    base = Path(root).resolve()
+    try:
+        manifest = json.loads((base / "manifest.json").read_text(encoding="utf-8"))
+        entry = manifest.get(effect_name)
+        if not isinstance(entry, dict):
+            return False
+        if entry.get("license") not in ("Mixkit Sound Effects Free License", "CC0 1.0") or not entry.get("source_url"):
+            return False
+        src = (base / str(entry.get("file", ""))).resolve()
+        if base not in src.parents or src.suffix.lower() not in (".wav", ".mp3", ".ogg") or not src.is_file():
+            return False
+        if src.stat().st_size < 1000 or src.stat().st_size > 25 * 1024 * 1024:
+            return False
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, output_path)
+        return True
+    except (OSError, ValueError, TypeError) as exc:
+        print(f"Approved SFX notice ({effect_name}): {exc}", flush=True)
+        return False
+
+
 def _ffmpeg_fallback(effect_name: str, output_path: str) -> bool:
     """Generate a short synthetic cue when no downloadable SFX is available."""
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -136,6 +169,10 @@ def resolve_sound_effect_audio(effect_name: str, output_path: str) -> bool:
     if not effect_name or effect_name == "none":
         return False
     if os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+        return True
+
+    if _approved_local_sfx(effect_name, output_path):
+        print(f"🔊 SFX ready from approved library: {effect_name}", flush=True)
         return True
 
     if _download_freesound(effect_name, output_path):
