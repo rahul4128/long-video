@@ -381,7 +381,7 @@ def fetch_pexels_video(query: str, dest_path: str, orientation: str = "landscape
         # per_page raised 4 -> 6: gives the relevance scorer below a bigger
         # pool to pick a genuine match from, instead of only ever choosing
         # between whichever 4 hits happened to sort first.
-        url = f"https://api.pexels.com/videos/search?query={clean_q}&orientation={orientation}&per_page=6"
+        url = f"https://api.pexels.com/v1/videos/search?query={clean_q}&orientation={orientation}&per_page=6"
         res = requests.get(url, headers={"Authorization": PEXELS_API_KEY}, timeout=15)
         if res.status_code == 200:
             videos = res.json().get("videos", [])
@@ -1241,7 +1241,7 @@ def _pexels_candidates(query: str, orientation: str, per_page: int = 5) -> list:
     try:
         clean_q = urllib.parse.quote(query.strip()[:60])
         url = (
-            f"https://api.pexels.com/videos/search?query={clean_q}"
+            f"https://api.pexels.com/v1/videos/search?query={clean_q}"
             f"&orientation={orientation}&per_page={per_page}"
         )
         res = requests.get(url, headers={"Authorization": PEXELS_API_KEY}, timeout=15)
