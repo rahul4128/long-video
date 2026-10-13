@@ -179,7 +179,33 @@ def validate_editing(scenes):
             raise ValueError("Too many text cards in one scene")
         if sum(s.get("transition") == "blur_cut" for s in shots) > 1:
             raise ValueError("Excessive blur transitions")
+        media_pool = {str(s.get("file") or "") for s in shots}
         for shot in shots:
+            compare_fields = bool(shot.get("comparisonBeforeFile") or shot.get("comparisonAfterFile"))
+            if compare_fields:
+                before = str(shot.get("comparisonBeforeFile") or "")
+                after = str(shot.get("comparisonAfterFile") or "")
+                if shot.get("comparisonApproved") is not True:
+                    raise ValueError("Before/after comparison must be explicitly verified")
+                if before == after or before not in media_pool or after not in media_pool:
+                    raise ValueError("Before/after requires two existing distinct scene assets")
+                if any(not re.fullmatch(r"[\\w.-]+\\.(?:png|jpg|jpeg|webp)", filename, flags=re.I)
+                       for filename in (before, after)):
+                    raise ValueError("Comparison only accepts approved still images from scene")
+            boxes = shot.get("privacyBlurBoxes")
+            if boxes:
+                if shot.get("privacyApproved") is not True or not isinstance(boxes, list) or len(boxes) > 3:
+                    raise ValueError("Privacy masks require approval and at most three boxes")
+                for box in boxes:
+                    if not isinstance(box, dict):
+                        raise ValueError("Invalid privacy mask")
+                    try:
+                        x, y = float(box["x"]), float(box["y"])
+                        w, h = float(box["width"]), float(box["height"])
+                    except (KeyError, ValueError, TypeError):
+                        raise ValueError("Invalid privacy mask coordinates")
+                    if not (0 <= x < 1 and 0 <= y < 1 and 0 < w <= 1 - x and 0 < h <= 1 - y):
+                        raise ValueError("Privacy mask exceeds frame")
             if shot.get("editTreatment") not in TREATMENTS:
                 raise ValueError("Invalid visual treatment")
             if shot.get("transition") not in TRANSITIONS:
