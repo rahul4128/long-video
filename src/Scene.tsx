@@ -166,8 +166,13 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
     : 0;
   const whipOffset = whipIn + whipOut;
   const whipBlur = (Math.abs(whipOffset) / 68) * 1.25;
+  const mildMatch = shot.colorCorrection;
+  const matchFilter = mildMatch
+    ? ' brightness(' + Math.max(0.92, Math.min(1.08, mildMatch.brightness)) + ')' +
+      ' saturate(' + Math.max(0.95, Math.min(1.05, mildMatch.saturation)) + ')'
+    : '';
   const visualFilter = (blurPx + whipBlur > 0
-    ? 'blur(' + (blurPx + whipBlur) + 'px) ' : '') + colorGrade;
+    ? 'blur(' + (blurPx + whipBlur) + 'px) ' : '') + colorGrade + matchFilter;
 
   // Phase 5: beat-specific camera direction is authoritative for AI images.
   // Videos keep the existing scene/director behavior so this phase cannot
