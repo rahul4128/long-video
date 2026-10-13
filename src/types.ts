@@ -56,11 +56,14 @@ export interface Shot {
   // for the first shot in a scene, which only cross-dissolves in from the
   // previous scene). Scene.tsx alternates crossfade/blur_cut by shot index
   // when this isn't provided, so older props.json files still render fine.
-  transition?: 'cut' | 'crossfade' | 'blur_cut';
+  transition?: 'cut' | 'crossfade' | 'blur_cut' | 'whip_pan' | 'flash_cut';
   // The editorial director uses these to guide movement/graphics without
   // moving real narration or altering shot times and visual sourcing.
   editTreatment?: 'clean' | 'detail' | 'impact' | 'breathing' | 'question';
   editorialLabel?: string;
+  editAccent?: 'cinematic_devotional' | 'curiosity_reveal' | 'presenter_explainer' | 'emotional_story' | 'festival_energy';
+  editSpotlight?: boolean;
+  editBeatSnap?: boolean;
 }
 export interface VisualBeat {
   beatIndex: number;
@@ -128,6 +131,8 @@ export interface SceneItem {
   // Mood-aware soundtrack selected once by Python; paths point under public/audio/.
   musicFile?: string;
   musicMood?: 'mystery' | 'devotional' | 'emotional' | 'revelation' | 'uplifting';
+  editStyle?: 'cinematic_devotional' | 'curiosity_reveal' | 'presenter_explainer' | 'emotional_story' | 'festival_energy';
+  captionStyle?: 'calm' | 'focus';
   soundEffect?: 'temple_bell' | 'shankh' | 'om_drone' | 'flute_swell' | 'none';
   // Hard visual requirements emitted by the story director. The Python asset
   // pipeline uses these to reject semantically wrong stock footage before
