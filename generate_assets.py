@@ -3898,7 +3898,12 @@ async def process():
     )
     print(f"🖼️ Generating ONE High-CTR Long Thumbnail ({thumbnail_text_position})...", flush=True)
     thumb_dest = "public/images/thumbnail.jpg"
-    generate_ai_image(thumb_prompt, thumb_dest, aspect_ratio="16:9", pollinations_width=1920, pollinations_height=1080)
+    long_thumb_ok = generate_ai_image(thumb_prompt, thumb_dest, aspect_ratio="16:9", pollinations_width=1920, pollinations_height=1080)
+    if not long_thumb_ok:
+        print("  ⚠️ All AI image providers failed for Long thumbnail; using safe local background.", flush=True)
+        create_local_visual_fallback(thumb_dest, orientation="landscape", allow_reference_reuse=False)
+    if framing_issue(thumb_dest, "16:9"):
+        raise RuntimeError("Long thumbnail failed mandatory framing QC")
     subprocess.run(["cp", thumb_dest, "out/thumbnail.jpg"], check=False)
 
     # 2b. Remotion hook-text props. The text position is dynamic instead of
@@ -3934,7 +3939,12 @@ async def process():
     )
     print(f"🖼️ Generating ONE High-CTR Shorts Thumbnail ({shorts_thumbnail_text_position})...", flush=True)
     shorts_thumb_dest = "public/images/thumbnail_shorts.jpg"
-    generate_ai_image(shorts_thumb_prompt, shorts_thumb_dest, aspect_ratio="9:16", pollinations_width=1080, pollinations_height=1920)
+    shorts_thumb_ok = generate_ai_image(shorts_thumb_prompt, shorts_thumb_dest, aspect_ratio="9:16", pollinations_width=1080, pollinations_height=1920)
+    if not shorts_thumb_ok:
+        print("  ⚠️ All AI image providers failed for Shorts thumbnail; using safe local background.", flush=True)
+        create_local_visual_fallback(shorts_thumb_dest, orientation="portrait", allow_reference_reuse=False)
+    if framing_issue(shorts_thumb_dest, "9:16"):
+        raise RuntimeError("Shorts thumbnail failed mandatory framing QC")
     subprocess.run(["cp", shorts_thumb_dest, "out/thumbnail_shorts.jpg"], check=False)
 
     shorts_thumbnail_hook_text = pick_hindi(
