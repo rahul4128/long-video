@@ -31,6 +31,11 @@ def main():
                 raise SystemExit(f"Editorial QC report coverage mismatch: {format_name}")
             for scene in scenes:
                 for shot in scene.get("shots") or []:
+                    if shot.get("comparisonApproved") is True:
+                        for key in ("comparisonBeforeFile", "comparisonAfterFile"):
+                            candidate = ROOT / "public" / "images" / str(shot.get(key) or "")
+                            if not candidate.is_file():
+                                raise SystemExit(f"Missing comparison evidence asset: {key}")
                     if len(str(shot.get("editorialLabel") or "").split()) > 4:
                         raise SystemExit("Editorial label too long")
                     # Editing must NOT introduce extra, unsourced hyperlinks.
