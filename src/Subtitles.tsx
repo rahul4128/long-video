@@ -91,9 +91,31 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
     }
   }
 
-  const captionText = activeChunk
-    ? activeChunk.map((w) => w.word).join(' ')
-    : text;
+  // Karaoke-style focus makes spoken Hindi easier to follow on a small screen.
+  // Keep the entire short phrase visible; emphasize only the current word.
+  // Never flash the whole script before the first timed caption arrives.
+  const captionContent = activeChunk
+    ? activeChunk.map((w, i) => {
+        const isCurrent = currentTime >= w.start && currentTime <= w.end + 0.05;
+        const isUpcoming = currentTime < w.start;
+        return (
+          <React.Fragment key={i}>
+            <span
+              style={{
+                color: isCurrent ? '#FFDA64' : isUpcoming ? '#FAE9CB' : '#FFF7E7',
+                fontWeight: isCurrent ? 900 : 700,
+                textShadow: isCurrent
+                  ? '0 0 14px rgba(255,205,85,0.38), 0 2px 6px rgba(0,0,0,0.9)'
+                  : undefined,
+              }}
+            >
+              {w.word}
+            </span>
+            {i < activeChunk.length - 1 ? ' ' : ''}
+          </React.Fragment>
+        );
+      })
+    : null;
 
   const chunkStart = activeChunk?.[0]?.start ?? 0;
   const chunkAgeFrames = Math.max(0, frame - Math.round(chunkStart * fps));
@@ -286,7 +308,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
                 display: 'inline-block',
               }}
             >
-              {captionText}
+              {captionContent}
             </span>
           </p>
         </div>
