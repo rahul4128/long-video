@@ -55,6 +55,7 @@ export const DevotionalShortsComposition: React.FC<DevotionalVideoProps> = ({
                 text={scene.narration_chunk}
                 words={scene.words}
                 visualBeats={scene.visualBeats}
+                captionStyle={scene.captionStyle || 'focus'}
                 format="shorts"
                 sceneDurationInFrames={sceneDurationInFrames}
               />
