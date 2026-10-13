@@ -12,6 +12,7 @@ import {
   useVideoConfig,
 } from 'remotion';
 import { Shot, SceneItem } from './types';
+import { EditorialAccent } from './EditorialAccent';
 
 interface SceneProps {
   scene: SceneItem;
@@ -132,6 +133,16 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
 
   const blurPx = Math.max(entryBlur, exitBlur);
   const isShorts = format === 'shorts';
+  const treatment = shot.editTreatment || 'clean';
+  // A restrained grade creates visual consistency across licensed real footage,
+  // illustrations and AI visuals; never claim an era or event via an effect.
+  const colorGrade =
+    treatment === 'impact'
+      ? 'contrast(1.07) saturate(1.06)'
+      : treatment === 'breathing'
+        ? 'contrast(1.025) saturate(0.96)'
+        : 'contrast(1.045) saturate(1.025)';
+  const visualFilter = (blurPx > 0 ? 'blur(' + blurPx + 'px) ' : '') + colorGrade;
 
   // Phase 5: beat-specific camera direction is authoritative for AI images.
   // Videos keep the existing scene/director behavior so this phase cannot
@@ -166,13 +177,18 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
       : isShorts
         ? 1.09
         : 1.16;
+  const editedZoomEnd =
+    treatment === 'impact' ? Math.min(1.10, zoomEnd) :
+    treatment === 'breathing' ? Math.min(1.045, zoomEnd) :
+    treatment === 'question' ? Math.min(1.06, zoomEnd) :
+    treatment === 'detail' ? Math.min(1.09, zoomEnd) : zoomEnd;
   const panStartScale = isShorts ? 1.1 : 1.15;
   const panEndScale = isShorts ? 1.04 : 1.05;
   const panDistance = isShorts ? 18 : 30;
 
   const scale =
     shotDirection === 'zoom-in'
-      ? interpolate(frame, [0, safeShotDuration], [1.0, zoomEnd], {
+      ? interpolate(frame, [0, safeShotDuration], [1.0, editedZoomEnd], {
           easing: smooth,
           extrapolateLeft: 'clamp',
           extrapolateRight: 'clamp',
@@ -218,7 +234,7 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
           objectFit: 'cover',
           transform,
           opacity,
-          filter: blurPx > 0 ? `blur(${blurPx}px)` : undefined,
+          filter: visualFilter,
         }}
         muted
         loop
@@ -247,7 +263,7 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
           objectFit: 'cover',
           transform,
           opacity,
-          filter: blurPx > 0 ? `blur(${blurPx}px)` : undefined,
+          filter: visualFilter,
         }}
       />
     );
@@ -268,7 +284,9 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
 
   // Keep movement especially restrained in vertical Shorts. Large travel on
   // a narrow crop feels like a phone slideshow rather than a camera move.
-  const foregroundPush = isShorts ? 1.055 : 1.075;
+  const foregroundPush = treatment === 'impact' ? 1.085 :
+    treatment === 'breathing' ? 1.035 : treatment === 'detail' ? 1.07 :
+    isShorts ? 1.055 : 1.075;
   const foregroundPan = isShorts ? 14 : 24;
   const backgroundPan = isShorts ? 6 : 10;
   const verticalDrift = isShorts ? 4 : 7;
@@ -304,7 +322,7 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
       style={{
         opacity,
         overflow: 'hidden',
-        filter: blurPx > 0 ? `blur(${blurPx}px)` : undefined,
+        filter: visualFilter,
         backgroundColor: '#000000',
       }}
     >
@@ -630,6 +648,13 @@ export const Scene: React.FC<SceneProps> = ({
                   incomingTransition={window.incomingTransition}
                   outgoingTransition={window.outgoingTransition}
                 />
+                {window.shot.editorialLabel && (
+                  <EditorialAccent
+                    label={window.shot.editorialLabel}
+                    format={format}
+                    maxFrames={window.duration}
+                  />
+                )}
               </AbsoluteFill>
             </Sequence>
           ))
