@@ -127,6 +127,18 @@ def _ffmpeg_fallback(effect_name: str, output_path: str) -> bool:
             "anoisesrc=color=brown:duration=2.2:amplitude=0.35,"
             "lowpass=f=180,afade=t=in:st=0:d=0.08,afade=t=out:st=0.8:d=1.3"
         )
+    elif effect_name == "wind":
+        lavfi = (
+            "anoisesrc=color=brown:duration=2.5:amplitude=0.22,"
+            "highpass=f=70,lowpass=f=1100,"
+            "afade=t=in:st=0:d=0.35,afade=t=out:st=1.8:d=0.7"
+        )
+    elif effect_name == "fire":
+        lavfi = (
+            "anoisesrc=color=pink:duration=2.5:amplitude=0.18,"
+            "highpass=f=250,lowpass=f=5200,"
+            "afade=t=in:st=0:d=0.15,afade=t=out:st=1.9:d=0.6"
+        )
     elif effect_name == "om_drone":
         lavfi = (
             "sine=frequency=136.1:duration=2.4,"
