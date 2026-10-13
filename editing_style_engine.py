@@ -5,6 +5,8 @@ Select from topic/format/audience intent; only measured recent performance
 records can change the order of supported styles.
 """
 from datetime import date, datetime
+import json
+from pathlib import Path
 import re
 
 STYLES = {
@@ -152,7 +154,18 @@ def select_edit_style(context=None, scenes=None):
         if requested in compatible_hints[narrative_style]:
             narrative_style = requested
             reason = "script_style_from_existing_make_payload"
-    trend, trend_reason = _recent_signal_winner(meta.get("editing_style_signals"))
+    # Optional read-only, owner-auditable channel data import. This file is
+    # empty until real, labeled video metrics are provided; never ask an LLM
+    # to invent per-style retention or treat raw YouTube search as evidence.
+    signals = meta.get("editing_style_signals")
+    if not isinstance(signals, list):
+        stored = Path("data/editing_style_signals.json")
+        try:
+            loaded = json.loads(stored.read_text(encoding="utf-8")) if stored.is_file() else []
+            signals = loaded if isinstance(loaded, list) else []
+        except (OSError, ValueError):
+            signals = []
+    trend, trend_reason = _recent_signal_winner(signals)
     selected = narrative_style
     # Preserve story-topic fit. A fast festival edit must not be imposed on an
     # intimate emotional story merely because festival video metrics grew.
