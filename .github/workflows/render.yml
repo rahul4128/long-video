@@ -60,7 +60,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Static Python syntax check
-        run: python -m py_compile content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py
+        run: python -m py_compile content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v7
@@ -91,6 +91,9 @@ jobs:
 
       - name: Install Python Dependencies
         run: pip install -r requirements.txt
+
+      - name: Check image aspect and embedded-letterbox regressions
+        run: python -m unittest discover -s tests -p 'test_image_framing.py' -v
 
       # Optional engines - installed only when switched on with repo
       # variables, so the default (Edge voice) run stays fast.
