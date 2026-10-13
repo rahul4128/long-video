@@ -19,6 +19,7 @@ from sfx_engine import resolve_sound_effect_audio
 from music_engine import attach_music
 from editing_director import attach_editing
 from color_continuity import inspect_shots
+from spoken_hindi_qc import assess_scenes
 from visual_matcher import extract_visual_requirements, candidate_is_accurate
 from content_qc import validate_payload, fact_check_items
 from visual_qc import assess_sequence
@@ -157,6 +158,12 @@ if not shorts_scenes:
 # test renders receive exactly the same production metadata as normal runs.
 long_scenes = enrich_scenes(long_scenes, format_name="long")
 shorts_scenes = enrich_scenes(shorts_scenes, format_name="shorts")
+
+# Analyze finalized story text *before* expensive TTS / visual generation.
+# Never rewrite here: Make's independent script-QA must own semantic edits.
+spoken_hindi_report = assess_scenes(long_scenes, shorts_scenes)
+print(f"🗣️ Spoken Hindi QA: {spoken_hindi_report['status']}; "
+      f"{spoken_hindi_report['severeScenes']} severe scenes", flush=True)
 
 CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
 CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
@@ -4312,6 +4319,10 @@ async def process():
         ) if meta_data.get(k)
     }
     metadata_for_upload["factCheck"] = fact_check_items(payload)
+    metadata_for_upload["spokenHindi"] = {
+        "status": spoken_hindi_report["status"],
+        "severeScenes": spoken_hindi_report["severeScenes"],
+    }
     metadata_for_upload["editingVersion"] = editing_report["editorVersion"]
     metadata_for_upload["colorContinuity"] = {
         "status": "review_warning" if color_report["warnings"] else "scanned",
