@@ -108,6 +108,15 @@ def _decorate_scene(scene, format_name, style_plan=None):
         # Every skill is *eligible*, not automatically applied to every shot:
         # subtle spotlight blur supports questions, and subject-safe grading
         # supports cinematic / bright celebration / emotional moments.
+        # Shot order and TTS cut boundaries are sacrosanct. Explain WHY each
+        # existing shot was selected instead of blindly restyling it.
+        shot["editPurpose"] = (
+            "reveal_payoff" if index == focus_idx and pattern in {"reveal", "climax"} else
+            "question_setup" if index == focus_idx and _word_focus(scene) else
+            "evidence_detail" if kind in {"detail", "close_up"} else
+            "establish_context" if kind in {"wide", "atmosphere"} else
+            "narrated_support"
+        )
         shot["editAccent"] = style
         shot["editSpotlight"] = bool(shot["editTreatment"] == "question" and
                                      style in {"curiosity_reveal", "presenter_explainer"})
@@ -137,14 +146,30 @@ def _decorate_scene(scene, format_name, style_plan=None):
         # At most ONE tasteful documentary label per scene, no collision with
         # existing kinetic typography, and never on top of a hook overlay.
         shot.pop("editorialLabel", None)
+        shot.pop("documentaryGraphic", None)
         if index == focus_idx and not beat.get("emphasisText"):
             start = shot.get("startSeconds")
             is_opening_hook = scene.get("scene_number") == 1 and (
                 start is None or (isinstance(start, (int, float)) and start < 1.85))
             if not is_opening_hook:
-                label = _short_phrase(beat.get("narrationText") or beat.get("narrationCue") or "")
+                original = str(beat.get("narrationText") or beat.get("narrationCue") or "")
+                label = _short_phrase(original)
                 if label:
-                    shot["editorialLabel"] = label
+                    graphic_kind = None
+                    if style == "presenter_explainer" and len(shots) >= 3:
+                        graphic_kind = "explainer_step"
+                    elif style == "curiosity_reveal" and pattern in {"reveal", "climax"}:
+                        graphic_kind = "key_point"
+                    elif style == "curiosity_reveal" and ("?" in original or "?" in scene.get("narration_chunk", "")):
+                        graphic_kind = "question"
+                    if graphic_kind:
+                        shot["documentaryGraphic"] = {
+                            "kind": graphic_kind, "label": label,
+                            "step": index + 1 if graphic_kind == "explainer_step" else None,
+                            "total": len(shots) if graphic_kind == "explainer_step" else None,
+                        }
+                    else:
+                        shot["editorialLabel"] = label
                     accent_count += 1
 
     return {
@@ -154,8 +179,11 @@ def _decorate_scene(scene, format_name, style_plan=None):
         "impact": impact_count,
         "warnings": [],
         "style": style,
+        "graphics": sum(bool(s.get("documentaryGraphic")) for s in shots),
+        "shotPurposes": dict(Counter(s.get("editPurpose") for s in shots)),
         "skills_used": sorted({key for shot in shots for key, on in (
             ("kinetic_text", bool(shot.get("editorialLabel"))),
+            ("documentary_graphics", bool(shot.get("documentaryGraphic"))),
             ("spotlight_blur", bool(shot.get("editSpotlight"))),
             ("impact_cut", shot.get("editTreatment") == "impact"),
             ("whip_pan", shot.get("transition") == "whip_pan"),
@@ -175,12 +203,30 @@ def validate_editing(scenes):
         shots = scene.get("shots") or []
         if not shots:
             raise ValueError(f"Scene {scene.get('scene_number')}: missing editing shots")
-        if sum(bool(s.get("editorialLabel")) for s in shots) > 1:
-            raise ValueError("Too many text cards in one scene")
+        if sum(bool(s.get("editorialLabel") or s.get("documentaryGraphic")) for s in shots) > 1:
+            raise ValueError("Too many text/graphics cards in one scene")
         if sum(s.get("transition") == "blur_cut" for s in shots) > 1:
             raise ValueError("Excessive blur transitions")
         media_pool = {str(s.get("file") or "") for s in shots}
         for shot in shots:
+            if shot.get("editPurpose") and shot["editPurpose"] not in {
+                "reveal_payoff", "question_setup", "evidence_detail",
+                "establish_context", "narrated_support",
+            }:
+                raise ValueError("Unsupported documentary edit purpose")
+            graphic = shot.get("documentaryGraphic")
+            if graphic:
+                if not isinstance(graphic, dict) or graphic.get("kind") not in {
+                    "question", "explainer_step", "key_point",
+                }:
+                    raise ValueError("Invalid documentary graphic")
+                label = graphic.get("label")
+                if not isinstance(label, str) or not label.strip() or len(label) > 36:
+                    raise ValueError("Unsafe documentary text")
+                if graphic["kind"] == "explainer_step":
+                    n, total = graphic.get("step"), graphic.get("total")
+                    if not isinstance(n, int) or not isinstance(total, int) or not 1 <= n <= total <= len(shots):
+                        raise ValueError("Invalid step graphic progression")
             compare_fields = bool(shot.get("comparisonBeforeFile") or shot.get("comparisonAfterFile"))
             if compare_fields:
                 before = str(shot.get("comparisonBeforeFile") or "")
