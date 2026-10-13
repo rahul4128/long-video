@@ -81,10 +81,13 @@ def _decorate_scene(scene, format_name, style_plan=None):
             focus_idx = candidates[0][0]
         elif len(shots) > 1:
             focus_idx = max(1, round(len(shots) * 0.68) - 1)
+    elif style == "presenter_explainer" and len(shots) >= 2:
+        # Put the explainer's step card on the first *detail*, not over the
+        # first question or the video's title/hook.
+        focus_idx = next((i for i, sh in enumerate(shots[1:], 1)
+                          if sh.get("shotType") in {"detail", "close_up"}), 1)
     elif pattern == "curiosity" or _word_focus(scene):
         focus_idx = 0
-    elif style == "presenter_explainer" and len(shots) >= 2:
-        focus_idx = 1
     elif style == "festival_energy" and len(shots) >= 2:
         focus_idx = len(shots) - 1
 
