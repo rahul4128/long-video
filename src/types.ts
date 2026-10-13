@@ -121,6 +121,9 @@ export interface SceneItem {
   // compatibility/debugging, but `shots` above is authoritative whenever
   // present.
   imageFileName?: string | string[];
+  // Mood-aware soundtrack selected once by Python; paths point under public/audio/.
+  musicFile?: string;
+  musicMood?: 'mystery' | 'devotional' | 'emotional' | 'revelation' | 'uplifting';
   soundEffect?: 'temple_bell' | 'shankh' | 'om_drone' | 'flute_swell' | 'none';
   // Hard visual requirements emitted by the story director. The Python asset
   // pipeline uses these to reject semantically wrong stock footage before
