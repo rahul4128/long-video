@@ -61,6 +61,13 @@ export interface Shot {
   // moving real narration or altering shot times and visual sourcing.
   editTreatment?: 'clean' | 'detail' | 'impact' | 'breathing' | 'question';
   editorialLabel?: string;
+  editPurpose?: 'reveal_payoff' | 'question_setup' | 'evidence_detail' | 'establish_context' | 'narrated_support';
+  documentaryGraphic?: {
+    kind: 'question' | 'explainer_step' | 'key_point';
+    label: string;
+    step?: number;
+    total?: number;
+  };
   editAccent?: 'cinematic_devotional' | 'curiosity_reveal' | 'presenter_explainer' | 'emotional_story' | 'festival_energy';
   editSpotlight?: boolean;
   editBeatSnap?: boolean;
