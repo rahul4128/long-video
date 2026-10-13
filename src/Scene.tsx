@@ -12,6 +12,7 @@ import {
   useVideoConfig,
 } from 'remotion';
 import { Shot, SceneItem } from './types';
+import { DocumentaryGraphic } from './DocumentaryGraphic';
 import { EditorialAccent } from './EditorialAccent';
 import { EditFx } from './EditFx';
 import { VerifiedComparison, VerifiedPrivacyBlur } from './ConditionalEditSkills';
@@ -689,6 +690,13 @@ export const Scene: React.FC<SceneProps> = ({
                   snap={window.shot.editBeatSnap}
                   flash={window.incomingTransition === 'flash_cut'}
                 />
+                {window.shot.documentaryGraphic && (
+                  <DocumentaryGraphic
+                    graphic={window.shot.documentaryGraphic}
+                    format={format}
+                    maxFrames={window.duration}
+                  />
+                )}
                 {window.shot.editorialLabel && (
                   <EditorialAccent
                     label={window.shot.editorialLabel}
