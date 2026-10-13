@@ -189,7 +189,7 @@ def validate_editing(scenes):
                     raise ValueError("Before/after comparison must be explicitly verified")
                 if before == after or before not in media_pool or after not in media_pool:
                     raise ValueError("Before/after requires two existing distinct scene assets")
-                if any(not re.fullmatch(r"[\\w.-]+\\.(?:png|jpg|jpeg|webp)", filename, flags=re.I)
+                if any(not re.fullmatch(r"[\w.-]+\.(?:png|jpg|jpeg|webp)", filename, flags=re.I)
                        for filename in (before, after)):
                     raise ValueError("Comparison only accepts approved still images from scene")
             boxes = shot.get("privacyBlurBoxes")
