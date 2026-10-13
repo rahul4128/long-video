@@ -104,6 +104,9 @@ jobs:
       - name: Check evidence-gated dynamic video editing styles
         run: python -m unittest discover -s tests -p 'test_editing_style_engine.py' -v
 
+      - name: Check verified comparison and privacy blur safeguards
+        run: python -m unittest discover -s tests -p 'test_verified_edit_skills.py' -v
+
       # Optional engines - installed only when switched on with repo
       # variables, so the default (Edge voice) run stays fast.
       - name: Install optional engines (own voice / Kokoro / CLIP)
