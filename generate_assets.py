@@ -20,6 +20,7 @@ from visual_matcher import extract_visual_requirements, candidate_is_accurate
 from content_qc import validate_payload, fact_check_items
 from visual_qc import assess_sequence
 from scripts.visual_evidence import detect_instructional_category, is_generic_stock_query
+from scripts.image_framing import framing_issue, preserve_full_subject
 from storyteller import build_prosody_map, prepare_storyteller_text
 from hindi_text import to_spoken_hindi, hindi_display_text, pick_hindi, text_free_prompt, has_latin, best_hindi_title
 try:
@@ -1764,7 +1765,17 @@ def _generate_visual_beat_image(scene_prompt: str, beat: dict, orientation: str,
         f"{_visual_beat_prompt(scene_prompt, beat)}. "
         f"{shot_type} cinematic composition, designed for {camera} motion, "
         f"{realism_phrase}, {period_phrase}, {lighting_phrase}, "
-        "consistent visual language, single coherent moment, no collage, no text"
+        "consistent visual language, single coherent moment, no collage, no text. "
+        + (
+            "Full-bleed vertical 9:16 portrait artwork, not a horizontal video "
+            "placed within a vertical frame. No borders, black bars or frames. "
+            "Keep the complete crown, face and hands comfortably inside the frame; "
+            "leave safe margins above the head and below the main subject, "
+            "with lower space for Hindi subtitles. "
+            if orientation == "portrait" else
+            "Full-bleed horizontal 16:9 landscape artwork, no letterboxing, "
+            "no black bars or border. Keep important subjects away from the edges. "
+        )
     )
     aspect_ratio = "9:16" if orientation == "portrait" else "16:9"
     width, height = (1080, 1920) if orientation == "portrait" else (1920, 1080)
@@ -2368,40 +2379,43 @@ def generate_hf_fallback_model(prompt: str, dest_path: str, model_id: str,
 
 def generate_ai_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9",
                        pollinations_width: int = 1920, pollinations_height: int = 1080) -> bool:
-    """Network AI image tiers with per-run circuit breakers.
+    """Generate native-ratio art wherever possible; reject misframed images.
 
-    Deprecated Hugging Face legacy-model retries are OFF by default because
-    provider logs currently return 400/410 for those endpoints. Set
-    HF_LEGACY_IMAGE_FALLBACKS_ENABLED=true only after verifying a working
-    provider/model pair.
+    Cloudflare FLUX.1 Schnell has no output-width/height parameters, so its
+    square output MUST NOT be used ahead of providers that respect 9:16/16:9.
+    If it is the only available provider, preserve the complete foreground
+    with a softly extended background rather than cropping deity anatomy.
     """
     cache_key = hashlib.sha256(
-        f"{prompt.strip()}|{aspect_ratio}|{pollinations_width}x{pollinations_height}".encode("utf-8")
+        f"{prompt.strip()}|{aspect_ratio}|{pollinations_width}x{pollinations_height}|framing-v2".encode("utf-8")
     ).hexdigest()[:24]
     cache_dir = os.path.join("out", "visual_cache")
     os.makedirs(cache_dir, exist_ok=True)
     cache_path = os.path.join(cache_dir, cache_key + ".png")
-    if _valid_generated_image(cache_path):
+
+    def frame_ok():
+        if not _valid_generated_image(dest_path):
+            return False
+        issue = framing_issue(dest_path, aspect_ratio)
+        if issue:
+            print(f"  ⚠️ AI image framing rejected: {issue}", flush=True)
+            return False
+        return True
+
+    if _valid_generated_image(cache_path) and framing_issue(cache_path, aspect_ratio) is None:
         shutil.copyfile(cache_path, dest_path)
-        print(f"  ♻️ AI visual cache hit: {cache_key}", flush=True)
+        print(f"  ♻️ Framing-checked AI visual cache hit: {cache_key}", flush=True)
         return True
 
     generated = False
 
-    if _ai_provider_allowed("cloudflare"):
-        ok = generate_cloudflare_flux(prompt, dest_path, aspect_ratio=aspect_ratio)
-        ok = bool(ok and _valid_generated_image(dest_path))
-        _ai_provider_record("cloudflare", ok)
-        if ok:
-            print("  ✅ Image fetched from Cloudflare FLUX", flush=True)
-            generated = True
-
-    if not generated and _ai_provider_allowed("huggingface"):
+    # 1. Prefer services with real width/height controls.
+    if _ai_provider_allowed("huggingface"):
         ok = generate_huggingface_image(prompt, dest_path, aspect_ratio=aspect_ratio)
-        ok = bool(ok and _valid_generated_image(dest_path))
+        ok = bool(ok and frame_ok())
         _ai_provider_record("huggingface", ok)
         if ok:
-            print("  ✅ Image fetched from Hugging Face (FLUX.1-schnell)", flush=True)
+            print("  ✅ Native-aspect AI image from Hugging Face", flush=True)
             generated = True
 
     legacy_hf = os.getenv("HF_LEGACY_IMAGE_FALLBACKS_ENABLED", "false").strip().lower() == "true"
@@ -2413,22 +2427,38 @@ def generate_ai_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9",
         ):
             if generate_hf_fallback_model(
                 prompt, dest_path, model_id, aspect_ratio=aspect_ratio
-            ):
+            ) and frame_ok():
                 generated = True
                 break
 
     if not generated and _ai_provider_allowed("pollinations"):
         ok = download_pollinations_fallback(
-            prompt,
-            dest_path,
-            width=pollinations_width,
+            prompt, dest_path, width=pollinations_width,
             height=pollinations_height,
         )
-        ok = bool(ok and _valid_generated_image(dest_path))
+        ok = bool(ok and frame_ok())
         _ai_provider_record("pollinations", ok)
-        generated = ok
+        if ok:
+            generated = True
 
-    if generated and _valid_generated_image(dest_path):
+    # 2. Cloudflare FLUX.1 Schnell is an emergency image-tier backup because
+    # it ignores output dimensions. A safe reframing is better than severing
+    # important anatomy or displaying a narrow landscape strip.
+    if not generated and _ai_provider_allowed("cloudflare"):
+        ok = generate_cloudflare_flux(prompt, dest_path, aspect_ratio=aspect_ratio)
+        ok = bool(ok and _valid_generated_image(dest_path))
+        if ok:
+            issue = framing_issue(dest_path, aspect_ratio)
+            if issue and issue.startswith("wrong aspect ratio"):
+                print(f"  🎞️ Cloudflare source is {issue}; preserving full subject.", flush=True)
+                ok = preserve_full_subject(dest_path, aspect_ratio)
+            ok = bool(ok and frame_ok())
+        _ai_provider_record("cloudflare", ok)
+        if ok:
+            generated = True
+            print("  ✅ Framing-safe AI image from Cloudflare backup", flush=True)
+
+    if generated and frame_ok():
         try:
             shutil.copyfile(dest_path, cache_path)
         except Exception:
@@ -2436,7 +2466,7 @@ def generate_ai_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9",
         return True
 
     try:
-        if os.path.exists(dest_path) and not _valid_generated_image(dest_path):
+        if os.path.exists(dest_path):
             os.remove(dest_path)
     except OSError:
         pass
