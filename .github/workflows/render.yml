@@ -60,7 +60,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Static Python syntax check
-        run: python -m py_compile content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py editing_style_engine.py
+        run: python -m py_compile content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py editing_style_engine.py color_continuity.py scripts/validate_color_continuity.py scripts/master_final_audio.py scripts/validate_final_audio.py
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v7
@@ -107,6 +107,12 @@ jobs:
       - name: Check verified comparison and privacy blur safeguards
         run: python -m unittest discover -s tests -p 'test_verified_edit_skills.py' -v
 
+      - name: Test sampled color correction without modifying source images
+        run: python -m unittest discover -s tests -p 'test_color_continuity.py' -v
+
+      - name: Test final audio mastering on synthetic media
+        run: python -m unittest discover -s tests -p 'test_master_final_audio.py' -v
+
       # Optional engines - installed only when switched on with repo
       # variables, so the default (Edge voice) run stays fast.
       - name: Install optional engines (own voice / Kokoro / CLIP)
@@ -142,6 +148,7 @@ jobs:
           CLIP_RERANK_ENABLED: ${{ vars.CLIP_RERANK_ENABLED || 'true' }}
           HOOK_OVERLAY_ENABLED: ${{ vars.HOOK_OVERLAY_ENABLED || 'true' }}
           EDITORIAL_EDITING_ENABLED: ${{ vars.EDITORIAL_EDITING_ENABLED || 'true' }}
+          COLOR_MATCH_ENABLED: ${{ vars.COLOR_MATCH_ENABLED || 'true' }}
         run: python generate_assets.py
 
       - name: Fail closed if Long or Shorts scene visuals are missing
@@ -152,6 +159,9 @@ jobs:
 
       - name: Validate narration-led editing and caption budgets
         run: python scripts/validate_editing.py
+
+      - name: Validate sampled color and continuity plan
+        run: python scripts/validate_color_continuity.py
 
       - name: Upload content QC report
         if: always()
@@ -172,6 +182,7 @@ jobs:
             out/visual_search_report.json
             out/visual_qc_report.json
             out/editing_qc_report.json
+            out/color_continuity_report.json
           if-no-files-found: ignore
           retention-days: 7
 
@@ -232,6 +243,7 @@ jobs:
             out/canva_assets.json
             out/music_license_report.json
             out/editing_qc_report.json
+            out/color_continuity_report.json
           retention-days: 1
 
   # ---------------------------------------------------------------
@@ -295,11 +307,19 @@ jobs:
           echo "- Composition FPS: 24" >> "$GITHUB_STEP_SUMMARY"
           echo "LONG_RENDER_SECONDS=$ELAPSED" >> "$GITHUB_ENV"
 
+      - name: Master and verify final Long audio mix
+        run: |
+          python scripts/master_final_audio.py --input out/final_video.mp4 \
+            --output out/final_video.mastered.mp4 --report out/audio_master_long.json
+          mv -f out/final_video.mastered.mp4 out/final_video.mp4
+
       - name: Upload Video Artifact
         uses: actions/upload-artifact@v7
         with:
           name: devotional-video-${{ github.run_id }}
-          path: out/final_video.mp4
+          path: |
+            out/final_video.mp4
+            out/audio_master_long.json
           retention-days: 14
 
   render-shorts:
@@ -341,11 +361,19 @@ jobs:
         run: |
           npx remotion render DevotionalShortsComposition out/final_video_shorts.mp4 --props=public/props_shorts.json --concurrency=$(nproc)
 
+      - name: Master and verify final Shorts audio mix
+        run: |
+          python scripts/master_final_audio.py --input out/final_video_shorts.mp4 \
+            --output out/final_video_shorts.mastered.mp4 --report out/audio_master_shorts.json
+          mv -f out/final_video_shorts.mastered.mp4 out/final_video_shorts.mp4
+
       - name: Upload Shorts Video Artifact
         uses: actions/upload-artifact@v7
         with:
           name: devotional-shorts-${{ github.run_id }}
-          path: out/final_video_shorts.mp4
+          path: |
+            out/final_video_shorts.mp4
+            out/audio_master_shorts.json
           retention-days: 14
 
   # ---------------------------------------------------------------
@@ -495,6 +523,9 @@ jobs:
         with:
           name: devotional-thumbnail-shorts-${{ github.run_id }}
           path: out
+      - name: Verify both mastered audio tracks from final artifacts
+        run: python scripts/validate_final_audio.py
+
       - name: Run automated media QC
         run: python qc.py
       - name: Upload QC report
@@ -630,6 +661,9 @@ jobs:
               "thumbnail_shorts_final/thumbnail_shorts_final.jpg" \
               "assets/out/music_license_report.json" \
               "assets/out/editing_qc_report.json" \
+              "assets/out/color_continuity_report.json" \
+              "video/audio_master_long.json" \
+              "shorts/audio_master_shorts.json" \
               --repo "${{ github.repository }}" \
               --title "Devotional upload $TAG" \
               "${RELEASE_FLAGS[@]}" \
@@ -650,7 +684,7 @@ jobs:
         run: |
           set -euo pipefail
           JSON=$(gh api "repos/${{ github.repository }}/releases/${{ steps.release.outputs.release_id }}")
-          for NAME in final_video.mp4 final_video_shorts.mp4 thumbnail.jpg thumbnail_shorts_final.jpg music_license_report.json editing_qc_report.json; do
+          for NAME in final_video.mp4 final_video_shorts.mp4 thumbnail.jpg thumbnail_shorts_final.jpg music_license_report.json editing_qc_report.json color_continuity_report.json audio_master_long.json audio_master_shorts.json; do
             echo "$JSON" | jq -e --arg name "$NAME" '.assets | any(.name == $name and .size > 0)' > /dev/null || {
               echo "::error::Missing or empty release asset: $NAME"
               exit 1
