@@ -4251,7 +4251,7 @@ async def process():
 
     # Video editor plans purposeful cuts and limited visual annotations from
     # already-timed shots. Narration, media sources and beat boundaries stay put.
-    editing_report = attach_editing(enriched_long, enriched_shorts)
+    editing_report = attach_editing(enriched_long, enriched_shorts, context=payload)
     print("🎞️ Editorial director: story-led cuts and documentary treatments ready; "
           f"enabled={editing_report['enabled']}", flush=True)
 
