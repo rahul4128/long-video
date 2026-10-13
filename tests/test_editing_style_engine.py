@@ -60,7 +60,7 @@ class StyleSelectionTests(unittest.TestCase):
         one["videos"] = 4
         verdict, reason = _recent_signal_winner([one], today=date(2026, 10, 13))
         self.assertEqual(verdict["style"], "presenter_explainer")
-        self.assertEqual(reason, "recent_multi_video_metric")
+        self.assertEqual(reason, "recent_source_reported_multi_video_metric")
 
     def test_stale_and_unsupported_styles_ignored(self):
         signals = [
