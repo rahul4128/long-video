@@ -138,11 +138,17 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
   // A restrained grade creates visual consistency across licensed real footage,
   // illustrations and AI visuals; never claim an era or event via an effect.
   const colorGrade =
-    treatment === 'impact'
-      ? 'contrast(1.07) saturate(1.06)'
-      : treatment === 'breathing'
-        ? 'contrast(1.025) saturate(0.96)'
-        : 'contrast(1.045) saturate(1.025)';
+    shot.editAccent === 'festival_energy'
+      ? 'contrast(1.07) saturate(1.13)'
+      : shot.editAccent === 'emotional_story'
+        ? 'contrast(1.025) saturate(0.94)'
+        : shot.editAccent === 'presenter_explainer'
+          ? 'contrast(1.06) saturate(1.01)'
+          : treatment === 'impact'
+            ? 'contrast(1.07) saturate(1.07)'
+            : treatment === 'breathing'
+              ? 'contrast(1.025) saturate(0.97)'
+              : 'contrast(1.045) saturate(1.025)';
   // One restrained whip move on a storytelling pivot; not applied to every cut.
   const whipIn = incomingTransition === 'whip_pan'
     ? interpolate(frame, [0, Math.max(1, incomingTransitionFrames)], [68, 0], {
