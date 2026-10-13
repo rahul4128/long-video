@@ -16,6 +16,7 @@ import requests
 import edge_tts
 from director import enrich_scenes
 from sfx_engine import resolve_sound_effect_audio
+from music_engine import attach_music
 from visual_matcher import extract_visual_requirements, candidate_is_accurate
 from content_qc import validate_payload, fact_check_items
 from visual_qc import assess_sequence
@@ -4240,6 +4241,13 @@ async def process():
         flush=True,
     )
 
+    # Dynamic background score. Reuses mood tracks across Long + Shorts while
+    # preserving separate scene timings and original Kokoro narration.
+    # The audit includes SHA256, source URL and license evidence for manual review.
+    music_report = attach_music(enriched_long, enriched_shorts)
+    print(f"🎼 Music director: {len(music_report['tracks'])} mood tracks; "
+          f"status={music_report['status']}", flush=True)
+
     # Save props and metadata
     # On-screen Hindi hook for the first ~1.8 s (HookOverlay.tsx): the
     # thumbnail promise repeated on screen so viewers who clicked see it
@@ -4292,6 +4300,11 @@ async def process():
         ) if meta_data.get(k)
     }
     metadata_for_upload["factCheck"] = fact_check_items(payload)
+    metadata_for_upload["music"] = {
+        "status": music_report["status"],
+        "tracks": music_report["tracks"],
+        "rights_notice": music_report["rights_notice"],
+    }
     metadata_for_upload["aiDisclosureRecommended"] = True
 
     with open("out/metadata.json", "w", encoding="utf-8") as f:
@@ -4304,7 +4317,7 @@ async def process():
     # after this script finishes (see render.yml).
     save_clip_history()
 
-    print("🎉 All Multi-Source Assets (Pexels + Pixabay + Coverr + Wikimedia + Local Library + FLUX), Thumbnail, Sound Effects, and Metadata ready!", flush=True)
+    print("🎉 All Multi-Source Assets, Mood Music, Sound Effects, Thumbnails and Metadata ready!", flush=True)
 
 if __name__ == "__main__":
     asyncio.run(process())
