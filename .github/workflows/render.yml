@@ -135,6 +135,7 @@ jobs:
           INDICF5_STRICT: ${{ vars.INDICF5_STRICT || 'false' }}
           CLIP_RERANK_ENABLED: ${{ vars.CLIP_RERANK_ENABLED || 'true' }}
           HOOK_OVERLAY_ENABLED: ${{ vars.HOOK_OVERLAY_ENABLED || 'true' }}
+          EDITORIAL_EDITING_ENABLED: ${{ vars.EDITORIAL_EDITING_ENABLED || 'true' }}
         run: python generate_assets.py
 
       - name: Fail closed if Long or Shorts scene visuals are missing
