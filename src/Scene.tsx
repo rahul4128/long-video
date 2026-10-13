@@ -13,6 +13,7 @@ import {
 } from 'remotion';
 import { Shot, SceneItem } from './types';
 import { EditorialAccent } from './EditorialAccent';
+import { EditFx } from './EditFx';
 
 interface SceneProps {
   scene: SceneItem;
@@ -24,7 +25,7 @@ interface SceneProps {
   smoothEntry?: boolean;
 }
 
-type TransitionStyle = 'cut' | 'crossfade' | 'blur_cut';
+type TransitionStyle = 'cut' | 'crossfade' | 'blur_cut' | 'whip_pan' | 'flash_cut';
 
 function resolveShots(scene: SceneItem): Shot[] {
   if (scene.shots && scene.shots.length > 0) {
@@ -142,7 +143,24 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
       : treatment === 'breathing'
         ? 'contrast(1.025) saturate(0.96)'
         : 'contrast(1.045) saturate(1.025)';
-  const visualFilter = (blurPx > 0 ? 'blur(' + blurPx + 'px) ' : '') + colorGrade;
+  // One restrained whip move on a storytelling pivot; not applied to every cut.
+  const whipIn = incomingTransition === 'whip_pan'
+    ? interpolate(frame, [0, Math.max(1, incomingTransitionFrames)], [68, 0], {
+        extrapolateLeft: 'clamp', extrapolateRight: 'clamp',
+      })
+    : 0;
+  const whipOut = outgoingTransition === 'whip_pan'
+    ? interpolate(
+        frame,
+        [Math.max(0, safeShotDuration - outgoingTransitionFrames), safeShotDuration],
+        [0, -68],
+        { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' },
+      )
+    : 0;
+  const whipOffset = whipIn + whipOut;
+  const whipBlur = (Math.abs(whipOffset) / 68) * 1.25;
+  const visualFilter = (blurPx + whipBlur > 0
+    ? 'blur(' + (blurPx + whipBlur) + 'px) ' : '') + colorGrade;
 
   // Phase 5: beat-specific camera direction is authoritative for AI images.
   // Videos keep the existing scene/director behavior so this phase cannot
@@ -221,7 +239,7 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
         )
       : 0;
 
-  const transform = `scale(${scale}) translateX(${translateX}px)`;
+  const transform = `translateX(${whipOffset}px) scale(${scale}) translateX(${translateX}px)`;
 
   if (shot.type === 'video') {
     return (
@@ -323,6 +341,7 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
         opacity,
         overflow: 'hidden',
         filter: visualFilter,
+        transform: 'translateX(' + whipOffset + 'px)',
         backgroundColor: '#000000',
       }}
     >
@@ -428,7 +447,9 @@ export const Scene: React.FC<SceneProps> = ({
     if (
       shot?.transition === 'cut' ||
       shot?.transition === 'crossfade' ||
-      shot?.transition === 'blur_cut'
+      shot?.transition === 'blur_cut' ||
+      shot?.transition === 'whip_pan' ||
+      shot?.transition === 'flash_cut'
     ) {
       return shot.transition;
     }
@@ -436,7 +457,7 @@ export const Scene: React.FC<SceneProps> = ({
   };
 
   const transitionFramesFor = (style: TransitionStyle): number =>
-    style === 'cut' ? 0 : defaultTransitionFrames;
+    style === 'cut' ? 0 : style === 'flash_cut' ? Math.min(6, defaultTransitionFrames) : defaultTransitionFrames;
 
   // Phase 4: if the Python asset stage attached real TTS-synchronised start/end
   // times, those become authoritative. Older props still use equal windows.
@@ -647,6 +668,12 @@ export const Scene: React.FC<SceneProps> = ({
                   isLast={i === shotWindows.length - 1}
                   incomingTransition={window.incomingTransition}
                   outgoingTransition={window.outgoingTransition}
+                />
+                <EditFx
+                  format={format}
+                  spotlight={window.shot.editSpotlight}
+                  snap={window.shot.editBeatSnap}
+                  flash={window.incomingTransition === 'flash_cut'}
                 />
                 {window.shot.editorialLabel && (
                   <EditorialAccent
