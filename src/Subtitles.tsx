@@ -287,7 +287,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
             textAlign: 'center',
             boxShadow: '0 8px 32px rgba(0, 0, 0, 0.85)',
             transform: `translateY(${translateY}px) scale(${scale})`,
-            opacity: captionOpacity,
+            opacity: activeChunk ? captionOpacity : 0,
             willChange: 'transform, opacity',
           }}
         >
