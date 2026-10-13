@@ -127,8 +127,8 @@ def _recent_signal_winner(signals, today=None):
                                        "platform": platform}))
     if not options:
         return None, "no_eligible_verified_metrics"
-    options.sort(reverse=True)
-    return options[0][2], "recent_multi_video_metric"
+    options.sort(key=lambda row: row[0], reverse=True)
+    return options[0][2], "recent_source_reported_multi_video_metric"
 
 
 def select_edit_style(context=None, scenes=None):
@@ -165,14 +165,14 @@ def select_edit_style(context=None, scenes=None):
     }
     if trend and trend["style"] in compatible[narrative_style] and trend["style"] != narrative_style:
         selected = trend["style"]
-        reason = "verified_channel_style_performance"
+        reason = "reported_channel_style_performance"
     return {
         "style": selected,
         "reason": reason,
         "story_style": narrative_style,
         "trend_signal": trend,
         "trend_verdict": trend_reason,
-        "trend_claim": "measured_recent_samples" if trend else "not_verified",
+        "trend_claim": "source_reported_not_independently_verified" if trend else "not_verified",
         "profile": STYLES[selected],
         "all_available_styles": list(STYLES),
         "skills_available": sorted({skill for s in STYLES.values() for skill in s["skills"]}),
