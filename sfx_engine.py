@@ -1,6 +1,6 @@
 """Resilient sound-effect resolver for the video generation pipeline.
 
-Uses Freesound when configured, then creates a small local FFmpeg fallback.
+Uses approved local effects, optionally Freesound with explicit commercial API\npermission, then creates a small local FFmpeg fallback.
 The fallback keeps CI deterministic and prevents a missing SFX provider from
 breaking the whole render.
 """
@@ -11,6 +11,9 @@ from pathlib import Path
 import requests
 
 FREESOUND_API_KEY = os.environ.get("FREESOUND_API_KEY", "").strip()
+# A CC0 asset license does not grant commercial Freesound API access.
+# Require an explicit operator acknowledgement of commercial API permission.
+FREESOUND_COMMERCIAL_API_APPROVED = os.environ.get("FREESOUND_COMMERCIAL_API_APPROVED", "").strip().lower() == "true"
 
 _EFFECT_QUERIES = {
     "transition_whoosh": "whoosh transition",
@@ -26,7 +29,7 @@ _EFFECT_QUERIES = {
 }
 
 def _download_freesound(effect_name: str, output_path: str) -> bool:
-    if not FREESOUND_API_KEY:
+    if not (FREESOUND_API_KEY and FREESOUND_COMMERCIAL_API_APPROVED):
         return False
     query = _EFFECT_QUERIES.get(effect_name, effect_name.replace("_", " "))
     try:
