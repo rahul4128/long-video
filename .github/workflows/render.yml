@@ -60,7 +60,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Static Python syntax check
-        run: python -m py_compile content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py
+        run: python -m py_compile content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py editing_style_engine.py
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v7
@@ -100,6 +100,9 @@ jobs:
 
       - name: Check documentary editing director regressions
         run: python -m unittest discover -s tests -p 'test_editing_director.py' -v
+
+      - name: Check evidence-gated dynamic video editing styles
+        run: python -m unittest discover -s tests -p 'test_editing_style_engine.py' -v
 
       # Optional engines - installed only when switched on with repo
       # variables, so the default (Edge voice) run stays fast.
