@@ -64,6 +64,13 @@ export interface Shot {
   editAccent?: 'cinematic_devotional' | 'curiosity_reveal' | 'presenter_explainer' | 'emotional_story' | 'festival_energy';
   editSpotlight?: boolean;
   editBeatSnap?: boolean;
+  // These are OPTIONAL manual/verified editing skills. They must never be
+  // invented from unrelated devotional images or guessed face positions.
+  comparisonApproved?: boolean;
+  comparisonBeforeFile?: string;
+  comparisonAfterFile?: string;
+  privacyApproved?: boolean;
+  privacyBlurBoxes?: Array<{x: number; y: number; width: number; height: number}>;
 }
 export interface VisualBeat {
   beatIndex: number;
