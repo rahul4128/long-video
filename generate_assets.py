@@ -18,6 +18,7 @@ from director import enrich_scenes
 from sfx_engine import resolve_sound_effect_audio
 from music_engine import attach_music
 from editing_director import attach_editing
+from color_continuity import inspect_shots
 from visual_matcher import extract_visual_requirements, candidate_is_accurate
 from content_qc import validate_payload, fact_check_items
 from visual_qc import assess_sequence
@@ -4255,6 +4256,10 @@ async def process():
     print("🎞️ Editorial director: story-led cuts and documentary treatments ready; "
           f"enabled={editing_report['enabled']}", flush=True)
 
+    color_report = inspect_shots(enriched_long, enriched_shorts)
+    print(f"🎨 Color continuity: {color_report['samples']} unique source samples; "
+          f"{len(color_report['warnings'])} review warnings", flush=True)
+
     # Save props and metadata
     # On-screen Hindi hook for the first ~1.8 s (HookOverlay.tsx): the
     # thumbnail promise repeated on screen so viewers who clicked see it
@@ -4308,6 +4313,11 @@ async def process():
     }
     metadata_for_upload["factCheck"] = fact_check_items(payload)
     metadata_for_upload["editingVersion"] = editing_report["editorVersion"]
+    metadata_for_upload["colorContinuity"] = {
+        "status": "review_warning" if color_report["warnings"] else "scanned",
+        "samples": color_report["samples"],
+        "warnings": len(color_report["warnings"]),
+    }
     metadata_for_upload["music"] = {
         "status": music_report["status"],
         "tracks": music_report["tracks"],
