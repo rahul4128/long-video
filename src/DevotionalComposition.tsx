@@ -100,7 +100,8 @@ export const DevotionalComposition: React.FC<DevotionalVideoProps> = ({
                 durationInFrames={sceneDurationInFrames}
                 direction={index % 2 === 0 ? 'zoom-in' : 'pan-right'}
                 format="long"
-                fadeIn={index === 0}
+                // First-frame footage is visible immediately; no black intro.
+                fadeIn={false}
                 fadeOut={index === scenes.length - 1}
               />
               <Subtitles
