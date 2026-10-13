@@ -138,7 +138,7 @@ def select_edit_style(context=None, scenes=None):
     # Make's existing schema passes _meta.decisionBasis unchanged. Let the
     # story council add an EDIT_STYLE marker there; do not alter JSON mapping.
     basis = str(meta.get("decisionBasis") or "")[:10000]
-    match = re.search(r"(?:^|\\n)\\s*EDIT_STYLE\\s*[:=]\\s*([a-z_]+)", basis, re.I)
+    match = re.search(r"(?:^|\n)\s*EDIT_STYLE\s*[:=]\s*([a-z_]+)", basis, re.I)
     declared = meta.get("editing_style") or (match.group(1) if match else None)
     compatible_hints = {
         "cinematic_devotional": set(STYLES),
