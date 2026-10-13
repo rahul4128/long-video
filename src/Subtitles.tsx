@@ -17,6 +17,7 @@ interface SubtitlesProps {
   words?: WordTiming[];
   visualBeats?: VisualBeat[];
   format?: 'long' | 'shorts';
+  captionStyle?: 'calm' | 'focus';
   sceneDurationInFrames?: number;
 }
 
@@ -54,6 +55,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
   words,
   visualBeats = [],
   format = 'long',
+  captionStyle = 'focus',
   sceneDurationInFrames,
 }) => {
   const frame = useCurrentFrame();
@@ -96,7 +98,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
   // Never flash the whole script before the first timed caption arrives.
   const captionContent = activeChunk
     ? activeChunk.map((w, i) => {
-        const isCurrent = currentTime >= w.start && currentTime <= w.end + 0.05;
+        const isCurrent = captionStyle === 'focus' && currentTime >= w.start && currentTime <= w.end + 0.05;
         const isUpcoming = currentTime < w.start;
         return (
           <React.Fragment key={i}>
@@ -120,15 +122,15 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
   const chunkStart = activeChunk?.[0]?.start ?? 0;
   const chunkAgeFrames = Math.max(0, frame - Math.round(chunkStart * fps));
   const isShorts = format === 'shorts';
-  const enter = isShorts
+  const enter = isShorts && captionStyle === 'focus'
     ? interpolate(chunkAgeFrames, [0, 5], [0, 1], {
         easing: Easing.out(Easing.cubic),
         extrapolateLeft: 'clamp',
         extrapolateRight: 'clamp',
       })
     : 1;
-  const translateY = isShorts ? interpolate(enter, [0, 1], [12, 0]) : 0;
-  const scale = isShorts ? interpolate(enter, [0, 1], [0.985, 1]) : 1;
+  const translateY = isShorts && captionStyle === 'focus' ? interpolate(enter, [0, 1], [12, 0]) : 0;
+  const scale = isShorts && captionStyle === 'focus' ? interpolate(enter, [0, 1], [0.985, 1]) : 1;
   const captionOpacity = isShorts
     ? interpolate(enter, [0, 1], [0.45, 1])
     : 1;
