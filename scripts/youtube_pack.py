@@ -107,7 +107,29 @@ def build(meta: dict) -> str:
               "- *Related video*: link the long video above (this is what turns Shorts views into watch hours)",
               "", "## 3. Instagram Reel (same Short file)", _block(f"{shorts_title}\n\n{shorts_desc}")]
 
-    lines += ["", "## 4. Fact check before uploading (1 minute)"]
+    # Audit trail: source/creator/rights for all selected music is stored in
+    # music_license_report.json on the GitHub draft release.
+    music = meta.get("music") or {}
+    tracks = music.get("tracks") or []
+    lines += ["", "## 4. Background music and rights review", ""]
+    if tracks:
+        for track in tracks:
+            title = str(track.get("title") or "Unnamed track")
+            source = str(track.get("source") or "")
+            license_name = str(track.get("license") or "UNVERIFIED")
+            source_url = str(track.get("source_url") or "")
+            lines.append(f"- **{track.get('mood', 'scene')}**: {title} — {source}; rights: {license_name}")
+            if source_url:
+                lines.append(f"  - Recording/source: {source_url}")
+        if music.get("status") == "review_required":
+            lines += ["", "**Manual review required before publishing**: source-reported CC0 status is not proof of ownership or a guarantee against Content ID claims. Verify rights and listen to the audio."]
+        else:
+            lines += ["", "All selected tracks have local verified approval or original synthesized provenance; still listen before posting."]
+    else:
+        lines.append("- Legacy video: no mood-music manifest present.")
+    lines += ["", "Detailed SHA256, source URLs, and file-level license evidence: `music_license_report.json` in GitHub release assets."]
+
+    lines += ["", "## 5. Fact check before uploading (1 minute)"]
     if facts:
         lines += ["Verify or soften these lines. **HIGH** = fix before publishing.", ""]
         lines += [f"- Scene {f.get('scene')}: {f.get('claim')} — **{f.get('risk')}**" for f in facts]
@@ -127,7 +149,7 @@ def build(meta: dict) -> str:
             if line.startswith(key + "=") or line.startswith(key + ":"):
                 strategy[key] = line[len(key) + 1:].strip()
                 break
-    lines += ["", "## 5. Story strategy and playlist placement", ""]
+    lines += ["", "## 6. Story strategy and playlist placement", ""]
     if strategy:
         for key in strategy_keys:
             lines.append(f"- **{key}**: {strategy.get(key) or 'NOT PROVIDED — review before upload'}")
