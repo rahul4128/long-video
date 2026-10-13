@@ -57,6 +57,10 @@ export interface Shot {
   // previous scene). Scene.tsx alternates crossfade/blur_cut by shot index
   // when this isn't provided, so older props.json files still render fine.
   transition?: 'cut' | 'crossfade' | 'blur_cut';
+  // The editorial director uses these to guide movement/graphics without
+  // moving real narration or altering shot times and visual sourcing.
+  editTreatment?: 'clean' | 'detail' | 'impact' | 'breathing' | 'question';
+  editorialLabel?: string;
 }
 export interface VisualBeat {
   beatIndex: number;
