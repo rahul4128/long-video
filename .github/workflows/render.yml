@@ -613,6 +613,7 @@ jobs:
               "shorts/final_video_shorts.mp4" \
               "thumbnail_final/thumbnail.jpg" \
               "thumbnail_shorts_final/thumbnail_shorts_final.jpg" \
+              "assets/out/music_license_report.json" \
               --repo "${{ github.repository }}" \
               --title "Devotional upload $TAG" \
               "${RELEASE_FLAGS[@]}" \
@@ -633,7 +634,7 @@ jobs:
         run: |
           set -euo pipefail
           JSON=$(gh api "repos/${{ github.repository }}/releases/${{ steps.release.outputs.release_id }}")
-          for NAME in final_video.mp4 final_video_shorts.mp4 thumbnail.jpg thumbnail_shorts_final.jpg; do
+          for NAME in final_video.mp4 final_video_shorts.mp4 thumbnail.jpg thumbnail_shorts_final.jpg music_license_report.json; do
             echo "$JSON" | jq -e --arg name "$NAME" '.assets | any(.name == $name and .size > 0)' > /dev/null || {
               echo "::error::Missing or empty release asset: $NAME"
               exit 1
