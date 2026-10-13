@@ -74,11 +74,14 @@ export const DevotionalComposition: React.FC<DevotionalVideoProps> = ({
   return (
     <AbsoluteFill style={{ backgroundColor: '#000000' }}>
       {/* Background Devotional Flute / Tanpura Music */}
-      <Audio
-        src={staticFile('audio/bgm.mp3')}
-        volume={duckedVolume}
-        loop
-      />
+      {/* Legacy single-track fallback only for older props without musicFile. */}
+      {!scenes.some((scene) => Boolean(scene.musicFile)) && (
+        <Audio
+          src={staticFile('audio/bgm.mp3')}
+          volume={duckedVolume}
+          loop
+        />
+      )}
 
       {/* Sequential Long-Form Scenes (Widescreen 16:9) */}
       <Series>
