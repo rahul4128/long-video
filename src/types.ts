@@ -64,6 +64,8 @@ export interface Shot {
   editAccent?: 'cinematic_devotional' | 'curiosity_reveal' | 'presenter_explainer' | 'emotional_story' | 'festival_energy';
   editSpotlight?: boolean;
   editBeatSnap?: boolean;
+  // Per-shot conservative exposure matching; no destructive media changes.
+  colorCorrection?: { brightness: number; saturation: number };
   // These are OPTIONAL manual/verified editing skills. They must never be
   // invented from unrelated devotional images or guessed face positions.
   comparisonApproved?: boolean;
