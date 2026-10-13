@@ -13,7 +13,9 @@ from datetime import date
 import json
 from pathlib import Path
 from urllib.parse import urlparse
+import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from editing_style_engine import STYLES
 
 
