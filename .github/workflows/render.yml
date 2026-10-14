@@ -112,6 +112,15 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends ffmpeg
           pip install -r requirements.txt
 
+      - name: Type-check Remotion scenes and motion graphics (no video render)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify React/Remotion TypeScript compiles
+        run: |
+          npm install --no-audit --no-fund
+          npx tsc --noEmit
+
       - name: Run ALL asset/editing/sound regressions before media generation
         run: |
           set -euo pipefail
