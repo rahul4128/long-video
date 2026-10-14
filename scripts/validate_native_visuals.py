@@ -11,6 +11,7 @@ import re
 import subprocess
 from pathlib import Path
 from image_framing import framing_issue
+from visual_relevance_gate import visual_relevance_issues
 
 ROOT = Path(__file__).resolve().parents[1]
 MEDIA_ROOT = ROOT / "public" / "images"
@@ -114,6 +115,34 @@ def main():
         if issue:
             raise ValueError(f"Thumbnail {filename}: invalid image framing: {issue}")
     props = [json.loads(filename.read_text(encoding="utf-8")) for _, filename in FILES]
+    # Technical media integrity is necessary but NOT sufficient. An earlier
+    # episode passed media QC with unrelated people, generic temple stock and
+    # emergency brown atmosphere screens. Reject that *before* Remotion spends
+    # CPU minutes rendering both formats.
+    relevance = []
+    for (kind, _), document in zip(FILES, props):
+        relevance.extend(visual_relevance_issues(document["scenes"], kind))
+    audit = {
+        "status": "review_required" if relevance else "supported_by_stock_metadata",
+        "limitations": (
+            "Source metadata/CLIP scores cannot prove the actual visual is "
+            "accurate. Review any generated deity depictions before publishing."
+        ),
+        "issues": relevance,
+        "checkedFormats": ["Long", "Shorts"],
+    }
+    alignment_path = ROOT / "out" / "visual_story_alignment_report.json"
+    alignment_path.parent.mkdir(parents=True, exist_ok=True)
+    alignment_path.write_text(json.dumps(audit, indent=2, ensure_ascii=False),
+                              encoding="utf-8")
+    if relevance:
+        first = relevance[0]
+        raise ValueError(
+            f"Visual narrative mismatch: {len(relevance)} unsupported stock/"
+            f"placeholder shot(s), first {first['format']} scene {first['scene']} "
+            f"shot {first['shot']} ({first['reason']}). "
+            f"Do not render unrelated imagery; see {alignment_path}."
+        )
     titles = [data.get("title", "") for data in props]
     reportfile = ROOT / "out" / "visual_search_report.json"
     report = json.loads(reportfile.read_text(encoding="utf-8")) if reportfile.is_file() else None
