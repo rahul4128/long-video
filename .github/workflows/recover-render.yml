@@ -9,7 +9,7 @@ on:
         type: string
 
 permissions:
-  contents: read
+  contents: write
   actions: read
 
 concurrency:
@@ -52,6 +52,8 @@ jobs:
             --name "devotional-thumbnail-$SOURCE_RUN" --dir out
           gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" \
             --name "devotional-thumbnail-shorts-$SOURCE_RUN" --dir out
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "approved-story-$SOURCE_RUN" --dir out
           for path in \
             public/props.json public/props_shorts.json out/metadata.json \
             out/final_video.mp4 out/final_video_shorts.mp4 \
@@ -73,6 +75,35 @@ jobs:
 
       - name: Run full dynamic duration, black-screen, thumbnail and soundtrack QC
         run: python qc.py
+
+      # Preserve source-based editing-style attribution that the old render's
+      # skipped publish job could not record. No YouTube upload is attempted.
+      - name: Save QC-passed editing style for later factual learning
+        if: success()
+        continue-on-error: true
+        env:
+          SOURCE_RUN: ${{ inputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          PIPELINE=$(python -c 'import json; print(json.load(open("out/replay_inputs.json", encoding="utf-8"))["pipeline"])')
+          python scripts/render_style_attribution.py \
+            --metadata out/metadata.json \
+            --editing out/editing_qc_report.json \
+            --pipeline "$PIPELINE" \
+            --run-id "$SOURCE_RUN"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/render_editing_history.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Record recovered QC-passed editor style from run $SOURCE_RUN"
+            for attempt in 1 2 3; do
+              if git pull --rebase --autostash origin visual-director-v2 && git push origin HEAD:visual-director-v2; then
+                exit 0
+              fi
+              sleep 4
+            done
+            echo "::warning::Verified videos remain available, but editing feedback attribution was not saved."
+          fi
 
       - name: Archive QC findings even if an inspection fails
         if: always()
