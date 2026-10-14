@@ -1837,6 +1837,22 @@ def _generate_visual_beat_image(scene_prompt: str, beat: dict, orientation: str,
     )
     fallback_source = ""
     if not network_generated or not _valid_generated_image(dest):
+        # Never fill an episode with brown texture once all cloud image
+        # services have explicitly exhausted their credits/quota. The
+        # mandatory visual-quality validator would reject it anyway.
+        # Failing now preserves GitHub time and makes the root cause obvious.
+        if all(not _ai_provider_allowed(name)
+               for name in ("cloudflare", "huggingface", "pollinations")):
+            reasons = ", ".join(
+                f"{name}: {state.get('unavailableReason') or 'failed requests'}"
+                for name, state in _AI_IMAGE_PROVIDER_STATE.items()
+            )
+            raise RuntimeError(
+                "No image-generation providers available for a required narration beat. "
+                f"Image providers: {reasons}. "
+                "Do not regenerate or publish generic abstract fallback scenes; "
+                "wait for quota reset or connect a funded, approved image API."
+            )
         fallback_source = create_local_visual_fallback(
             dest,
             orientation=orientation,
@@ -2098,6 +2114,21 @@ def _ai_provider_failure_limit(name: str) -> int:
         return defaults.get(name, 2)
 
 
+def _ai_provider_mark_unavailable(name: str, reason: str) -> None:
+    """Circuit-break a provider for non-retryable billing or daily quota errors.
+
+    HTTP 402 is not a transient service hiccup. A Cloudflare response that
+    explicitly says its daily free neuron allocation is exhausted cannot be
+    fixed by retrying another 15 prompts in the same run.
+    """
+    with _AI_IMAGE_PROVIDER_LOCK:
+        state = _AI_IMAGE_PROVIDER_STATE.setdefault(name, {"failures": 0, "open": False})
+        if not state.get("open"):
+            print(f"  🛑 {name} image generation unavailable for this run: {reason}", flush=True)
+        state["open"] = True
+        state["unavailableReason"] = reason
+
+
 def _ai_provider_allowed(name: str) -> bool:
     with _AI_IMAGE_PROVIDER_LOCK:
         return not bool(_AI_IMAGE_PROVIDER_STATE.get(name, {}).get("open"))
@@ -2289,6 +2320,14 @@ def generate_cloudflare_flux(prompt: str, dest_path: str, aspect_ratio: str = "1
         else:
             body = res.text[:240] if "text" in res.headers.get("content-type", "") or "json" in res.headers.get("content-type", "") else ""
             print(f"Cloudflare notice: HTTP {res.status_code} {body}", flush=True)
+            if (res.status_code == 402 or
+                (res.status_code == 429 and
+                 ("daily free allocation" in body.lower() or
+                  "used up" in body.lower() or
+                  "neuron" in body.lower()))):
+                _ai_provider_mark_unavailable(
+                    "cloudflare", f"HTTP {res.status_code}: free daily image quota exhausted"
+                )
     except Exception as e:
         print(f"Cloudflare error: {e}", flush=True)
     return False
@@ -2346,7 +2385,11 @@ def generate_huggingface_image(prompt: str, dest_path: str, aspect_ratio: str = 
                     print(f"  ✅ Image fetched from Hugging Face provider-auto ({model_id})", flush=True)
                     return True
         except Exception as exc:
-            print(f"Hugging Face provider notice ({model_id}): {str(exc)[:220]}", flush=True)
+            msg = str(exc)
+            print(f"Hugging Face provider notice ({model_id}): {msg[:220]}", flush=True)
+            if ("402" in msg and ("Payment Required" in msg or "payment required" in msg.lower())):
+                _ai_provider_mark_unavailable("huggingface", "HTTP 402 Payment Required")
+                break
 
     return False
 
@@ -2553,6 +2596,9 @@ def download_pollinations_fallback(prompt: str, img_dest: str, width: int = 1920
                         f"Pollinations notice: HTTP {res.status_code} from {urllib.parse.urlparse(url).netloc}",
                         flush=True,
                     )
+                    if res.status_code == 402:
+                        _ai_provider_mark_unavailable("pollinations", "HTTP 402 Payment Required")
+                        return False
             except Exception as exc:
                 print(f"Pollinations notice: {str(exc)[:180]}", flush=True)
             time.sleep(0.7)
