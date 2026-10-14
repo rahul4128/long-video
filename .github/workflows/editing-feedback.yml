@@ -1,0 +1,58 @@
+name: Verified Editing Feedback
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        required: true
+        type: choice
+        options: [primary, oflifepart31]
+      analytics_json:
+        required: true
+        type: string
+      ids_json:
+        required: true
+        type: string
+      titles_json:
+        required: true
+        type: string
+      published_json:
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: editing-feedback
+  cancel-in-progress: false
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: visual-director-v2
+      - name: Ingest actual video analytics
+        env:
+          SCOPE: ${{ inputs.scope }}
+          ANALYTICS: ${{ inputs.analytics_json }}
+          IDS: ${{ inputs.ids_json }}
+          TITLES: ${{ inputs.titles_json }}
+          PUBLISHED: ${{ inputs.published_json }}
+        run: |
+          python scripts/ingest_editing_feedback.py --scope "$SCOPE" --analytics "$ANALYTICS" --ids "$IDS" --titles "$TITLES" --published "$PUBLISHED"
+      - name: Persist metrics and audit
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/editing_style_signals_*.json data/editing_feedback_audit_*.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Update editing performance evidence"
+          git pull --rebase --autostash origin visual-director-v2
+          git push origin HEAD:visual-director-v2
+      - name: Upload audit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: editing-feedback-audit
+          path: data/editing_feedback_audit_*.json
+          if-no-files-found: ignore
