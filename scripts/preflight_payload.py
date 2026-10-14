@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""Cache an approved Make episode *before* any paid media generation.
+
+A new workflow_dispatch may specify reuse_run_id instead of payload, allowing
+a fresh checkout of the updated GitHub branch without invoking Gemini again.
+Cache only the user-approved story JSON, not credentials or output secrets.
+"""
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+
+
+def prepare(env=None, replay_path=None):
+    env = env or os.environ
+    previous = str(env.get("REPLAY_RUN_ID") or "").strip()
+    if previous:
+        if not re.fullmatch(r"\d{4,20}", previous):
+            raise ValueError("reuse_run_id must be a GitHub run number ID")
+        if str(env.get("REVIEW_APPROVED") or "false").lower() == "true":
+            raise ValueError("Reused story must remain review-only; publication needs separate approval")
+        source = Path(replay_path or "out/reused/replay_inputs.json")
+        if not source.is_file():
+            raise ValueError("Source run has no saved payload artifact. Export the past Make payload once.")
+        doc = json.loads(source.read_text(encoding="utf-8"))
+        if not isinstance(doc, dict) or str(doc.get("version")) != "1":
+            raise ValueError("Invalid replay artifact version")
+        payload_string = doc.get("payload")
+        pipeline = doc.get("pipeline")
+        source_run = previous
+        verified = doc.get("payload_sha256")
+    else:
+        payload_string = env.get("NEW_DISPATCH_PAYLOAD", "")
+        pipeline = env.get("NEW_PIPELINE", "")
+        source_run = None
+        verified = None
+
+    if not isinstance(payload_string, str) or not 20 <= len(payload_string) <= 250000:
+        raise ValueError("No complete original Make story JSON available for render")
+    episode = json.loads(payload_string)
+    if isinstance(episode, dict) and isinstance(episode.get("payload"), dict):
+        # Repository dispatch content is often {payload: {...}}, but our
+        # workflow_dispatch normally already passes only the script as JSON.
+        episode = episode["payload"]
+    if not isinstance(episode, dict):
+        raise ValueError("Episode is not a JSON object")
+    for fmt in ("long_video", "shorts"):
+        item = episode.get(fmt)
+        if not isinstance(item, dict) or not isinstance(item.get("scenes"), list) or not item["scenes"]:
+            raise ValueError("Approved story is missing complete " + fmt + ".scenes")
+    seo = episode.get("seo_metadata")
+    if not isinstance(seo, dict) or not seo.get("long_video_title") or not seo.get("shorts_title"):
+        raise ValueError("Approved story must have both title fields")
+    if not isinstance(pipeline, str) or not re.fullmatch(r"[A-Za-z0-9_-]{3,80}", pipeline):
+        raise ValueError("Invalid or missing original pipeline label")
+    if not pipeline.startswith("visual-director-v2-"):
+        # Manual tests may have other labels; do not assign them a measured
+        # channel style unless the original Make run was explicitly scoped.
+        print("This pipeline has no source-verified editing-performance scope.")
+
+    approved_json = json.dumps(episode, ensure_ascii=False, separators=(",", ":"))
+    digest = hashlib.sha256(approved_json.encode("utf-8")).hexdigest()
+    if verified and digest != verified:
+        raise ValueError("Cached payload SHA-256 does not match; refusing replay")
+    archive = {
+        "version": 1, "pipeline": pipeline,
+        "payload": approved_json, "payload_sha256": digest,
+        "source_run_id": source_run,
+    }
+    return archive
+
+
+def main():
+    item = prepare()
+    out = Path("out/replay_inputs.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(item, ensure_ascii=False), encoding="utf-8")
+    output_file = os.environ.get("GITHUB_OUTPUT")
+    if output_file:
+        with open(output_file, "a", encoding="utf-8") as fh:
+            fh.write("pipeline=" + item["pipeline"] + "\n")
+    print(f"Approved story is cached for GitHub-only retries; SHA-256 {item['payload_sha256'][:14]}, "
+          f"pipeline {item['pipeline']}. No Gemini calls.")
+
+
+if __name__ == "__main__":
+    main()
