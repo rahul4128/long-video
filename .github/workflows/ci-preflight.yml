@@ -33,6 +33,15 @@ jobs:
       - name: Check Python syntax
         run: |
           python -m compileall -q -f generate_assets.py spoken_hindi_qc.py editing_style_engine.py editing_director.py color_continuity.py scripts
+      - name: Type-check Remotion scenes and motion graphics (no video render)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify React/Remotion TypeScript compiles
+        run: |
+          npm install --no-audit --no-fund
+          npx tsc --noEmit
+
       - name: Regression checks before media generation
         run: |
           set -euo pipefail
