@@ -35,9 +35,9 @@ export const RemotionRoot: React.FC = () => {
   return (
     <>
       {/* 1. Long Devotional Video (16:9 Widescreen) */}
-      <Composition<DevotionalVideoProps>
+      <Composition
         id="DevotionalComposition"
-        component={DevotionalComposition}
+        component={DevotionalComposition as unknown as React.ComponentType<Record<string, unknown>>}
         durationInFrames={durationInFramesLong}
         fps={longFps}
         width={1920}
@@ -46,9 +46,9 @@ export const RemotionRoot: React.FC = () => {
       />
 
       {/* 2. YouTube Shorts Video (9:16 Vertical) */}
-      <Composition<DevotionalVideoProps>
+      <Composition
         id="DevotionalShortsComposition"
-        component={DevotionalShortsComposition}
+        component={DevotionalShortsComposition as unknown as React.ComponentType<Record<string, unknown>>}
         durationInFrames={durationInFramesShorts}
         fps={shortsFps}
         width={1080}
@@ -59,9 +59,9 @@ export const RemotionRoot: React.FC = () => {
       {/* 3. High-CTR Thumbnail (16:9 still, background image + bold Hindi
           hook-text overlay) - rendered as a single frame via `npx remotion
           still`, see .github/workflows/render.yml */}
-      <Still<ThumbnailProps>
+      <Still
         id="ThumbnailComposition"
-        component={ThumbnailComposition}
+        component={ThumbnailComposition as unknown as React.ComponentType<Record<string, unknown>>}
         width={1920}
         height={1080}
         defaultProps={typedPropsThumbnail}
@@ -70,9 +70,9 @@ export const RemotionRoot: React.FC = () => {
       {/* 4. Shorts-specific 9:16 Thumbnail - its own background image + hook
           text (see ShortsThumbnailComposition.tsx), so Shorts stop reusing
           the long-video 16:9 thumbnail. */}
-      <Still<ThumbnailProps>
+      <Still
         id="ShortsThumbnailComposition"
-        component={ShortsThumbnailComposition}
+        component={ShortsThumbnailComposition as unknown as React.ComponentType<Record<string, unknown>>}
         width={1080}
         height={1920}
         defaultProps={typedPropsThumbnailShorts}
