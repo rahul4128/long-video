@@ -83,6 +83,7 @@ jobs:
             }
 
       - name: Verify and cache approved episode inputs for low-cost retries
+        if: ${{ !inputs.preflight_only || inputs.payload != '' || inputs.reuse_run_id != '' }}
         id: store
         env:
           NEW_DISPATCH_PAYLOAD: ${{ inputs.payload || toJson(github.event.client_payload) }}
@@ -92,6 +93,7 @@ jobs:
         run: python scripts/preflight_payload.py
 
       - name: Store approved story before running tests or generating paid media
+        if: ${{ !inputs.preflight_only || inputs.payload != '' || inputs.reuse_run_id != '' }}
         uses: actions/upload-artifact@v7
         with:
           name: approved-story-${{ github.run_id }}
