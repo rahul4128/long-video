@@ -22,7 +22,7 @@ from color_continuity import inspect_shots
 from spoken_hindi_qc import assess_scenes
 from visual_matcher import extract_visual_requirements, candidate_is_accurate
 from content_qc import validate_payload, fact_check_items
-from visual_qc import assess_sequence
+from visual_qc import assess_sequence, prioritized_repair_tasks
 from scripts.visual_evidence import detect_instructional_category, is_generic_stock_query
 from scripts.visual_relevance_gate import strong_stock_match, named_deity_requires_verified_footage
 from scripts.image_framing import framing_issue, preserve_full_subject
@@ -3651,7 +3651,11 @@ def run_visual_qc_and_repair(
     budget = _visual_qc_max_repairs()
     used = 0
 
-    for scene_index, scene_report in enumerate(before.get("scenes", [])):
+    # Sort ALL scene repair targets globally. Missing beats (priority 100)
+    # must be handled before any decorative/AI-ratio repair in earlier scenes.
+    for scene_index, target in prioritized_repair_tasks(before):
+        if used >= budget:
+            break
         if scene_index >= len(enriched_scenes):
             continue
         enriched_scene = enriched_scenes[scene_index]
@@ -3667,161 +3671,163 @@ def run_visual_qc_and_repair(
             for i, beat in enumerate(enriched_scene.get("visualBeats") or [])
         }
 
-        for target in scene_report.get("repairTargets", []):
-            if used >= budget:
-                break
+        if used >= budget:
+            break
 
-            beat_index = int(target.get("beatIndex") or 0)
-            beat = beats.get(beat_index)
-            action = target.get("action")
-            reason = target.get("reason")
-            if not beat:
-                continue
+        beat_index = int(target.get("beatIndex") or 0)
+        beat = beats.get(beat_index)
+        action = target.get("action")
+        reason = target.get("reason")
+        if not beat:
+            continue
 
-            shot_index = _visual_qc_find_shot_index(shots, target)
-            current = shots[shot_index] if shot_index is not None else {}
+        shot_index = _visual_qc_find_shot_index(shots, target)
+        current = shots[shot_index] if shot_index is not None else {}
 
-            if action == "try_stock_only" and current.get("source") != "ai_image":
-                continue
+        if action == "try_stock_only" and current.get("source") != "ai_image":
+            continue
 
-            if action == "soften_short_beat":
-                if shot_index is not None:
-                    current["transition"] = "crossfade"
-                    current["qcAction"] = "soften_short_beat"
-                    current["qcReason"] = reason
-                    repairs.append({
-                        "sceneNumber": scene_number,
-                        "beatIndex": beat_index,
-                        "reason": reason,
-                        "action": "soften_short_beat",
-                        "result": "applied",
-                    })
-                    used += 1
-                continue
-
-            if action == "split_visual" and shot_index is not None:
-                try:
-                    start = float(current.get("startSeconds"))
-                    end = float(current.get("endSeconds"))
-                except Exception:
-                    continue
-                if end - start <= 0.2:
-                    continue
-
-                used += 1
-                replacement = _visual_qc_generate_replacement(
-                    source_scene,
-                    beat,
-                    shots,
-                    shot_index,
-                    orientation,
-                    format_name,
-                    scene_number,
-                    used,
-                    stock_only=False,
-                )
-                if not replacement:
-                    repairs.append({
-                        "sceneNumber": scene_number,
-                        "beatIndex": beat_index,
-                        "reason": reason,
-                        "action": "split_visual",
-                        "result": "no_replacement_available",
-                    })
-                    continue
-
-                midpoint = round(start + (end - start) / 2.0, 3)
-                current["endSeconds"] = midpoint
-                current["syncedDurationSeconds"] = round(midpoint - start, 3)
-                current["qcAction"] = "split_long_hold"
+        if action == "soften_short_beat":
+            if shot_index is not None:
+                current["transition"] = "crossfade"
+                current["qcAction"] = "soften_short_beat"
                 current["qcReason"] = reason
-
-                replacement = _visual_qc_inherit_timing(
-                    replacement,
-                    current,
-                    beat,
-                )
-                replacement["startSeconds"] = midpoint
-                replacement["endSeconds"] = end
-                replacement["syncedDurationSeconds"] = round(end - midpoint, 3)
-                replacement["transition"] = "crossfade"
-                replacement["qcAction"] = "split_long_hold"
-                replacement["qcReason"] = reason
-                shots.insert(shot_index + 1, replacement)
-
                 repairs.append({
                     "sceneNumber": scene_number,
                     "beatIndex": beat_index,
                     "reason": reason,
-                    "action": "split_visual",
-                    "result": "repaired",
-                    "replacementFile": replacement.get("file"),
-                    "replacementSource": replacement.get("source"),
+                    "action": "soften_short_beat",
+                    "result": "applied",
                 })
+                used += 1
+            continue
+
+        if action == "split_visual" and shot_index is not None:
+            try:
+                start = float(current.get("startSeconds"))
+                end = float(current.get("endSeconds"))
+            except Exception:
+                continue
+            if end - start <= 0.2:
                 continue
 
-            # Missing/weak/duplicate/conflicting visual: retry this beat only.
             used += 1
             replacement = _visual_qc_generate_replacement(
                 source_scene,
                 beat,
                 shots,
-                shot_index if shot_index is not None else len(shots),
+                shot_index,
                 orientation,
                 format_name,
                 scene_number,
                 used,
-                stock_only=(action == "try_stock_only"),
+                stock_only=False,
             )
-
             if not replacement:
                 repairs.append({
                     "sceneNumber": scene_number,
                     "beatIndex": beat_index,
                     "reason": reason,
-                    "action": action,
+                    "action": "split_visual",
                     "result": "no_replacement_available",
                 })
                 continue
 
-            if shot_index is not None:
-                replacement = _visual_qc_inherit_timing(
-                    replacement,
-                    current,
-                    beat,
-                )
-                replacement["qcAction"] = "replace_failing_beat"
-                replacement["qcReason"] = reason
-                shots[shot_index] = replacement
-            else:
-                replacement = _visual_qc_inherit_timing(
-                    replacement,
-                    {},
-                    beat,
-                )
-                replacement["qcAction"] = "fill_missing_beat"
-                replacement["qcReason"] = reason
-                shots.append(replacement)
-                shots.sort(
-                    key=lambda shot: (
-                        float(shot.get("startSeconds") or 0.0),
-                        int(shot.get("beatIndex") or 0),
-                    )
-                )
+            midpoint = round(start + (end - start) / 2.0, 3)
+            current["endSeconds"] = midpoint
+            current["syncedDurationSeconds"] = round(midpoint - start, 3)
+            current["qcAction"] = "split_long_hold"
+            current["qcReason"] = reason
+
+            replacement = _visual_qc_inherit_timing(
+                replacement,
+                current,
+                beat,
+            )
+            replacement["startSeconds"] = midpoint
+            replacement["endSeconds"] = end
+            replacement["syncedDurationSeconds"] = round(end - midpoint, 3)
+            replacement["transition"] = "crossfade"
+            replacement["qcAction"] = "split_long_hold"
+            replacement["qcReason"] = reason
+            shots.insert(shot_index + 1, replacement)
 
             repairs.append({
                 "sceneNumber": scene_number,
                 "beatIndex": beat_index,
                 "reason": reason,
-                "action": action,
+                "action": "split_visual",
                 "result": "repaired",
                 "replacementFile": replacement.get("file"),
                 "replacementSource": replacement.get("source"),
-                "selectionScore": replacement.get("selectionScore"),
             })
+            continue
+
+        # Missing/weak/duplicate/conflicting visual: retry this beat only.
+        used += 1
+        replacement = _visual_qc_generate_replacement(
+            source_scene,
+            beat,
+            shots,
+            shot_index if shot_index is not None else len(shots),
+            orientation,
+            format_name,
+            scene_number,
+            used,
+            stock_only=(action == "try_stock_only"),
+        )
+
+        if not replacement:
+            repairs.append({
+                "sceneNumber": scene_number,
+                "beatIndex": beat_index,
+                "reason": reason,
+                "action": action,
+                "result": "no_replacement_available",
+            })
+            continue
+
+        if shot_index is not None:
+            replacement = _visual_qc_inherit_timing(
+                replacement,
+                current,
+                beat,
+            )
+            replacement["qcAction"] = "replace_failing_beat"
+            replacement["qcReason"] = reason
+            shots[shot_index] = replacement
+        else:
+            replacement = _visual_qc_inherit_timing(
+                replacement,
+                {},
+                beat,
+            )
+            replacement["qcAction"] = "fill_missing_beat"
+            replacement["qcReason"] = reason
+            shots.append(replacement)
+            shots.sort(
+                key=lambda shot: (
+                    float(shot.get("startSeconds") or 0.0),
+                    int(shot.get("beatIndex") or 0),
+                )
+            )
+
+        repairs.append({
+            "sceneNumber": scene_number,
+            "beatIndex": beat_index,
+            "reason": reason,
+            "action": action,
+            "result": "repaired",
+            "replacementFile": replacement.get("file"),
+            "replacementSource": replacement.get("source"),
+            "selectionScore": replacement.get("selectionScore"),
+        })
 
         enriched_scene["shots"] = shots
+
+    for enriched_scene in enriched_scenes:
         _visual_qc_normalize_timeline(enriched_scene)
+        shots = enriched_scene.get("shots") or []
         if shots:
             enriched_scene["imageFileName"] = shots[0].get("file", "")
 
