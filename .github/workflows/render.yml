@@ -6,9 +6,18 @@ on:
   workflow_dispatch:
     inputs:
       payload:
-        description: 'Make.com render payload JSON'
-        required: true
+        description: 'Make.com render payload JSON (not required when reusing a prior cached GitHub run)'
+        required: false
         type: string
+      reuse_run_id:
+        description: 'GitHub run ID with an approved-story-<run_id> artifact (reuse last script without Make/Gemini)'
+        required: false
+        type: string
+      preflight_only:
+        description: 'Run Python regression checks and cache story only, without TTS/images/render'
+        required: false
+        type: boolean
+        default: false
       pipeline:
         description: 'Pipeline label'
         required: false
@@ -41,12 +50,86 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # CACHE FIRST. This preflight stage spends no Gemini/stock/TTS tokens and
+  # saves the approved Make script before even the cheapest regression tests.
+  # Rerun with reuse_run_id on the latest branch instead of re-running Make.
+  preflight:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      pipeline: ${{ steps.store.outputs.pipeline }}
+    steps:
+      - name: Checkout current branch
+        uses: actions/checkout@v7
+
+      - name: Restore previously approved episode from GitHub artifacts
+        if: ${{ inputs.reuse_run_id != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ORIGINAL_RUN: ${{ inputs.reuse_run_id }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$ORIGINAL_RUN" =~ ^[0-9]{4,20}$ ]]; then
+            echo "::error::reuse_run_id must be a numeric GitHub Actions run ID"
+            exit 1
+          fi
+          mkdir -p out/reused
+          gh run download "$ORIGINAL_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "approved-story-$ORIGINAL_RUN" --dir out/reused || {
+              echo "::error::No cached story for that old run. Export Make module 3/5 full JSON and submit it once as the payload input."
+              exit 1
+            }
+
+      - name: Verify and cache approved episode inputs for low-cost retries
+        id: store
+        env:
+          NEW_DISPATCH_PAYLOAD: ${{ inputs.payload || toJson(github.event.client_payload) }}
+          NEW_PIPELINE: ${{ inputs.pipeline || 'canva-updated-flow' }}
+          REPLAY_RUN_ID: ${{ inputs.reuse_run_id || '' }}
+          REVIEW_APPROVED: ${{ inputs.review_approved || 'false' }}
+        run: python scripts/preflight_payload.py
+
+      - name: Store approved story before running tests or generating paid media
+        uses: actions/upload-artifact@v7
+        with:
+          name: approved-story-${{ github.run_id }}
+          path: out/replay_inputs.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Set up Python for inexpensive regression checks
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Install test dependencies only
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg
+          pip install -r requirements.txt
+
+      - name: Run ALL asset/editing/sound regressions before media generation
+        run: |
+          set -euo pipefail
+          for name in \
+            test_image_framing.py test_music_engine.py test_editing_director.py \
+            test_p1_storytelling.py test_editing_performance_learning.py \
+            test_render_style_feedback.py test_editing_style_engine.py \
+            test_verified_edit_skills.py test_color_continuity.py \
+            test_master_final_audio.py; do
+            python -m unittest discover -s tests -p "$name" -v
+          done
+
   # ---------------------------------------------------------------
   # JOB 1: Generate all assets (images/video clips, narration audio,
   # sound effects, thumbnail). Python-only - no Node.js needed here,
   # so this job no longer wastes time installing Node/npm at all.
   # ---------------------------------------------------------------
   generate-assets:
+    needs: preflight
+    if: ${{ !inputs.preflight_only }}
     runs-on: ubuntu-latest
     # Own-voice IndicF5 on a CPU runner is slow; keep a generous ceiling.
     timeout-minutes: 90
@@ -58,6 +141,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+
+      - name: Load the cached approved story (never rerun Gemini)
+        uses: actions/download-artifact@v7
+        with:
+          name: approved-story-${{ github.run_id }}
+          path: out
 
       - name: Static Python syntax check
         run: python -m py_compile content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py editing_style_engine.py color_continuity.py scripts/validate_color_continuity.py scripts/master_final_audio.py scripts/validate_final_audio.py spoken_hindi_qc.py scripts/build_editing_style_signals.py scripts/render_style_attribution.py scripts/ingest_editing_feedback.py
@@ -92,36 +181,6 @@ jobs:
       - name: Install Python Dependencies
         run: pip install -r requirements.txt
 
-      - name: Check image aspect and embedded-letterbox regressions
-        run: python -m unittest discover -s tests -p 'test_image_framing.py' -v
-
-      - name: Check music licensing and mood selector regressions
-        run: python -m unittest discover -s tests -p 'test_music_engine.py' -v
-
-      - name: Check documentary editing director regressions
-        run: python -m unittest discover -s tests -p 'test_editing_director.py' -v
-
-      - name: Test spoken Hindi clarity and documentary motion graphics
-        run: python -m unittest discover -s tests -p 'test_p1_storytelling.py' -v
-
-      - name: Test measured editing style performance import
-        run: python -m unittest discover -s tests -p 'test_editing_performance_learning.py' -v
-
-      - name: Verify actual render-to-published-YouTube editing feedback attribution
-        run: python -m unittest discover -s tests -p 'test_render_style_feedback.py' -v
-
-      - name: Check evidence-gated dynamic video editing styles
-        run: python -m unittest discover -s tests -p 'test_editing_style_engine.py' -v
-
-      - name: Check verified comparison and privacy blur safeguards
-        run: python -m unittest discover -s tests -p 'test_verified_edit_skills.py' -v
-
-      - name: Test sampled color correction without modifying source images
-        run: python -m unittest discover -s tests -p 'test_color_continuity.py' -v
-
-      - name: Test final audio mastering on synthetic media
-        run: python -m unittest discover -s tests -p 'test_master_final_audio.py' -v
-
       # Optional engines - installed only when switched on with repo
       # variables, so the default (Edge voice) run stays fast.
       - name: Install optional engines (own voice / Kokoro / CLIP)
@@ -140,7 +199,6 @@ jobs:
 
       - name: Generate Unified Assets (4K B-Roll + FLUX.1 + Voiceover)
         env:
-          DISPATCH_PAYLOAD: ${{ inputs.payload || toJson(github.event.client_payload) }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -159,8 +217,10 @@ jobs:
           EDITORIAL_EDITING_ENABLED: ${{ vars.EDITORIAL_EDITING_ENABLED || 'true' }}
           COLOR_MATCH_ENABLED: ${{ vars.COLOR_MATCH_ENABLED || 'true' }}
           SPOKEN_HINDI_STRICT: ${{ vars.SPOKEN_HINDI_STRICT || 'false' }}
-          EDITING_METRICS_SCOPE: ${{ inputs.pipeline || 'none' }}
-        run: python generate_assets.py
+          EDITING_METRICS_SCOPE: ${{ needs.preflight.outputs.pipeline }}
+        run: |
+          export DISPATCH_PAYLOAD="$(python -c 'import json; print(json.load(open("out/replay_inputs.json", encoding="utf-8"))["payload"])')"
+          python generate_assets.py
 
       - name: Fail closed if Long or Shorts scene visuals are missing
         run: python scripts/validate_native_visuals.py
@@ -557,7 +617,7 @@ jobs:
   # title/description/thumbnail and files each into its playlist.
   # ---------------------------------------------------------------
   publish-and-notify:
-    needs: [generate-assets, render-long, render-shorts, render-thumbnail, render-thumbnail-shorts, media-qc]
+    needs: [preflight, generate-assets, render-long, render-shorts, render-thumbnail, render-thumbnail-shorts, media-qc]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -600,7 +660,7 @@ jobs:
       # requires exact Youtube video IDs / titles and mature analytics.
       - name: Persist actual editing style after both final MP4s pass QC
         env:
-          ATTRIBUTION_PIPELINE: ${{ inputs.pipeline || 'none' }}
+          ATTRIBUTION_PIPELINE: ${{ needs.preflight.outputs.pipeline }}
           GITHUB_RENDER_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
