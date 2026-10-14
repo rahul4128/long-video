@@ -35,7 +35,7 @@ export const RemotionRoot: React.FC = () => {
   return (
     <>
       {/* 1. Long Devotional Video (16:9 Widescreen) */}
-      <Composition
+      <Composition<DevotionalVideoProps>
         id="DevotionalComposition"
         component={DevotionalComposition}
         durationInFrames={durationInFramesLong}
@@ -46,7 +46,7 @@ export const RemotionRoot: React.FC = () => {
       />
 
       {/* 2. YouTube Shorts Video (9:16 Vertical) */}
-      <Composition
+      <Composition<DevotionalVideoProps>
         id="DevotionalShortsComposition"
         component={DevotionalShortsComposition}
         durationInFrames={durationInFramesShorts}
@@ -59,7 +59,7 @@ export const RemotionRoot: React.FC = () => {
       {/* 3. High-CTR Thumbnail (16:9 still, background image + bold Hindi
           hook-text overlay) - rendered as a single frame via `npx remotion
           still`, see .github/workflows/render.yml */}
-      <Still
+      <Still<ThumbnailProps>
         id="ThumbnailComposition"
         component={ThumbnailComposition}
         width={1920}
@@ -70,7 +70,7 @@ export const RemotionRoot: React.FC = () => {
       {/* 4. Shorts-specific 9:16 Thumbnail - its own background image + hook
           text (see ShortsThumbnailComposition.tsx), so Shorts stop reusing
           the long-video 16:9 thumbnail. */}
-      <Still
+      <Still<ThumbnailProps>
         id="ShortsThumbnailComposition"
         component={ShortsThumbnailComposition}
         width={1080}
