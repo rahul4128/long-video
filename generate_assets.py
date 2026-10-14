@@ -4181,10 +4181,20 @@ async def process():
         flush=True,
     )
     if not visual_qc_report["ok"]:
+        # This is NOT a renderable, approved visual sequence. Persist exact
+        # chosen shots and narration mapping ONLY for post-failure storyboard
+        # review. The fail-closed render gate below remains unchanged.
+        for name, scenes in (
+            ("long", enriched_long),
+            ("shorts", enriched_shorts),
+        ):
+            with open(f"out/partial_props_{name}.json", "w", encoding="utf-8") as fp:
+                json.dump({"scenes": scenes, "reviewOnly": True},
+                          fp, ensure_ascii=False, indent=2)
         raise RuntimeError(
             "Visual QC failed after targeted repair: "
             f"{remaining_blockers} blocking issue(s) remain. "
-            "See out/visual_qc_report.json."
+            "See out/visual_qc_report.json and partial visual storyboards."
         )
 
     # Phase-6 audit: selected asset + rerank score + narration-synchronised
