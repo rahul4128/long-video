@@ -60,7 +60,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Static Python syntax check
-        run: python -m py_compile content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py editing_style_engine.py color_continuity.py scripts/validate_color_continuity.py scripts/master_final_audio.py scripts/validate_final_audio.py spoken_hindi_qc.py scripts/build_editing_style_signals.py
+        run: python -m py_compile content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py editing_style_engine.py color_continuity.py scripts/validate_color_continuity.py scripts/master_final_audio.py scripts/validate_final_audio.py spoken_hindi_qc.py scripts/build_editing_style_signals.py scripts/render_style_attribution.py scripts/ingest_editing_feedback.py
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v7
@@ -156,6 +156,7 @@ jobs:
           EDITORIAL_EDITING_ENABLED: ${{ vars.EDITORIAL_EDITING_ENABLED || 'true' }}
           COLOR_MATCH_ENABLED: ${{ vars.COLOR_MATCH_ENABLED || 'true' }}
           SPOKEN_HINDI_STRICT: ${{ vars.SPOKEN_HINDI_STRICT || 'false' }}
+          EDITING_METRICS_SCOPE: ${{ inputs.pipeline || 'none' }}
         run: python generate_assets.py
 
       - name: Fail closed if Long or Shorts scene visuals are missing
@@ -590,6 +591,31 @@ jobs:
         with:
           name: devotional-thumbnail-shorts-${{ github.run_id }}
           path: thumbnail_shorts_final
+
+      # Only successful QC-passed renders can become editing-style evidence.
+      # The attribution ledger is NOT proof of YouTube upload. Feedback still
+      # requires exact Youtube video IDs / titles and mature analytics.
+      - name: Persist actual editing style after both final MP4s pass QC
+        env:
+          ATTRIBUTION_PIPELINE: ${{ inputs.pipeline || 'none' }}
+          GITHUB_RENDER_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase --autostash origin "${{ github.ref_name }}"
+          python scripts/render_style_attribution.py \
+            --metadata assets/out/metadata.json \
+            --editing assets/out/editing_qc_report.json \
+            --pipeline "$ATTRIBUTION_PIPELINE" \
+            --run-id "$GITHUB_RENDER_ID"
+          git add data/render_editing_history.json
+          if git diff --cached --quiet; then
+            echo "No new attributable video render to persist."
+          else
+            git commit -m "Record approved-QC editing style (render $GITHUB_RENDER_ID)"
+            git push origin HEAD:"${{ github.ref_name }}"
+          fi
 
       # -----------------------------------------------------------
       # Canva finishing: runs on the FINAL rendered files. Uploads both
