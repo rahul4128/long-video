@@ -376,6 +376,27 @@ def assess_scene(scene, format_name="long", media_root="public/images"):
     }
 
 
+def prioritized_repair_tasks(sequence_report):
+    """Repair globally by severity, not scene order.
+
+    Run #165 exhausted eight Long repair attempts on scene 1–4 warnings
+    while scenes 5 and 6 still had missing beats. Never spend cosmetic
+    retry budget while ANY narration beat is unillustrated.
+    """
+    tasks = []
+    for scene_index, scene in enumerate((sequence_report or {}).get("scenes") or []):
+        for target in scene.get("repairTargets") or []:
+            if not isinstance(target, dict):
+                continue
+            tasks.append((scene_index, target))
+    tasks.sort(key=lambda task: (
+        -int(task[1].get("priority") or 0),
+        task[0],
+        int(task[1].get("beatIndex") or 0),
+    ))
+    return tasks
+
+
 def assess_sequence(scenes, format_name="long", media_root="public/images"):
     reports = [
         assess_scene(scene, format_name=format_name, media_root=media_root)
