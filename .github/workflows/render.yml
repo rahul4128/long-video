@@ -262,6 +262,7 @@ jobs:
             out/spoken_hindi_report.json
             out/visual_story_alignment_report.json
             out/visual_storyboard_*.jpg
+            out/partial_props_*.json
           if-no-files-found: warn
           retention-days: 2
 
@@ -297,6 +298,7 @@ jobs:
             out/visual_story_alignment_report.json
             out/visual_storyboard_*.json
             out/visual_storyboard_*.jpg
+            out/partial_props_*.json
             out/visual_qc_report.json
             out/editing_qc_report.json
             out/color_continuity_report.json
@@ -360,6 +362,7 @@ jobs:
             out/visual_story_alignment_report.json
             out/visual_storyboard_*.json
             out/visual_storyboard_*.jpg
+            out/partial_props_*.json
             out/visual_qc_report.json
             out/canva_assets.json
             out/music_license_report.json
