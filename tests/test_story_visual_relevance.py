@@ -5,7 +5,10 @@ is needed. A crisp stock clip must not bypass actual narration relevance.
 """
 import unittest
 
-from scripts.visual_relevance_gate import strong_stock_match, visual_relevance_issues
+from scripts.visual_relevance_gate import (
+    strong_stock_match, visual_relevance_issues,
+    named_deity_requires_verified_footage,
+)
 from director import _build_queries
 
 
@@ -90,6 +93,16 @@ class StoryFirstStockTests(unittest.TestCase):
             "reveal", "temple")
         self.assertTrue(any("कूष्मांडा" in s or "kushmanda" in s.lower() for s in q))
         self.assertFalse(any(s == "woman in temple" for s in q))
+
+    def test_shiva_footage_is_not_verified_kushmanda_stock(self):
+        self.assertTrue(named_deity_requires_verified_footage(
+            {"narrationText": "कूष्मांडा माता ब्रह्मांडीय ऊर्जा का स्रोत हैं"},
+            "Goddess Kushmanda radiant"))
+        self.assertTrue(named_deity_requires_verified_footage(
+            {"subject": "Lord Shiva"}, "blue Hindu deity"))
+        self.assertFalse(named_deity_requires_verified_footage(
+            {"narrationText": "पानी पिएं और ताजे फल लें"},
+            "glass of water and Indian fruit thali"))
 
     def test_not_all_unknown_topics_become_generic_people(self):
         q = _build_queries({
