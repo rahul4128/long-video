@@ -18,8 +18,18 @@ def inspect(root=ROOT):
         if not video.is_file() or not reportfile.is_file():
             raise ValueError(f"{kind}: missing mastered file or audio audit")
         report = json.loads(reportfile.read_text(encoding="utf-8"))
-        if report.get("status") != "passed" or report.get("output") != filename:
-            raise ValueError(f"{kind}: missing successful audio master record")
+        # The rendering job masters into final_video.mastered.mp4, then
+        # atomically renames it to final_video.mp4 for downstream consumers.
+        # Its immutable FFmpeg report therefore names the pre-rename output.
+        # Accept only these two exact identities, never an unrelated source.
+        mastered_name = f"{Path(filename).stem}.mastered.mp4"
+        if (report.get("status") != "passed"
+            or report.get("source") != filename
+            or report.get("output") not in (filename, mastered_name)):
+            raise ValueError(
+                f"{kind}: missing successful audio master record "
+                f"(expected source={filename}, output={mastered_name} or {filename})"
+            )
         actual = _probe(video)
         if abs(actual["duration"] - float(report.get("duration", 0))) > .6:
             raise ValueError(f"{kind}: video duration differs from audio audit")
