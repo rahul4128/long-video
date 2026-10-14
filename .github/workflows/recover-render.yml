@@ -1,0 +1,118 @@
+name: Recover Existing Render - QC Only (No Gemini or Remotion)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Prior render GitHub Actions run ID with saved videos, thumbnails and assets'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: existing-render-qc-${{ inputs.source_run_id }}
+  cancel-in-progress: false
+
+jobs:
+  verify-existing-media:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout current corrected QC code
+        uses: actions/checkout@v7
+        with:
+          ref: visual-director-v2
+
+      - name: Validate source-run identifier
+        env:
+          SOURCE_RUN: ${{ inputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$SOURCE_RUN" =~ ^[0-9]{4,20}$ ]]; then
+            echo "::error::Enter a valid numerical GitHub Actions run ID"
+            exit 1
+          fi
+
+      - name: Retrieve existing approved script, visual assets, final videos and thumbnails
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "generated-assets-$SOURCE_RUN" --dir .
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "devotional-video-$SOURCE_RUN" --dir out
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "devotional-shorts-$SOURCE_RUN" --dir out
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "devotional-thumbnail-$SOURCE_RUN" --dir out
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "devotional-thumbnail-shorts-$SOURCE_RUN" --dir out
+          for path in \
+            public/props.json public/props_shorts.json out/metadata.json \
+            out/final_video.mp4 out/final_video_shorts.mp4 \
+            out/audio_master_long.json out/audio_master_shorts.json \
+            out/thumbnail.jpg out/thumbnail_shorts_final.jpg; do
+            if [ ! -s "$path" ]; then
+              echo "::error::Missing existing artifact: $path"
+              exit 1
+            fi
+          done
+
+      - name: Install FFmpeg for inspection only
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg
+
+      - name: Validate real mastered audio in both already-rendered MP4s
+        run: python scripts/validate_final_audio.py
+
+      - name: Run full dynamic duration, black-screen, thumbnail and soundtrack QC
+        run: python qc.py
+
+      - name: Archive QC findings even if an inspection fails
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: recovered-qc-report-${{ inputs.source_run_id }}
+          path: |
+            out/qc_report.json
+            out/audio_master_long.json
+            out/audio_master_shorts.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Make successfully verified existing videos available for review
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: verified-review-media-${{ inputs.source_run_id }}
+          path: |
+            out/final_video.mp4
+            out/final_video_shorts.mp4
+            out/thumbnail.jpg
+            out/thumbnail_shorts_final.jpg
+            out/metadata.json
+            out/audio_master_long.json
+            out/audio_master_shorts.json
+            out/qc_report.json
+            out/music_license_report.json
+            out/editing_qc_report.json
+            out/visual_qc_report.json
+            out/color_continuity_report.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Summary and explicit publication hold
+        if: success()
+        env:
+          SOURCE_RUN: ${{ inputs.source_run_id }}
+        run: |
+          echo "### ✅ Recovery verified without AI calls or any re-render" >> "$GITHUB_STEP_SUMMARY"
+          echo "Source render: $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
+          echo "Videos and thumbnails retained as private Actions artifacts for manual review." >> "$GITHUB_STEP_SUMMARY"
+          echo "No GitHub Release or YouTube upload was created by this workflow." >> "$GITHUB_STEP_SUMMARY"
