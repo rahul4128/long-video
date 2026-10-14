@@ -39,6 +39,21 @@ def prepare(env=None, replay_path=None):
     if not isinstance(payload_string, str) or not 20 <= len(payload_string) <= 250000:
         raise ValueError("No complete original Make story JSON available for render")
     episode = json.loads(payload_string)
+    # Accept either Make module 3's raw story JSON or module 5's complete
+    # GitHub workflow_dispatch envelope. Reusing module 5 also preserves the
+    # original account label without any additional Make/Gemini execution.
+    if isinstance(episode, dict) and isinstance(episode.get("inputs"), dict):
+        inputs = episode["inputs"]
+        inner = inputs.get("payload")
+        if isinstance(inner, str):
+            episode = json.loads(inner)
+        elif isinstance(inner, dict):
+            episode = inner
+        else:
+            raise ValueError("Make GitHub envelope does not contain a valid story")
+        original_pipeline = inputs.get("pipeline")
+        if isinstance(original_pipeline, str) and original_pipeline:
+            pipeline = original_pipeline
     if isinstance(episode, dict) and isinstance(episode.get("payload"), dict):
         # Repository dispatch content is often {payload: {...}}, but our
         # workflow_dispatch normally already passes only the script as JSON.
