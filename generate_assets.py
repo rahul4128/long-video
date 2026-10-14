@@ -24,7 +24,7 @@ from visual_matcher import extract_visual_requirements, candidate_is_accurate
 from content_qc import validate_payload, fact_check_items
 from visual_qc import assess_sequence
 from scripts.visual_evidence import detect_instructional_category, is_generic_stock_query
-from scripts.visual_relevance_gate import strong_stock_match
+from scripts.visual_relevance_gate import strong_stock_match, named_deity_requires_verified_footage
 from scripts.image_framing import framing_issue, preserve_full_subject
 from storyteller import build_prosody_map, prepare_storyteller_text
 from hindi_text import to_spoken_hindi, hindi_display_text, pick_hindi, text_free_prompt, has_latin, best_hindi_title
@@ -1653,6 +1653,13 @@ def select_best_visual_candidate(queries: list, beat: dict, beat_prompt: str,
     If every candidate is below the quality/relevance threshold, return {}
     so the caller can use its narration-specific AI-image fallback.
     """
+    # Automated generic stock metadata can mislabel a Shiva clip as
+    # Maa Kushmanda. For explicitly named divine identities, skip *all*
+    # unreviewed stock footage; generate a narration-specific illustration
+    # or use a separately approved verified asset instead.
+    if named_deity_requires_verified_footage(beat, beat_prompt):
+        print("    🔒 Named-deity footage requires verified artwork; rejecting unreviewed stock videos.", flush=True)
+        return {}
     candidates = _collect_visual_candidates(queries, orientation)
     if not candidates:
         return {}
@@ -1960,6 +1967,7 @@ def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
                 local_terms = " ".join(queries)
                 if (
                     not requirements.get("strict")
+                    and not named_deity_requires_verified_footage(beat, beat_prompt)
                     and any(not is_generic_stock_query(q) for q in queries)
                     and fetch_local_library_video(local_terms, dest)
                 ):
