@@ -107,6 +107,9 @@ jobs:
       - name: Test measured editing style performance import
         run: python -m unittest discover -s tests -p 'test_editing_performance_learning.py' -v
 
+      - name: Verify actual render-to-published-YouTube editing feedback attribution
+        run: python -m unittest discover -s tests -p 'test_render_style_feedback.py' -v
+
       - name: Check evidence-gated dynamic video editing styles
         run: python -m unittest discover -s tests -p 'test_editing_style_engine.py' -v
 
