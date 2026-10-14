@@ -177,6 +177,8 @@ export interface SEOMetadata {
 }
 
 export interface DevotionalVideoProps {
+  // Remotion's composition generic expects object props with string keys.
+  [key: string]: unknown;
   title: string;
   // Short Hindi hook shown big on screen for the first ~1.8 s (HookOverlay).
   hookText?: string;
