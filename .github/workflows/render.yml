@@ -135,7 +135,7 @@ jobs:
             test_p1_storytelling.py test_preflight_payload.py test_editing_performance_learning.py \
             test_render_style_feedback.py test_editing_style_engine.py \
             test_verified_edit_skills.py test_color_continuity.py \
-            test_master_final_audio.py; do
+            test_master_final_audio.py test_validate_final_audio.py; do
             python -m unittest discover -s tests -p "$name" -v
           done
 
