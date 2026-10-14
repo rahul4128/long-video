@@ -617,7 +617,17 @@ jobs:
             echo "No new attributable video render to persist."
           else
             git commit -m "Record approved-QC editing style (render $GITHUB_RENDER_ID)"
-            git push origin HEAD:"${{ github.ref_name }}"
+            saved=false
+            for attempt in 1 2 3; do
+              if git pull --rebase --autostash origin "${{ github.ref_name }}" && git push origin HEAD:"${{ github.ref_name }}"; then
+                saved=true
+                break
+              fi
+              sleep 4
+            done
+            if [ "$saved" != "true" ]; then
+              echo "::warning::Render was QC-passed but style attribution could not be persisted. This run will not contribute to editing learning."
+            fi
           fi
 
       # -----------------------------------------------------------
