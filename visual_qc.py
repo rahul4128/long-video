@@ -165,11 +165,23 @@ def assess_scene(scene, format_name="long", media_root="public/images"):
         if source == "ai_image":
             ai_indices.append(index)
         elif source in {"local_continuity_fallback", "local_atmosphere_fallback"}:
-            warnings.append({
-                "code": "network_independent_visual_fallback",
+            # A non-black, valid image is not necessarily a relevant image.
+            # Run #166 had five filler frames that earlier Phase 8 called OK
+            # while the mandatory pre-render gate rejected them. Treat the
+            # same placeholder as a BLOCKING missing visual at both gates.
+            issues.append({
+                "code": "emergency_placeholder_not_story_footage",
                 "beatIndex": beat_index,
                 "shotIndex": index,
                 "source": source,
+                "blocking": True,
+            })
+            repair_targets.append({
+                "beatIndex": beat_index,
+                "shotIndex": index,
+                "reason": "emergency_placeholder_not_story_footage",
+                "action": "replace_or_generate",
+                "priority": 110,
             })
 
         selection_score = shot.get("selectionScore")
