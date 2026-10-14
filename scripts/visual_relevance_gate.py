@@ -7,6 +7,37 @@ module enforces subject/semantic support independently of cinematic polish.
 No stock API or ML model calls; scoring and file provenance are inputs.
 """
 import os
+import re
+
+# A correct search title/tag or CLIP likeness is NOT evidence that a deity in a
+# video is the *named* Hindu deity. The reviewed Kushmanda Shorts actually
+# received Shiva-looking footage from a "Goddess Kushmanda" stock search.
+NAMED_DEVOTIONAL_IDENTITIES = (
+    "कूष्मांडा", "कुष्मांडा", "स्कंदमाता", "कृष्ण", "श्रीकृष्ण",
+    "राधा", "हनुमान", "शिव", "महादेव", "गणेश", "विष्णु",
+    "दुर्गा", "लक्ष्मी", "सरस्वती", "श्रीराम",
+    "kushmanda", "skandamata", "krishna", "radha", "hanuman",
+    "mahadev", "shiva", "ganesha", "vishnu", "durga", "lakshmi",
+    "saraswati", "lord rama",
+)
+
+
+def named_deity_requires_verified_footage(beat, prompt=""):
+    """Do not use automated stock for explicitly named divine identities.
+
+    This does not certify AI imagery; generated deity art is separately
+    identified as synthetic and remains subject to visual review.
+    """
+    beat = beat or {}
+    text = " ".join([
+        str(beat.get("narrationText") or ""),
+        str(beat.get("subject") or ""),
+        str(prompt or ""),
+    ]).casefold()
+    for name in NAMED_DEVOTIONAL_IDENTITIES:
+        if re.search(r"(?<![a-z])" + re.escape(name.casefold()) + r"(?![a-z])", text):
+            return True
+    return False
 
 
 def _number(value, fallback=0.0):
