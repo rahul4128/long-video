@@ -24,6 +24,7 @@ from visual_matcher import extract_visual_requirements, candidate_is_accurate
 from content_qc import validate_payload, fact_check_items
 from visual_qc import assess_sequence
 from scripts.visual_evidence import detect_instructional_category, is_generic_stock_query
+from scripts.visual_relevance_gate import strong_stock_match
 from scripts.image_framing import framing_issue, preserve_full_subject
 from storyteller import build_prosody_map, prepare_storyteller_text
 from hindi_text import to_spoken_hindi, hindi_display_text, pick_hindi, text_free_prompt, has_latin, best_hindi_title
@@ -1572,6 +1573,7 @@ def _score_visual_candidates(candidates: list, beat: dict, beat_prompt: str,
 
         candidate["rejected"] = rejected
         candidate["rejectReason"] = "|".join(reasons)
+        candidate["visualContractStrict"] = bool(requirements.get("strict"))
         scored.append(candidate)
 
     scored.sort(
@@ -1665,14 +1667,21 @@ def select_best_visual_candidate(queries: list, beat: dict, beat_prompt: str,
         else max(_candidate_min_score(), float(minimum_score))
     )
     excluded = set(exclude_keys or set())
-    viable = [
-        c for c in ranked
-        if (
-            not c.get("rejected")
-            and _candidate_key(c) not in excluded
-            and float(c.get("selectionScore") or 0.0) >= threshold
-        )
-    ]
+    viable = []
+    for candidate in ranked:
+        if (_candidate_key(candidate) in excluded
+            or float(candidate.get("selectionScore") or 0.0) < threshold):
+            continue
+        accepted, reason = strong_stock_match(candidate)
+        if accepted:
+            viable.append(candidate)
+        else:
+            print(
+                f"    🛑 Reject glossy but off-topic stock: {candidate.get('source')} "
+                f"reason={reason} score={candidate.get('selectionScore')} "
+                f"query={str(candidate.get('query') or '')[:65]}",
+                flush=True,
+            )
 
     top_preview = [
         {
@@ -1699,11 +1708,13 @@ def select_best_visual_candidate(queries: list, beat: dict, beat_prompt: str,
 def _visual_beat_prompt(scene_prompt: str, beat: dict) -> str:
     """Build one media-generation/search context string for a visual beat."""
     parts = [
-        scene_prompt,
-        f"Narration beat: {beat.get('narrationText', '')}",
-        f"Subject: {beat.get('subject', '')}",
-        f"Action: {beat.get('action', '')}",
-        f"Setting: {beat.get('setting', '')}",
+        # A scene-level prompt might describe one temple/person for 30 seconds.
+        # The FIRST instruction must always specify what this *beat* narrates.
+        f"PRIMARY VISUAL FOR THIS SHOT: {beat.get('narrationText', '')}",
+        f"Specific on-screen subject: {beat.get('subject', '')}",
+        f"Observable action: {beat.get('action', '')}",
+        f"On-screen setting: {beat.get('setting', '')}",
+        f"Episode visual context only (do not repeat if narration moved on): {scene_prompt}",
         f"Mood: {beat.get('mood', '')}",
         f"Time: {beat.get('time', '')}",
         f"Shot type: {beat.get('shotType', '')}",
@@ -1775,7 +1786,12 @@ def _generate_visual_beat_image(scene_prompt: str, beat: dict, orientation: str,
         f"{_visual_beat_prompt(scene_prompt, beat)}. "
         f"{shot_type} cinematic composition, designed for {camera} motion, "
         f"{realism_phrase}, {period_phrase}, {lighting_phrase}, "
-        "consistent visual language, single coherent moment, no collage, no text. "
+        "Narration-matched subject and action MUST be visibly present. "
+        "Do not add a generic smiling person, random temple, unrelated deity, "
+        "abstract energy effects or unrelated wellness B-roll to fill space. "
+        "If the line is conceptual, use a specific real object or culturally accurate "
+        "scene from this episode that clearly illustrates the current sentence. "
+        "Consistent visual language, single coherent moment, no collage, no text. "
         + (
             "Full-bleed vertical 9:16 portrait artwork, not a horizontal video "
             "placed within a vertical frame. No borders, black bars or frames. "
@@ -1906,6 +1922,7 @@ def fetch_visual_beat_shots(scene: dict, scene_prompt: str, orientation: str,
                     "queryCandidates": queries,
                     "selectionScore": selected.get("selectionScore"),
                     "scoreBreakdown": selected.get("scoreBreakdown", {}),
+                    "visualContractStrict": selected.get("visualContractStrict", False),
                     "clipSimilarity": selected.get("clipSimilarity"),
                     "continuitySimilarity": selected.get("continuitySimilarity"),
                     "continuityProfile": selected.get("continuityProfile", {}),
