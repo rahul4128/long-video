@@ -42,18 +42,70 @@ jobs:
           SOURCE_RUN: ${{ inputs.source_run_id }}
         run: |
           set -euo pipefail
+          # Extract every artifact into an EMPTY directory. GitHub's gh CLI
+          # refuses to overwrite files, while checkout already includes
+          # public/audio/bgm.mp3. Additionally, the generated-assets archive
+          # contains a raw thumbnail.jpg that the final thumbnail artifact
+          # deliberately replaces. Never extract overlapping ZIPs in place.
+          scratch=$(mktemp -d "$RUNNER_TEMP/existing-render-XXXXXX")
           gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" \
-            --name "generated-assets-$SOURCE_RUN" --dir .
+            --name "generated-assets-$SOURCE_RUN" --dir "$scratch/generated"
           gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" \
-            --name "devotional-video-$SOURCE_RUN" --dir out
+            --name "devotional-video-$SOURCE_RUN" --dir "$scratch/long"
           gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" \
-            --name "devotional-shorts-$SOURCE_RUN" --dir out
+            --name "devotional-shorts-$SOURCE_RUN" --dir "$scratch/shorts"
           gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" \
-            --name "devotional-thumbnail-$SOURCE_RUN" --dir out
+            --name "devotional-thumbnail-$SOURCE_RUN" --dir "$scratch/thumbnail"
           gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" \
-            --name "devotional-thumbnail-shorts-$SOURCE_RUN" --dir out
+            --name "devotional-thumbnail-shorts-$SOURCE_RUN" --dir "$scratch/thumbnail-shorts"
           gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" \
-            --name "approved-story-$SOURCE_RUN" --dir out
+            --name "approved-story-$SOURCE_RUN" --dir "$scratch/story"
+
+          # Validate the staged source material BEFORE overwriting anything.
+          for file in \
+            generated/public/props.json \
+            generated/public/props_shorts.json \
+            generated/out/metadata.json \
+            long/final_video.mp4 \
+            long/audio_master_long.json \
+            shorts/final_video_shorts.mp4 \
+            shorts/audio_master_shorts.json \
+            thumbnail/thumbnail.jpg \
+            thumbnail-shorts/thumbnail_shorts_final.jpg \
+            story/replay_inputs.json; do
+            if [ ! -s "$scratch/$file" ]; then
+              echo "::error::Missing saved file: $file from run $SOURCE_RUN"
+              exit 1
+            fi
+          done
+
+          # Overlay ONLY saved media/data paths; never copy source code,
+          # workflow definitions, tokens or repository configuration.
+          # Source run is authoritative for its generated background audio,
+          # props and pre-QC thumbnail. Final rendered artifacts overwrite
+          # those raw files in the intended order.
+          mkdir -p public out
+          rsync -a "$scratch/generated/public/" public/
+          rsync -a "$scratch/generated/out/" out/
+          rsync -a "$scratch/long/" out/
+          rsync -a "$scratch/shorts/" out/
+          rsync -a "$scratch/thumbnail/" out/
+          rsync -a "$scratch/thumbnail-shorts/" out/
+          cp "$scratch/story/replay_inputs.json" out/replay_inputs.json
+
+          # Confirm we are verifying the exact source run's mastered tracks.
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for report_name, input_name in [
+              ("audio_master_long.json", "final_video.mp4"),
+              ("audio_master_shorts.json", "final_video_shorts.mp4")
+          ]:
+              report = json.loads((Path("out") / report_name).read_text(encoding="utf-8"))
+              if report.get("source") != input_name:
+                  raise SystemExit("Unexpected audio-master source identity: " + report_name)
+          print("Staged both source-run mastered MP4s and original audio reports.")
+          PY
           for path in \
             public/props.json public/props_shorts.json out/metadata.json \
             out/final_video.mp4 out/final_video_shorts.mp4 \
