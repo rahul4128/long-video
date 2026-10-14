@@ -5,6 +5,8 @@ import { loadFont } from '@remotion/google-fonts/NotoSansDevanagari';
 const { fontFamily } = loadFont();
 
 export interface ThumbnailProps {
+  // Needed by Remotion's strongly typed Still component.
+  [key: string]: unknown;
   backgroundImage: string;
   hookText: string;
   textPosition?: string;
