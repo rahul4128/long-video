@@ -246,26 +246,6 @@ jobs:
         continue-on-error: true
         run: python scripts/visual_storyboard.py
 
-      # Partial media is otherwise lost when a late visual beat fails QC.
-      # Keep this short-lived diagnostic checkpoint so failed asset selection
-      # doesn't destroy every already-rendered source clip/narration track.
-      # A checkpoint is NOT a completed/renderable video and must not publish.
-      - name: Preserve partial media progress if asset generation failed
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: partial-assets-${{ github.run_id }}
-          path: |
-            public/images
-            public/audio
-            out/visual_qc_report.json
-            out/spoken_hindi_report.json
-            out/visual_story_alignment_report.json
-            out/visual_storyboard_*.jpg
-            out/partial_props_*.json
-          if-no-files-found: warn
-          retention-days: 2
-
       - name: Fail closed if Long or Shorts scene visuals are missing
         run: python scripts/validate_native_visuals.py
 
@@ -277,6 +257,32 @@ jobs:
 
       - name: Validate sampled color and continuity plan
         run: python scripts/validate_color_continuity.py
+
+      # Any failure in generation OR final validation must retain the actual
+      # narration and already-selected media. Earlier checkpoint placement
+      # happened before validate_native_visuals.py, so run 166 lost every
+      # generated source file when its final relevance check failed.
+      # A checkpoint remains review-only and MUST NOT bypass QC.
+      - name: Preserve unfinished media on any asset or validation failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: partial-assets-${{ github.run_id }}
+          path: |
+            public/images
+            public/audio
+            public/props.json
+            public/props_shorts.json
+            out/metadata.json
+            out/visual_qc_report.json
+            out/visual_story_alignment_report.json
+            out/visual_search_report.json
+            out/visual_storyboard_*.jpg
+            out/visual_storyboard_*.json
+            out/partial_props_*.json
+            out/spoken_hindi_report.json
+          if-no-files-found: warn
+          retention-days: 2
 
       - name: Upload content QC report
         if: always()
