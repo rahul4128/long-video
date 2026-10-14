@@ -268,7 +268,7 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
           filter: visualFilter,
         }}
         muted
-        loop
+        // Source clips are trimmed/extended in Python shot planning; OffthreadVideo does not support the HTML loop prop.
       />
     );
   }
