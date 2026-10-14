@@ -697,12 +697,15 @@ def dynamic_ai_query_rewrite(primary_query: str, prompt_text: str) -> list:
         headers = {"Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}", "Content-Type": "application/json"}
         system_prompt = (
             "You turn a devotional/mythological Indian video scene description into short, "
-            "generic English stock-footage search phrases (3-5 words each) that a general "
-            "Western stock video library such as Pexels or Pixabay is likely to actually have "
-            "footage for. Never include character names, Sanskrit/Hindi words, or the words "
-            "'India'/'Indian' - describe only the visual: lighting, objects, action, mood. "
-            "Return exactly 3 phrases, one per line, ordered from most specific-but-plausible "
-            "to most generic-and-guaranteed-to-exist. No numbering, no extra text, no quotes."
+            "specific *observable* English stock-footage search phrases (4-8 words each) "
+            "for Pexels/Pixabay. PRESERVE explicitly narrated Indian/Hindu cultural setting, "
+            "ritual objects, clothing, and location. Never replace named deities, mythological "
+            "characters or documented historic places with generic people or unrelated statues. "
+            "Do not invent footage of a named divine identity. "
+            "Translate actions to what a real camera should visibly show, NOT an abstract "
+            "emotion, blurry worship montage, random smiling person, or arbitrary temple. "
+            "When there is no visually faithful stock scene, return NO_STOCK on its own line. "
+            "Otherwise return up to three concrete searches, one per line, no numbering."
         )
         user_prompt = f"Scene search query: {primary_query}\nScene image prompt: {prompt_text}"
         res = requests.post(
@@ -715,7 +718,7 @@ def dynamic_ai_query_rewrite(primary_query: str, prompt_text: str) -> list:
         if res.status_code == 200:
             text = res.json().get("result", {}).get("response", "")
             phrases = [line.strip("-•* ").strip() for line in text.strip().split("\n")]
-            return [p for p in phrases if p][:3]
+            return [p for p in phrases if p and p.upper() != "NO_STOCK"][:3]
     except Exception as e:
         print(f"Dynamic query-rewrite notice: {e}", flush=True)
     return []
