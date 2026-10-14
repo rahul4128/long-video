@@ -10,6 +10,7 @@ from scripts.visual_relevance_gate import (
     named_deity_requires_verified_footage,
 )
 from director import _build_queries
+from visual_qc import prioritized_repair_tasks
 
 
 def candidate(semantic, entity, overall=.78, similarity=.31):
@@ -25,6 +26,29 @@ def candidate(semantic, entity, overall=.78, similarity=.31):
 
 
 class StoryFirstStockTests(unittest.TestCase):
+    def test_visual_repairs_prioritize_missing_beats_in_later_scenes(self):
+        report = {"scenes": [
+            {"repairTargets": [
+                {"beatIndex": 1, "priority": 60, "reason": "shot_too_long"},
+                {"beatIndex": 2, "priority": 35, "reason": "excessive_ai_fallback"},
+            ]},
+            {"repairTargets": [
+                {"beatIndex": 1, "priority": 35, "reason": "excessive_ai_fallback"},
+            ]},
+            {"repairTargets": [
+                {"beatIndex": 3, "priority": 100, "reason": "missing_beat_visual"},
+            ]},
+            {"repairTargets": [
+                {"beatIndex": 4, "priority": 100, "reason": "missing_beat_visual"},
+            ]},
+        ]}
+        tasks = prioritized_repair_tasks(report)
+        self.assertEqual(
+            [(i, t["reason"]) for i, t in tasks[:2]],
+            [(2, "missing_beat_visual"), (3, "missing_beat_visual")],
+        )
+        self.assertEqual(tasks[-1][1]["reason"], "excessive_ai_fallback")
+
     def test_high_resolution_great_transition_cannot_rescue_wrong_action(self):
         good_looking_wrong_person = candidate(.77, 0.0, .90)
         passed, reason = strong_stock_match(good_looking_wrong_person)
