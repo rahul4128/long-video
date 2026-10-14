@@ -49,8 +49,14 @@ jobs:
           git add data/editing_style_signals_*.json data/editing_feedback_audit_*.json
           if git diff --cached --quiet; then exit 0; fi
           git commit -m "Update editing performance evidence"
-          git pull --rebase --autostash origin visual-director-v2
-          git push origin HEAD:visual-director-v2
+          for attempt in 1 2 3; do
+            if git pull --rebase --autostash origin visual-director-v2 && git push origin HEAD:visual-director-v2; then
+              exit 0
+            fi
+            sleep 4
+          done
+          echo "::error::Unable to persist verified editing feedback"
+          exit 1
       - name: Upload audit
         if: always()
         uses: actions/upload-artifact@v7
