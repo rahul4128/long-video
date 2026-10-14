@@ -87,8 +87,12 @@ def storyboard(format_name, scenes, *, width=288, height=162):
 def main():
     counts = {}
     for format_name, filename in (("long", "props.json"), ("shorts", "props_shorts.json")):
-        path = ROOT / "public" / filename
-        if path.exists():
+        # If visual QC failed before creating Remotion props, inspect the
+        # actual selected partial shots, not default sample props in git.
+        partial = OUTPUT / f"partial_props_{format_name}.json"
+        final = ROOT / "public" / filename
+        path = partial if partial.is_file() else final
+        if path.is_file():
             doc = json.loads(path.read_text(encoding="utf-8"))
             counts[format_name] = storyboard(format_name, doc.get("scenes", []))
     print("Shot-by-shot visual review sheets:", counts, flush=True)
