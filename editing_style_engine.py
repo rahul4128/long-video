@@ -5,6 +5,7 @@ Select from topic/format/audience intent; only measured recent performance
 records can change the order of supported styles.
 """
 from datetime import date, datetime
+import os
 import json
 from pathlib import Path
 import re
@@ -87,7 +88,7 @@ def infer_story_style(context=None, scenes=None):
     return "cinematic_devotional", "safe_devotional_default"
 
 
-def _recent_signal_winner(signals, today=None):
+def _recent_signal_winner(signals, today=None, required_format="long"):
     """Opt-in aggregate performance records, not guessed trend rankings.
 
     Format: {style, published_on, videos, average_view_percentage,
@@ -103,6 +104,8 @@ def _recent_signal_winner(signals, today=None):
             continue
         style = ALIASES.get(str(item.get("style") or "").lower(), item.get("style"))
         if style not in STYLES:
+            continue
+        if item.get("format") and item["format"] != required_format:
             continue
         try:
             published = date.fromisoformat(str(item.get("published_on")))
@@ -159,7 +162,9 @@ def select_edit_style(context=None, scenes=None):
     # to invent per-style retention or treat raw YouTube search as evidence.
     signals = meta.get("editing_style_signals")
     if not isinstance(signals, list):
-        stored = Path("data/editing_style_signals.json")
+        scope = os.environ.get("EDITING_METRICS_SCOPE", "").strip().lower()
+        filename = ("editing_style_signals_" + scope + ".json") if scope in ("primary", "oflifepart31") else "editing_style_signals.json"
+        stored = Path("data") / filename
         try:
             loaded = json.loads(stored.read_text(encoding="utf-8")) if stored.is_file() else []
             signals = loaded if isinstance(loaded, list) else []
