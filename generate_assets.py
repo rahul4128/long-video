@@ -1710,7 +1710,17 @@ def select_best_visual_candidate(queries: list, beat: dict, beat_prompt: str,
 
 def _visual_beat_prompt(scene_prompt: str, beat: dict) -> str:
     """Build one media-generation/search context string for a visual beat."""
+    searches = beat.get("queries") or []
+    concrete_en = next(
+        (q for q in searches
+         if q and re.search(r"[a-zA-Z]", str(q))
+         and not is_generic_stock_query(q)),
+        "",
+    )
     parts = [
+        # Hindi-only beat narration may not ground an English image generator.
+        # Use the beat's concrete English subject/action before scene context.
+        f"THIS SHOT'S VISIBLE ACTION OR OBJECT: {concrete_en}" if concrete_en else "",
         # A scene-level prompt might describe one temple/person for 30 seconds.
         # The FIRST instruction must always specify what this *beat* narrates.
         f"PRIMARY VISUAL FOR THIS SHOT: {beat.get('narrationText', '')}",
