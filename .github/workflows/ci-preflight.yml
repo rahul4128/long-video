@@ -16,6 +16,11 @@ on:
 permissions:
   contents: read
 
+# New code supersedes earlier CPU-only checks; never cancels video rendering.
+concurrency:
+  group: cpu-only-preflight-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: ubuntu-latest
