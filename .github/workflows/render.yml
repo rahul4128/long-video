@@ -118,6 +118,12 @@ jobs:
           node-version: '22'
       - name: Verify React/Remotion TypeScript compiles
         run: |
+          # Story/media JSON is normally generated later by Python. Stubs
+          # are used ONLY for type checking; no render uses these assets.
+          mkdir -p public
+          test -f public/props_shorts.json || cp public/props.json public/props_shorts.json
+          test -f public/thumbnail_props.json || printf '%s\n' '{"backgroundImage":"placeholder.jpg","hookText":"परीक्षण"}' > public/thumbnail_props.json
+          test -f public/thumbnail_props_shorts.json || printf '%s\n' '{"backgroundImage":"placeholder.jpg","hookText":"परीक्षण"}' > public/thumbnail_props_shorts.json
           npm install --no-audit --no-fund
           npx tsc --noEmit
 
