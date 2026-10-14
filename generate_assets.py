@@ -4303,6 +4303,7 @@ async def process():
     # without touching anything about how the video itself renders.
     chapters_block = build_chapters_block(enriched_long)
     metadata_for_upload = dict(seo_metadata)
+    metadata_for_upload["correlationId"] = str(payload.get("correlationId") or "")
     if chapters_block:
         base_description = (metadata_for_upload.get("long_video_description") or "").strip()
         metadata_for_upload["long_video_description"] = f"{base_description}\n\n{chapters_block}".strip()
