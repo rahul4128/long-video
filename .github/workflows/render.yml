@@ -246,6 +246,25 @@ jobs:
         continue-on-error: true
         run: python scripts/visual_storyboard.py
 
+      # Partial media is otherwise lost when a late visual beat fails QC.
+      # Keep this short-lived diagnostic checkpoint so failed asset selection
+      # doesn't destroy every already-rendered source clip/narration track.
+      # A checkpoint is NOT a completed/renderable video and must not publish.
+      - name: Preserve partial media progress if asset generation failed
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: partial-assets-${{ github.run_id }}
+          path: |
+            public/images
+            public/audio
+            out/visual_qc_report.json
+            out/spoken_hindi_report.json
+            out/visual_story_alignment_report.json
+            out/visual_storyboard_*.jpg
+          if-no-files-found: warn
+          retention-days: 2
+
       - name: Fail closed if Long or Shorts scene visuals are missing
         run: python scripts/validate_native_visuals.py
 
