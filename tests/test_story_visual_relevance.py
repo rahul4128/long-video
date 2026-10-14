@@ -3,14 +3,16 @@
 Tests metadata evidence and beat query generation; no networking or paid media
 is needed. A crisp stock clip must not bypass actual narration relevance.
 """
+import tempfile
 import unittest
+from pathlib import Path
 
 from scripts.visual_relevance_gate import (
     strong_stock_match, visual_relevance_issues,
     named_deity_requires_verified_footage,
 )
 from director import _build_queries
-from visual_qc import prioritized_repair_tasks
+from visual_qc import prioritized_repair_tasks, assess_scene
 
 
 def candidate(semantic, entity, overall=.78, similarity=.31):
@@ -26,6 +28,27 @@ def candidate(semantic, entity, overall=.78, similarity=.31):
 
 
 class StoryFirstStockTests(unittest.TestCase):
+    def test_run166_abstract_fallback_is_a_blocking_repair_not_a_warning(self):
+        with tempfile.TemporaryDirectory() as media_root:
+            Path(media_root, "filler.jpg").write_bytes(b"synthetic-test-only")
+            scene = {
+                "scene_number": 1,
+                "visualBeats": [{"beatIndex": 1, "narrationText": "माँ कूष्मांडा"}],
+                "shots": [{
+                    "beatIndex": 1, "file": "filler.jpg",
+                    "source": "local_atmosphere_fallback",
+                    "type": "image", "startSeconds": 0.0, "endSeconds": 3.5,
+                }],
+                "durationInSeconds": 3.5,
+            }
+            report = assess_scene(scene, "long", media_root)
+            self.assertFalse(report["ok"])
+            blockers = [i for i in report["issues"] if i.get("blocking")]
+            self.assertEqual(blockers[0]["code"], "emergency_placeholder_not_story_footage")
+            fix = report["repairTargets"][0]
+            self.assertEqual(fix["priority"], 110)
+            self.assertEqual(fix["action"], "replace_or_generate")
+
     def test_visual_repairs_prioritize_missing_beats_in_later_scenes(self):
         report = {"scenes": [
             {"repairTargets": [
