@@ -37,7 +37,7 @@ class HindiTests(unittest.TestCase):
 
 
 def example(style,pattern):
-    return {"scene_number":2,"narration_chunk":"क्या हुआ, अब समझिए",
+    return {"scene_number":2,"narration_chunk":"यह रहस्य आखिर कैसे खुला?",
             "director":{"entertainmentBeat":pattern},"visualBeats":[
               {"beatIndex":1,"narrationText":"आपने ऐसा क्यों किया?"},
               {"beatIndex":2,"narrationText":"लेकिन इसका जवाब क्या है"},
