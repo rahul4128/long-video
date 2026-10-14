@@ -163,6 +163,8 @@ def select_edit_style(context=None, scenes=None):
     signals = meta.get("editing_style_signals")
     if not isinstance(signals, list):
         scope = os.environ.get("EDITING_METRICS_SCOPE", "").strip().lower()
+        if scope.startswith("visual-director-v2-"):
+            scope = scope[len("visual-director-v2-"):]
         filename = ("editing_style_signals_" + scope + ".json") if scope in ("primary", "oflifepart31") else "editing_style_signals.json"
         stored = Path("data") / filename
         try:
