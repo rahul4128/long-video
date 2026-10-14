@@ -30,6 +30,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: visual-director-v2
+      - name: Run exact-match feedback regressions
+        run: python -m unittest discover -s tests -p 'test_render_style_feedback.py' -v
       - name: Ingest actual video analytics
         env:
           SCOPE: ${{ inputs.scope }}
