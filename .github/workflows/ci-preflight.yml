@@ -47,7 +47,7 @@ jobs:
           set -euo pipefail
           for file in \
             test_image_framing.py test_music_engine.py test_editing_director.py \
-            test_p1_storytelling.py test_editing_performance_learning.py \
+            test_p1_storytelling.py test_preflight_payload.py test_editing_performance_learning.py \
             test_render_style_feedback.py test_editing_style_engine.py \
             test_verified_edit_skills.py test_color_continuity.py \
             test_master_final_audio.py; do
