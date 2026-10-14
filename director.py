@@ -146,39 +146,72 @@ def _visual_beat_count(word_count, format_name):
     return 1
 
 
+# Literal narrator concepts -> observable, culturally grounded stock searches.
+# This helps stock catalogs when Hindi narration has no literal English query,
+# without changing religious persons/rituals into unrelated generic imagery.
+_BEAT_STOCK_CONCEPTS = (
+    (("थकान", "कमजोरी", "थके", "थकावट", "tired", "fatigue"),
+     "Indian person tired resting at home"),
+    (("उपवास", "व्रत", "fasting"),
+     "Indian family fasting food fruit plate"),
+    (("पानी", "जल", "hydration", "water"),
+     "glass of drinking water closeup hands"),
+    (("फल", "सात्विक", "आहार", "food", "fruits"),
+     "Indian vegetarian fruit food thali closeup"),
+    (("चिंता", "विचार", "तनाव", "मन", "ध्यान", "mental", "focus", "meditation"),
+     "Indian adult quietly meditating indoors"),
+    (("दीया", "दीप", "आरती", "aarti", "lamp"),
+     "traditional Hindu puja oil lamp diya flame"),
+    (("मंदिर", "तीर्थ", "temple"),
+     "authentic Indian Hindu temple exterior"),
+    (("प्रार्थना", "नमस्कार", "भक्ति", "prayer"),
+     "Hindu devotee folded hands prayer temple"),
+)
+
+_PRECISE_DEVOTIONAL_ENTITIES = (
+    "कृष्ण", "राधा", "राम", "शिव", "महादेव", "कूष्मांडा", "स्कंदमाता",
+    "दुर्गा", "हनुमान", "गणेश", "विष्णु", "लक्ष्मी", "सरस्वती",
+    "krishna", "radha", "rama", "shiva", "kushmanda",
+    "skandamata", "durga", "hanuman", "ganesha", "vishnu",
+)
+
+
 def _build_queries(scene, beat_words, subject, action, setting):
     base = str(scene.get("videoSearchQuery") or scene.get("video_search_query") or "").strip()
     prompt = str(scene.get("imagePrompt") or scene.get("image_prompt") or "").strip()
-
-    beat_terms = _clean_terms(" ".join(beat_words))[:5]
-    prompt_terms = _clean_terms(prompt)[:3]
-
-    # Beat-specific intent comes first. The scene-wide videoSearchQuery is
-    # deliberately last: using it first for every beat makes a 25-second
-    # narration scene search the same broad phrase repeatedly and defeats
-    # the point of narration-aware visual direction.
-    candidates = [
-        " ".join(v for v in (subject, action, setting) if v),
-        " ".join((beat_terms[:3] + prompt_terms[:2])),
-        " ".join(beat_terms),
-        base,
-    ]
-
-    queries = []
-    seen = set()
-    for q in candidates:
-        q = re.sub(r"\s+", " ", q).strip(" ,.-")
-        if not q:
-            continue
-        key = q.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        queries.append(q)
-        if len(queries) == 4:
-            break
-
-    return queries
+    beat_text = " ".join(beat_words).casefold()
+    identities = (subject + " " + beat_text).casefold()
+    # A generic goddess image, person in temple, or unrelated deity is NEVER
+    # factual visual evidence for a specifically narrated divine identity.
+    # Keep the original exact query for a possible genuinely labelled archive;
+    # the ranked metadata gate will reject generic substitutions.
+    exact_identity = any(term.casefold() in identities for term in _PRECISE_DEVOTIONAL_ENTITIES)
+    candidates = []
+    if exact_identity:
+        for name in _PRECISE_DEVOTIONAL_ENTITIES:
+            if name.casefold() in identities:
+                candidates.append(name + " Hindu devotional sculpture India")
+                break
+    else:
+        # Put the concrete visible action before the scene-wide generic query.
+        for markers, query in _BEAT_STOCK_CONCEPTS:
+            if any(marker in beat_text for marker in markers):
+                candidates.append(query)
+                break
+        # The user's original English visual search is preferable to the
+        # previous mixed Hindi-person keywords whose metadata never matches.
+        if base and not (base.casefold() in {"person", "hands", "temple", "dancer"}):
+            candidates.append(base)
+    # Do not send Hindi narration fragments or "person narrative moment" to
+    # Western stock engines. Those were producing arbitrary glossy shots.
+    # Fully dynamic unique concepts without a reliable translation will
+    # correctly fall through to beat-specific AI imagery rather than stock.
+    out = []
+    for query in candidates:
+        query = re.sub(r"\s+", " ", query).strip(" ,.-")
+        if query and query.casefold() not in {item.casefold() for item in out}:
+            out.append(query)
+    return out[:3]
 
 
 
