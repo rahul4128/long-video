@@ -26,6 +26,7 @@ from visual_qc import assess_sequence, prioritized_repair_tasks
 from scripts.visual_evidence import detect_instructional_category, is_generic_stock_query
 from scripts.visual_relevance_gate import strong_stock_match, named_deity_requires_verified_footage
 from scripts.image_framing import framing_issue, preserve_full_subject
+from scripts.canva_image_provider import CanvaImageError, generate_canva_image
 from storyteller import build_prosody_map, prepare_storyteller_text
 from hindi_text import to_spoken_hindi, hindi_display_text, pick_hindi, text_free_prompt, has_latin, best_hindi_title
 try:
@@ -1841,17 +1842,19 @@ def _generate_visual_beat_image(scene_prompt: str, beat: dict, orientation: str,
         # services have explicitly exhausted their credits/quota. The
         # mandatory visual-quality validator would reject it anyway.
         # Failing now preserves GitHub time and makes the root cause obvious.
-        if all(not _ai_provider_allowed(name)
-               for name in ("cloudflare", "huggingface", "pollinations")):
+        available_providers = ("cloudflare", "huggingface", "pollinations") + (
+            ("canva",) if _canva_image_enabled() else ()
+        )
+        if all(not _ai_provider_allowed(name) for name in available_providers):
             reasons = ", ".join(
-                f"{name}: {state.get('unavailableReason') or 'failed requests'}"
-                for name, state in _AI_IMAGE_PROVIDER_STATE.items()
+                f"{name}: {_AI_IMAGE_PROVIDER_STATE.get(name, {}).get('unavailableReason') or 'failed requests'}"
+                for name in available_providers
             )
             raise RuntimeError(
                 "No image-generation providers available for a required narration beat. "
                 f"Image providers: {reasons}. "
                 "Do not regenerate or publish generic abstract fallback scenes; "
-                "wait for quota reset or connect a funded, approved image API."
+                "wait for quota reset or enable a Canva image fallback with an approved AI-credit budget."
             )
         fallback_source = create_local_visual_fallback(
             dest,
@@ -2101,12 +2104,13 @@ _AI_IMAGE_PROVIDER_STATE = {
     "cloudflare": {"failures": 0, "open": False},
     "huggingface": {"failures": 0, "open": False},
     "pollinations": {"failures": 0, "open": False},
+    "canva": {"failures": 0, "open": False},
 }
 _AI_IMAGE_PROVIDER_LOCK = threading.Lock()
 
 
 def _ai_provider_failure_limit(name: str) -> int:
-    defaults = {"cloudflare": 2, "huggingface": 2, "pollinations": 2}
+    defaults = {"cloudflare": 2, "huggingface": 2, "pollinations": 2, "canva": 1}
     env_name = f"AI_{name.upper()}_FAILURE_LIMIT"
     try:
         return max(1, min(5, int(os.getenv(env_name, str(defaults.get(name, 2))) or defaults.get(name, 2))))
@@ -2149,6 +2153,59 @@ def _ai_provider_record(name: str, success: bool) -> None:
                 "remaining beats will use other providers/local continuity fallback.",
                 flush=True,
             )
+
+
+_CANVA_IMAGE_COUNTER_LOCK = threading.Lock()
+_CANVA_IMAGES_REQUESTED = 0
+
+
+def _canva_image_enabled() -> bool:
+    # Explicit opt-in: each POST consumes Canva AI allowances; avoid surprise
+    # charges/credits on scheduled devotional production jobs.
+    return os.getenv("CANVA_IMAGE_FALLBACK_ENABLED", "false").lower() == "true"
+
+
+def _canva_image_budget() -> int:
+    try:
+        return max(1, min(50, int(os.getenv("CANVA_IMAGE_MAX_PER_RUN", "1"))))
+    except (ValueError, TypeError):
+        return 1
+
+
+def _try_canva_image(prompt: str, dest: str, aspect_ratio: str) -> bool:
+    """Optional last-resort image provider, capped across concurrent shots."""
+    global _CANVA_IMAGES_REQUESTED
+    if not _canva_image_enabled() or not _ai_provider_allowed("canva"):
+        return False
+    if not os.getenv("CANVA_ACCESS_TOKEN", "").strip():
+        _ai_provider_mark_unavailable("canva", "OAuth access token unavailable; inspect Canva refresh step")
+        return False
+    with _CANVA_IMAGE_COUNTER_LOCK:
+        if _CANVA_IMAGES_REQUESTED >= _canva_image_budget():
+            exhausted = True
+        else:
+            exhausted = False
+            _CANVA_IMAGES_REQUESTED += 1
+    if exhausted:
+        _ai_provider_mark_unavailable("canva", f"Configured per-run limit of {_canva_image_budget()} image(s) reached")
+        return False
+    try:
+        generate_canva_image(prompt, dest, aspect_ratio=aspect_ratio)
+        print("  ✅ Canva image generated for narration-specific visual beat", flush=True)
+        return True
+    except CanvaImageError as exc:
+        print(f"  ⚠️ Canva image: {exc}", flush=True)
+        # Billing, credit, permission and preview-feature errors must never be
+        # retried through the remainder of this run.
+        if exc.code in {
+            "credit_quota_exceeded", "credit_quota_cooldown", "permission_denied",
+            "missing_scope", "user_role_required", "missing_token", "invalid_access_token",
+            "payment_required", "http_402", "http_401", "model_not_available",
+        }:
+            _ai_provider_mark_unavailable("canva", f"{exc.code}: {str(exc)[:130]}")
+        else:
+            _ai_provider_record("canva", False)
+        return False
 
 
 def _local_visual_dimensions(orientation: str):
@@ -2548,6 +2605,16 @@ def generate_ai_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9",
         if ok:
             generated = True
             print("  ✅ Framing-safe AI image from Cloudflare backup", flush=True)
+
+    # 3. Canva Connect API preview: last fallback, explicit opt-in and
+    # fixed per-run credit cap. Do not reuse generic/brown local placeholders.
+    if not generated and _canva_image_enabled() and _ai_provider_allowed("canva"):
+        ok = _try_canva_image(prompt, dest_path, aspect_ratio)
+        ok = bool(ok and frame_ok())
+        if ok:
+            generated = True
+        elif not _ai_provider_allowed("canva"):
+            print("  🛑 Canva image provider exhausted or unavailable.", flush=True)
 
     if generated and frame_ok():
         try:
