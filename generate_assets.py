@@ -2526,7 +2526,8 @@ def generate_hf_fallback_model(prompt: str, dest_path: str, model_id: str,
 
 
 def generate_ai_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9",
-                       pollinations_width: int = 1920, pollinations_height: int = 1080) -> bool:
+                       pollinations_width: int = 1920, pollinations_height: int = 1080,
+                       allow_canva: bool = True) -> bool:
     """Generate native-ratio art wherever possible; reject misframed images.
 
     Cloudflare FLUX.1 Schnell has no output-width/height parameters, so its
@@ -2608,7 +2609,7 @@ def generate_ai_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9",
 
     # 3. Canva Connect API preview: last fallback, explicit opt-in and
     # fixed per-run credit cap. Do not reuse generic/brown local placeholders.
-    if not generated and _canva_image_enabled() and _ai_provider_allowed("canva"):
+    if not generated and allow_canva and _canva_image_enabled() and _ai_provider_allowed("canva"):
         ok = _try_canva_image(prompt, dest_path, aspect_ratio)
         ok = bool(ok and frame_ok())
         if ok:
@@ -4065,7 +4066,7 @@ async def process():
     )
     print(f"🖼️ Generating ONE High-CTR Long Thumbnail ({thumbnail_text_position})...", flush=True)
     thumb_dest = "public/images/thumbnail.jpg"
-    long_thumb_ok = generate_ai_image(thumb_prompt, thumb_dest, aspect_ratio="16:9", pollinations_width=1920, pollinations_height=1080)
+    long_thumb_ok = generate_ai_image(thumb_prompt, thumb_dest, aspect_ratio="16:9", pollinations_width=1920, pollinations_height=1080, allow_canva=os.getenv("CANVA_IMAGE_THUMBNAILS_ENABLED", "false").lower() == "true")
     if not long_thumb_ok:
         print("  ⚠️ All AI image providers failed for Long thumbnail; using safe local background.", flush=True)
         create_local_visual_fallback(thumb_dest, orientation="landscape", allow_reference_reuse=False)
@@ -4106,7 +4107,7 @@ async def process():
     )
     print(f"🖼️ Generating ONE High-CTR Shorts Thumbnail ({shorts_thumbnail_text_position})...", flush=True)
     shorts_thumb_dest = "public/images/thumbnail_shorts.jpg"
-    shorts_thumb_ok = generate_ai_image(shorts_thumb_prompt, shorts_thumb_dest, aspect_ratio="9:16", pollinations_width=1080, pollinations_height=1920)
+    shorts_thumb_ok = generate_ai_image(shorts_thumb_prompt, shorts_thumb_dest, aspect_ratio="9:16", pollinations_width=1080, pollinations_height=1920, allow_canva=os.getenv("CANVA_IMAGE_THUMBNAILS_ENABLED", "false").lower() == "true")
     if not shorts_thumb_ok:
         print("  ⚠️ All AI image providers failed for Shorts thumbnail; using safe local background.", flush=True)
         create_local_visual_fallback(shorts_thumb_dest, orientation="portrait", allow_reference_reuse=False)
