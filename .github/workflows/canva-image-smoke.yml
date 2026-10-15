@@ -1,0 +1,51 @@
+name: Canva Scene Image Smoke (one AI generation)
+
+on:
+  workflow_dispatch:
+
+# The same shared Canva OAuth refresh token is single-use and must be rotated
+# serially with the main production renderer.
+concurrency:
+  group: canva-token-rotation
+  cancel-in-progress: false
+
+jobs:
+  canva-one-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Install only smoke test dependencies
+        run: python -m pip install requests "Pillow>=10,<12" pynacl
+
+      - name: Authenticate Canva and safely rotate refresh token
+        env:
+          CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
+          CANVA_CLIENT_SECRET: ${{ secrets.CANVA_CLIENT_SECRET }}
+          CANVA_REFRESH_TOKEN: ${{ secrets.CANVA_REFRESH_TOKEN }}
+          REPO_SECRETS_TOKEN: ${{ secrets.REPO_SECRETS_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/refresh_canva_token.py
+
+      - name: Generate exactly one landscape Canva AI image and validate framing
+        env:
+          CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
+        run: python scripts/canva_image_smoke.py
+
+      - name: Save generated image for visual review
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: canva-smoke-image-${{ github.run_id }}
+          path: out/canva_smoke_scene.jpg
+          if-no-files-found: error
+          retention-days: 7
