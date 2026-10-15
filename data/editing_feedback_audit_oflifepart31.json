@@ -1,8 +1,19 @@
 {
   "account": "oflifepart31",
-  "generatedAt": "2026-10-14T01:13:33.335484+00:00",
+  "generatedAt": "2026-10-15T03:17:24.080009+00:00",
   "matchedVideos": [],
-  "rejected": [],
+  "rejected": [
+    {
+      "reason": "ambiguous_or_unpublished_title",
+      "format": "long",
+      "githubRunId": "38510397633"
+    },
+    {
+      "reason": "ambiguous_or_unpublished_title",
+      "format": "shorts",
+      "githubRunId": "38510397633"
+    }
+  ],
   "eligibleGroups": 0,
   "limitations": "30-day YouTube Analytics top-50 sample. Exact title/videoId match only; >=7d mature; observational, not causal. Missing/uploaded-with-changed-title videos excluded."
 }
