@@ -131,7 +131,7 @@ jobs:
         run: |
           set -euo pipefail
           for name in \
-            test_image_framing.py test_music_engine.py test_editing_director.py \
+            test_image_framing.py test_canva_image_provider.py test_music_engine.py test_editing_director.py \
             test_story_visual_relevance.py \
             test_p1_storytelling.py test_preflight_payload.py test_editing_performance_learning.py \
             test_render_style_feedback.py test_editing_style_engine.py \
@@ -167,7 +167,7 @@ jobs:
           path: out
 
       - name: Static Python syntax check
-        run: python -m py_compile content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py editing_style_engine.py color_continuity.py scripts/validate_color_continuity.py scripts/master_final_audio.py scripts/validate_final_audio.py spoken_hindi_qc.py scripts/visual_relevance_gate.py scripts/visual_storyboard.py scripts/build_editing_style_signals.py scripts/render_style_attribution.py scripts/ingest_editing_feedback.py
+        run: python -m py_compile scripts/canva_image_provider.py content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py editing_style_engine.py color_continuity.py scripts/validate_color_continuity.py scripts/master_final_audio.py scripts/validate_final_audio.py spoken_hindi_qc.py scripts/visual_relevance_gate.py scripts/visual_storyboard.py scripts/build_editing_style_signals.py scripts/render_style_attribution.py scripts/ingest_editing_feedback.py
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v7
@@ -199,6 +199,23 @@ jobs:
       - name: Install Python Dependencies
         run: pip install -r requirements.txt
 
+      # Refresh Canva OAuth in the same job that generates scene images.
+      # Do not expose the rotating refresh token to logs. Explicit opt-in only.
+      - name: Install Canva OAuth dependency for image fallback
+        if: ${{ vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
+        run: pip install pynacl
+
+      - name: Authenticate Canva for image fallback and rotate refresh token
+        if: ${{ vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
+        continue-on-error: true
+        env:
+          CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
+          CANVA_CLIENT_SECRET: ${{ secrets.CANVA_CLIENT_SECRET }}
+          CANVA_REFRESH_TOKEN: ${{ secrets.CANVA_REFRESH_TOKEN }}
+          REPO_SECRETS_TOKEN: ${{ secrets.REPO_SECRETS_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/refresh_canva_token.py
+
       # Optional engines - installed only when switched on with repo
       # variables, so the default (Edge voice) run stays fast.
       - name: Install optional engines (own voice / Kokoro / CLIP)
@@ -224,6 +241,9 @@ jobs:
           COVERR_API_KEY: ${{ secrets.COVERR_API_KEY }}
           HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
           POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
+          CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
+          CANVA_IMAGE_FALLBACK_ENABLED: ${{ vars.CANVA_IMAGE_FALLBACK_ENABLED || 'false' }}
+          CANVA_IMAGE_MAX_PER_RUN: ${{ vars.CANVA_IMAGE_MAX_PER_RUN || '1' }}
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
           HF_TOKEN: ${{ secrets.HUGGINGFACE_API_KEY }}
           AUDIO_TTS_ENGINE: ${{ vars.AUDIO_TTS_ENGINE || 'kokoro' }}
