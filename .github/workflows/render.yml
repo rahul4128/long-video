@@ -13,6 +13,16 @@ on:
         description: 'GitHub run ID with an approved-story-<run_id> artifact (reuse last script without Make/Gemini)'
         required: false
         type: string
+      use_canva_images:
+        description: 'Opt in to Canva AI image fallback (consumes Canva AI credits)'
+        required: false
+        type: boolean
+        default: false
+      canva_image_max_per_run:
+        description: 'Hard cap on Canva AI generations for this run (1-50)'
+        required: false
+        type: string
+        default: '1'
       preflight_only:
         description: 'Run Python regression checks and cache story only, without TTS/images/render'
         required: false
@@ -202,11 +212,11 @@ jobs:
       # Refresh Canva OAuth in the same job that generates scene images.
       # Do not expose the rotating refresh token to logs. Explicit opt-in only.
       - name: Install Canva OAuth dependency for image fallback
-        if: ${{ vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
+        if: ${{ inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
         run: pip install pynacl
 
       - name: Authenticate Canva for image fallback and rotate refresh token
-        if: ${{ vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
+        if: ${{ inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
         continue-on-error: true
         env:
           CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
@@ -242,8 +252,8 @@ jobs:
           HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
           POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
           CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
-          CANVA_IMAGE_FALLBACK_ENABLED: ${{ vars.CANVA_IMAGE_FALLBACK_ENABLED || 'false' }}
-          CANVA_IMAGE_MAX_PER_RUN: ${{ vars.CANVA_IMAGE_MAX_PER_RUN || '1' }}
+          CANVA_IMAGE_FALLBACK_ENABLED: ${{ (inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true') && 'true' || 'false' }}
+          CANVA_IMAGE_MAX_PER_RUN: ${{ inputs.canva_image_max_per_run || vars.CANVA_IMAGE_MAX_PER_RUN || '1' }}
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
           HF_TOKEN: ${{ secrets.HUGGINGFACE_API_KEY }}
           AUDIO_TTS_ENGINE: ${{ vars.AUDIO_TTS_ENGINE || 'kokoro' }}
