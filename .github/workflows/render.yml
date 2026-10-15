@@ -18,6 +18,11 @@ on:
         required: false
         type: boolean
         default: false
+      canva_smoke_only:
+        description: 'Test exactly one Canva image (no rendering, no publishing)'
+        required: false
+        type: boolean
+        default: false
       canva_image_max_per_run:
         description: 'Hard cap on Canva AI generations for this run (1-50)'
         required: false
@@ -64,6 +69,7 @@ jobs:
   # saves the approved Make script before even the cheapest regression tests.
   # Rerun with reuse_run_id on the latest branch instead of re-running Make.
   preflight:
+    if: ${{ !inputs.canva_smoke_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -149,6 +155,45 @@ jobs:
             test_master_final_audio.py test_validate_final_audio.py; do
             python -m unittest discover -s tests -p "$name" -v
           done
+
+  # One-credit manual Canva test using the EXISTING registered render workflow.
+  # workflow_dispatch registration requires the workflow to exist on the
+  # default branch; this job is reachable through the existing render.yml.
+  canva-image-smoke:
+    if: ${{ inputs.canva_smoke_only }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Set up Python for Canva image smoke
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Install smoke dependencies
+        run: pip install requests "Pillow>=10,<12" pynacl
+      - name: Authenticate Canva for one image and rotate refresh token
+        env:
+          CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
+          CANVA_CLIENT_SECRET: ${{ secrets.CANVA_CLIENT_SECRET }}
+          CANVA_REFRESH_TOKEN: ${{ secrets.CANVA_REFRESH_TOKEN }}
+          REPO_SECRETS_TOKEN: ${{ secrets.REPO_SECRETS_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/refresh_canva_token.py
+      - name: Generate one Canva image and validate framing
+        env:
+          CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
+        run: python scripts/canva_image_smoke.py
+      - name: Save test image for visual review
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: canva-smoke-image-${{ github.run_id }}
+          path: out/canva_smoke_scene.jpg
+          if-no-files-found: error
+          retention-days: 7
 
   # ---------------------------------------------------------------
   # JOB 1: Generate all assets (images/video clips, narration audio,
