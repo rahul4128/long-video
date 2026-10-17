@@ -183,9 +183,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: python scripts/refresh_canva_token.py
       - name: Generate one Canva image and validate framing
-        env:
-          CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
-        run: python scripts/canva_image_smoke.py
+        run: python -m scripts.canva_image_smoke
       - name: Save test image for visual review
         if: success()
         uses: actions/upload-artifact@v7
@@ -296,7 +294,6 @@ jobs:
           COVERR_API_KEY: ${{ secrets.COVERR_API_KEY }}
           HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
           POLLINATIONS_API_KEY: ${{ secrets.POLLINATIONS_API_KEY }}
-          CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
           CANVA_IMAGE_FALLBACK_ENABLED: ${{ (inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true') && 'true' || 'false' }}
           CANVA_IMAGE_MAX_PER_RUN: ${{ inputs.canva_image_max_per_run || vars.CANVA_IMAGE_MAX_PER_RUN || '1' }}
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
@@ -851,7 +848,6 @@ jobs:
       - name: Canva finishing (upload final videos + thumbnails, create editable designs)
         continue-on-error: true
         env:
-          CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
           CANVA_ASSET_BRIDGE_ENABLED: ${{ vars.CANVA_FINISHING_ENABLED || 'true' }}
           CANVA_UPLOAD_VIDEOS: ${{ vars.CANVA_UPLOAD_VIDEOS || 'true' }}
           CANVA_UPLOAD_SCENE_ASSETS: ${{ vars.CANVA_UPLOAD_SCENE_ASSETS || 'true' }}
