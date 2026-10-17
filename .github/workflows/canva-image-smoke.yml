@@ -37,9 +37,7 @@ jobs:
         run: python scripts/refresh_canva_token.py
 
       - name: Generate exactly one landscape Canva AI image and validate framing
-        env:
-          CANVA_ACCESS_TOKEN: ${{ env.CANVA_ACCESS_TOKEN }}
-        run: python scripts/canva_image_smoke.py
+        run: python -m scripts.canva_image_smoke
 
       - name: Save generated image for visual review
         if: success()
