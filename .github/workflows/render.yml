@@ -189,6 +189,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_TTS_MODEL: ${{ vars.GEMINI_TTS_MODEL || 'gemini-3.8-flash-tts' }}
           GEMINI_TTS_VOICE: ${{ vars.GEMINI_TTS_VOICE || 'Kore' }}
+          GEMINI_TTS_STYLE: ${{ vars.GEMINI_TTS_STYLE || '' }}
         run: python -m scripts.gemini_tts_smoke
       - name: Save sample MP3 for listening
         if: always()
@@ -345,6 +346,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_TTS_MODEL: ${{ vars.GEMINI_TTS_MODEL || 'gemini-3.8-flash-tts' }}
           GEMINI_TTS_VOICE: ${{ vars.GEMINI_TTS_VOICE || 'Kore' }}
+          GEMINI_TTS_STYLE: ${{ vars.GEMINI_TTS_STYLE || '' }}
           GEMINI_TTS_MAX_REQUESTS: ${{ vars.GEMINI_TTS_MAX_REQUESTS || '12' }}
           CANVA_IMAGE_FALLBACK_ENABLED: ${{ (inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true') && 'true' || 'false' }}
           CANVA_IMAGE_MAX_PER_RUN: ${{ inputs.canva_image_max_per_run || vars.CANVA_IMAGE_MAX_PER_RUN || '1' }}
