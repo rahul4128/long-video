@@ -23,6 +23,11 @@ on:
         required: false
         type: boolean
         default: false
+      gemini_tts_smoke_only:
+        description: 'Generate one short Hindi Gemini voice MP3 (no rendering or publishing)'
+        required: false
+        type: boolean
+        default: false
       canva_image_max_per_run:
         description: 'Hard cap on Canva AI generations for this run (1-50)'
         required: false
@@ -73,7 +78,7 @@ jobs:
   # saves the approved Make script before even the cheapest regression tests.
   # Rerun with reuse_run_id on the latest branch instead of re-running Make.
   preflight:
-    if: ${{ !inputs.canva_smoke_only }}
+    if: ${{ !inputs.canva_smoke_only && !inputs.gemini_tts_smoke_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -159,6 +164,40 @@ jobs:
             test_master_final_audio.py test_validate_final_audio.py; do
             python -m unittest discover -s tests -p "$name" -v
           done
+
+  # Safe manual test: one Gemini API call, no Make dispatch, video or publishing.
+  gemini-tts-smoke:
+    if: ${{ inputs.gemini_tts_smoke_only }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Install narration smoke dependencies
+        run: |
+          python -m pip install requests
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg
+      - name: Generate a single Hindi sample using Gemini TTS
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_TTS_MODEL: ${{ vars.GEMINI_TTS_MODEL || 'gemini-3.8-flash-tts' }}
+          GEMINI_TTS_VOICE: ${{ vars.GEMINI_TTS_VOICE || 'Kore' }}
+        run: python -m scripts.gemini_tts_smoke
+      - name: Save sample MP3 for listening
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gemini-hindi-voice-${{ github.run_id }}
+          path: out/gemini_tts_smoke.mp3
+          if-no-files-found: warn
+          retention-days: 7
 
   # One-credit manual Canva test using the EXISTING registered render workflow.
   # workflow_dispatch registration requires the workflow to exist on the
