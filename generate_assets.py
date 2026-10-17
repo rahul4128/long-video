@@ -2762,10 +2762,11 @@ def _gemini_tts_claim_request() -> bool:
 
 
 def _gemini_tts_block_on_error(exc: GeminiTTSError) -> None:
+    # Fail over for the rest of this run after ANY TTS failure. This prevents
+    # repeated credit-using requests when the model/API returned bad audio.
     global _GEMINI_TTS_BLOCKED
-    if exc.code in ("quota_exceeded", "missing_key", "http_401", "http_403", "http_404"):
-        with _GEMINI_TTS_STATE_LOCK:
-            _GEMINI_TTS_BLOCKED = True
+    with _GEMINI_TTS_STATE_LOCK:
+        _GEMINI_TTS_BLOCKED = True
 
 def _fit_long_narration_to_target(audio_paths: list, word_timings: list, target_seconds: float = 205.0) -> float:
     """Keep long-form narration inside the production duration target.
