@@ -172,8 +172,13 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: '3.11'
-      - name: Install smoke dependencies
-        run: pip install requests "Pillow>=10,<12" pynacl
+      - name: Install smoke dependencies (including FFprobe for image QC)
+        run: |
+          pip install requests "Pillow>=10,<12" pynacl
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg
+          command -v ffprobe
+          command -v ffmpeg
       - name: Authenticate Canva for one image and rotate refresh token
         env:
           CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
@@ -184,13 +189,13 @@ jobs:
         run: python scripts/refresh_canva_token.py
       - name: Generate one Canva image and validate framing
         run: python -m scripts.canva_image_smoke
-      - name: Save test image for visual review
-        if: success()
+      - name: Save test image for visual review even if QC fails
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: canva-smoke-image-${{ github.run_id }}
           path: out/canva_smoke_scene.jpg
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
 
   # ---------------------------------------------------------------
