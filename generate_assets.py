@@ -2734,11 +2734,38 @@ def generate_multi_shot_ai_images(
 # -------------------------------------------------------------
 # 3. AUDIO SYNTHESIS ENGINE
 # -------------------------------------------------------------
-# Primary: local Kokoro Hindi TTS (free/open weights, no API key).
-# Fallback: the existing Edge-TTS path. Set AUDIO_TTS_ENGINE=edge to force
-# the legacy engine, or kokoro to require Kokoro.
+# Gemini 3.8 TTS (explicit opt-in) -> local Kokoro -> existing Edge.
+# Existing Kokoro and Edge modes remain available unchanged.
 # -------------------------------------------------------------
 from audio_engine import generate_kokoro_audio, KOKORO_AVAILABLE
+from scripts.gemini_tts import GeminiTTSError, generate_gemini_audio
+
+_GEMINI_TTS_STATE_LOCK = threading.Lock()
+_GEMINI_TTS_REQUESTS = 0
+_GEMINI_TTS_BLOCKED = False
+
+
+def _gemini_tts_claim_request() -> bool:
+    """Hard per-run limit across concurrent scene rendering threads."""
+    global _GEMINI_TTS_REQUESTS
+    with _GEMINI_TTS_STATE_LOCK:
+        if _GEMINI_TTS_BLOCKED:
+            return False
+        try:
+            max_requests = max(1, min(40, int(os.getenv("GEMINI_TTS_MAX_REQUESTS", "12"))))
+        except ValueError:
+            max_requests = 12
+        if _GEMINI_TTS_REQUESTS >= max_requests:
+            return False
+        _GEMINI_TTS_REQUESTS += 1
+        return True
+
+
+def _gemini_tts_block_on_error(exc: GeminiTTSError) -> None:
+    global _GEMINI_TTS_BLOCKED
+    if exc.code in ("quota_exceeded", "missing_key", "http_401", "http_403", "http_404"):
+        with _GEMINI_TTS_STATE_LOCK:
+            _GEMINI_TTS_BLOCKED = True
 
 def _fit_long_narration_to_target(audio_paths: list, word_timings: list, target_seconds: float = 205.0) -> float:
     """Keep long-form narration inside the production duration target.
@@ -2999,10 +3026,10 @@ async def _generate_edge_chunked_audio(clean_text: str, audio_dest: str) -> list
 
 
 async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") -> list:
-    """Kokoro Hindi TTS -> cinematic pause handling -> Edge fallback.
+    """Narration chain: optional Gemini 3.8 TTS -> Kokoro -> Edge-TTS.
 
-    Kokoro is the default local Hindi voice. Edge-TTS remains the automatic
-    fallback so a temporary Kokoro/model/runtime failure does not stop a run.
+    Gemini is selected by AUDIO_TTS_ENGINE=gemini; all other modes retain
+    their previous behavior. A missing key/quota falls back without failure.
     """
     async with tts_semaphore:
         if has_latin(narration):
@@ -3010,10 +3037,25 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") 
         original_text = _naturalize_text(to_spoken_hindi(narration)) or "हरि ॐ तत्सत्"
         prosody = build_prosody_map(original_text, beat=beat)
         clean_text = prepare_storyteller_text(original_text)
-        # Edge's Hindi neural voices (Madhur/Swara) sound far more human than
-        # Kokoro's Hindi voice, which listeners described as robotic. Kokoro is
-        # still available with AUDIO_TTS_ENGINE=kokoro.
+        # Gemini is an optional higher-quality engine; Kokoro/Edge remain as
+        # fallbacks. All speech engines use the same normalized Hindi transcript.
         engine = os.getenv("AUDIO_TTS_ENGINE", "kokoro").strip().lower()
+
+        if engine == "gemini":
+            if os.getenv("GEMINI_API_KEY", "").strip() and _gemini_tts_claim_request():
+                try:
+                    await asyncio.to_thread(generate_gemini_audio, clean_text, audio_dest)
+                    if os.path.exists(audio_dest) and get_audio_duration(audio_dest) > 0.8:
+                        print(f"  🎙️ Gemini TTS narration generated: {os.path.basename(audio_dest)}", flush=True)
+                        return _fallback_word_timings(clean_text, audio_dest)
+                    raise GeminiTTSError("Gemini TTS returned no usable narration", "invalid_audio")
+                except GeminiTTSError as e:
+                    _gemini_tts_block_on_error(e)
+                    print(f"::warning title=Gemini TTS fallback::{os.path.basename(audio_dest)}: {e.code}; trying Kokoro, then Edge.", flush=True)
+                except Exception as e:
+                    print(f"::warning title=Gemini TTS fallback::{os.path.basename(audio_dest)}: {type(e).__name__}; trying Kokoro, then Edge.", flush=True)
+            else:
+                print(f"::warning title=Gemini TTS fallback::{os.path.basename(audio_dest)}: key unavailable or per-run request limit reached; trying Kokoro, then Edge.", flush=True)
 
         # Own-voice narration (human element): IndicF5 clones the creator's
         # own recorded reference voice. Opt-in; falls back to Edge on error.
@@ -3039,9 +3081,9 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") 
                     raise RuntimeError("INDICF5_STRICT=true: IndicF5 engine not installed; stopping instead of using Edge-TTS.")
             engine = "edge"
 
-        # Kokoro is primary. audio_engine.py adds real silence after cinematic
+        # Kokoro is the local fallback. audio_engine.py adds real silence after cinematic
         # punctuation such as …, —, । and !/? while preserving Kokoro prosody.
-        if engine in ("kokoro", "auto"):
+        if engine in ("gemini", "kokoro", "auto"):
             if KOKORO_AVAILABLE:
                 try:
                     ok = await asyncio.to_thread(
@@ -3061,7 +3103,7 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") 
 
         # Edge remains available as an explicit engine and as the automatic
         # fallback when Kokoro fails.
-        if engine in ("edge", "auto", "kokoro"):
+        if engine in ("gemini", "edge", "auto", "kokoro"):
             for attempt in range(1, 4):
                 try:
                     timings = await _generate_edge_chunked_audio(clean_text, audio_dest)
