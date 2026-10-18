@@ -11,6 +11,7 @@ from unittest.mock import patch
 from scripts.gemini_tts import (
     GeminiTTSError, generate_gemini_audio, _audio_from_response
 )
+import scripts.gemini_tts as tts
 
 
 def sample_wav():
@@ -24,9 +25,10 @@ def sample_wav():
 
 
 class FakeResponse:
-    def __init__(self, payload=None, status=200):
+    def __init__(self, payload=None, status=200, headers=None):
         self.status_code = status
         self.payload = payload if payload is not None else {}
+        self.headers = headers or {}
 
     def json(self):
         return self.payload
@@ -34,15 +36,33 @@ class FakeResponse:
 
 class FakeSession:
     def __init__(self, response):
-        self.response = response
+        self.responses = response if isinstance(response, list) else [response]
         self.requests = []
 
     def post(self, url, **kwargs):
         self.requests.append((url, kwargs))
-        return self.response
+        return self.responses[min(len(self.requests)-1, len(self.responses)-1)]
 
 
 class GeminiNarrationTests(unittest.TestCase):
+    def setUp(self):
+        # No cooldowns or external requests in unit tests.
+        tts._LAST_ATTEMPT_AT = 0.0
+        tts._API_ATTEMPTS = 0
+        tts._DAILY_QUOTA_EXHAUSTED = False
+        self.env = patch.dict(os.environ, {
+            "GEMINI_TTS_MIN_GAP_SECONDS": "0",
+            "GEMINI_TTS_MAX_RETRIES": "2",
+            "GEMINI_TTS_MAX_API_ATTEMPTS": "18",
+        })
+        self.sleep = patch("scripts.gemini_tts.time.sleep")
+        self.env.start()
+        self.sleep.start()
+
+    def tearDown(self):
+        self.sleep.stop()
+        self.env.stop()
+
     def response(self, raw=None):
         return FakeResponse({"steps": [
             {"type": "model_output", "content": [
@@ -115,6 +135,57 @@ class GeminiNarrationTests(unittest.TestCase):
                 generate_gemini_audio("नमस्ते", "scene.mp3", api_key="key", session=session)
             self.assertEqual(err.exception.code, "invalid_audio")
             ff.assert_not_called()
+
+    def test_429_retries_after_cooling_down_and_succeeds(self):
+        session = FakeSession([
+            FakeResponse({"error": {"message": "Rate limited"}}, 429, {"Retry-After": "28"}),
+            self.response(),
+        ])
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("scripts.gemini_tts.subprocess.run") as ff:
+                def make_mp3(cmd, **kw):
+                    Path(cmd[-1]).write_bytes(b"ID3"+b"x"*2200)
+                    return type("Result", (), {"returncode": 0})()
+                ff.side_effect = make_mp3
+                self.assertTrue(generate_gemini_audio(
+                    "भक्ति की शक्ति", str(Path(tmp)/"demo.mp3"),
+                    api_key="test", session=session,
+                ))
+        self.assertEqual(len(session.requests), 2)
+        # Retry-After is honoured rather than retrying immediately.
+        self.assertIn(28.0, [arg.args[0] for arg in tts.time.sleep.call_args_list])
+
+    def test_daily_quota_never_retries(self):
+        session = FakeSession(FakeResponse({
+            "error": {
+                "message": "Quota exceeded",
+                "details": [{"violations": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}]
+            }
+        }, 429))
+        with self.assertRaises(GeminiTTSError) as e:
+            generate_gemini_audio("नमस्ते", "unused.mp3", api_key="key", session=session)
+        self.assertEqual(e.exception.code, "quota_daily_exhausted")
+        self.assertEqual(len(session.requests), 1)
+        tts.time.sleep.assert_not_called()
+        with self.assertRaises(GeminiTTSError):
+            generate_gemini_audio("नमस्ते", "unused.mp3", api_key="key", session=session)
+        self.assertEqual(len(session.requests), 1)
+
+    def test_failed_quota_retries_are_bounded(self):
+        session = FakeSession(FakeResponse({"error": {"message": "Rate limit"}}, 429))
+        with self.assertRaises(GeminiTTSError) as e:
+            generate_gemini_audio("नमस्ते", "unused.mp3", api_key="key", session=session)
+        self.assertEqual(e.exception.code, "quota_exceeded")
+        self.assertEqual(len(session.requests), 3)
+        self.assertEqual(len(tts.time.sleep.call_args_list), 2)
+
+    def test_api_attempt_budget_includes_retries(self):
+        session = FakeSession(FakeResponse({"error": {"message": "Too many requests"}}, 429))
+        with patch.dict(os.environ, {"GEMINI_TTS_MAX_API_ATTEMPTS": "2"}):
+            with self.assertRaises(GeminiTTSError) as e:
+                generate_gemini_audio("नमस्ते", "unused.mp3", api_key="key", session=session)
+        self.assertEqual(e.exception.code, "request_budget_exhausted")
+        self.assertEqual(len(session.requests), 2)
 
     def test_only_tts_models_are_allowed(self):
         session = FakeSession(self.response())
