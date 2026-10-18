@@ -135,7 +135,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends ffmpeg
-          pip install -r requirements.txt
+          pip install -r requirements.txt pynacl
 
       - name: Type-check Remotion scenes and motion graphics (no video render)
         uses: actions/setup-node@v4
@@ -156,7 +156,7 @@ jobs:
         run: |
           set -euo pipefail
           for name in \
-            test_image_framing.py test_canva_image_provider.py test_gemini_tts.py test_music_engine.py test_editing_director.py \
+            test_image_framing.py test_canva_image_provider.py test_canva_token_handoff.py test_gemini_tts.py test_music_engine.py test_editing_director.py \
             test_story_visual_relevance.py \
             test_p1_storytelling.py test_preflight_payload.py test_editing_performance_learning.py \
             test_render_style_feedback.py test_editing_style_engine.py \
@@ -269,7 +269,7 @@ jobs:
           path: out
 
       - name: Static Python syntax check
-        run: python -m py_compile scripts/canva_image_provider.py content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py editing_style_engine.py color_continuity.py scripts/validate_color_continuity.py scripts/master_final_audio.py scripts/validate_final_audio.py spoken_hindi_qc.py scripts/visual_relevance_gate.py scripts/visual_storyboard.py scripts/build_editing_style_signals.py scripts/render_style_attribution.py scripts/ingest_editing_feedback.py
+        run: python -m py_compile scripts/canva_token_handoff.py scripts/gemini_tts.py scripts/canva_image_provider.py content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py editing_style_engine.py color_continuity.py scripts/validate_color_continuity.py scripts/master_final_audio.py scripts/validate_final_audio.py spoken_hindi_qc.py scripts/visual_relevance_gate.py scripts/visual_storyboard.py scripts/build_editing_style_signals.py scripts/render_style_attribution.py scripts/ingest_editing_feedback.py
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v7
