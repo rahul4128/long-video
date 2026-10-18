@@ -6,7 +6,7 @@ import time
 
 import requests
 from nacl.public import PublicKey, SealedBox
-from scripts.canva_token_handoff import seal_access_token
+from canva_token_handoff import seal_access_token
 
 
 def req(name):
