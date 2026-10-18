@@ -6,6 +6,7 @@ import time
 
 import requests
 from nacl.public import PublicKey, SealedBox
+from scripts.canva_token_handoff import seal_access_token
 
 
 def req(name):
@@ -151,6 +152,12 @@ def main():
     # Save the newly rotated token immediately. Retries happen only against
     # GitHub; Canva is never called twice for the same refresh token.
     save_refresh_token(repo, github_token, new_refresh)
+
+    handoff = os.environ.get("CANVA_TOKEN_TRANSFER_FILE", "").strip()
+    if handoff:
+        # Write ONLY an encrypted access token to the short-lived Actions artifact.
+        # Never persist either plaintext credentials or refresh-token lineage.
+        seal_access_token(access, handoff, secret=github_token)
 
     with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
         env_file.write(f"CANVA_ACCESS_TOKEN={access}\n")
