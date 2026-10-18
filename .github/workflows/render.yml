@@ -316,7 +316,17 @@ jobs:
           CANVA_REFRESH_TOKEN: ${{ secrets.CANVA_REFRESH_TOKEN }}
           REPO_SECRETS_TOKEN: ${{ secrets.REPO_SECRETS_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          CANVA_TOKEN_TRANSFER_FILE: out/canva-token.enc
         run: python scripts/refresh_canva_token.py
+
+      - name: Save encrypted Canva access-token handoff for this run only
+        if: ${{ inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: canva-access-encrypted-${{ github.run_id }}
+          path: out/canva-token.enc
+          if-no-files-found: ignore
+          retention-days: 1
 
       # Optional engines - installed only when switched on with repo
       # variables, so the default (Edge voice) run stays fast.
@@ -348,6 +358,10 @@ jobs:
           GEMINI_TTS_VOICE: ${{ vars.GEMINI_TTS_VOICE || 'Kore' }}
           GEMINI_TTS_STYLE: ${{ vars.GEMINI_TTS_STYLE || '' }}
           GEMINI_TTS_MAX_REQUESTS: ${{ vars.GEMINI_TTS_MAX_REQUESTS || '12' }}
+          GEMINI_TTS_MAX_API_ATTEMPTS: ${{ vars.GEMINI_TTS_MAX_API_ATTEMPTS || '18' }}
+          GEMINI_TTS_MAX_RETRIES: ${{ vars.GEMINI_TTS_MAX_RETRIES || '2' }}
+          GEMINI_TTS_COOLDOWN_SECONDS: ${{ vars.GEMINI_TTS_COOLDOWN_SECONDS || '20' }}
+          GEMINI_TTS_MIN_GAP_SECONDS: ${{ vars.GEMINI_TTS_MIN_GAP_SECONDS || '6' }}
           CANVA_IMAGE_FALLBACK_ENABLED: ${{ (inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true') && 'true' || 'false' }}
           CANVA_IMAGE_MAX_PER_RUN: ${{ inputs.canva_image_max_per_run || vars.CANVA_IMAGE_MAX_PER_RUN || '1' }}
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
@@ -888,8 +902,27 @@ jobs:
       - name: Install Canva dependencies
         run: pip install requests pynacl
 
-      - name: Authenticate Canva and rotate refresh token
-        id: canva_auth
+      # Repository secrets are snapshotted when the workflow starts.
+      # An earlier asset job may have used & rotated Canva's single-use
+      # refresh token, so never refresh the same snapshot again here.
+      - name: Download encrypted Canva access-token from asset generation
+        if: ${{ inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: canva-access-encrypted-${{ github.run_id }}
+          path: out
+
+      - name: Reuse Canva access token without consuming refresh token twice
+        if: ${{ inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
+        continue-on-error: true
+        env:
+          REPO_SECRETS_TOKEN: ${{ secrets.REPO_SECRETS_TOKEN }}
+          CANVA_TOKEN_TRANSFER_FILE: out/canva-token.enc
+        run: python scripts/canva_token_handoff.py
+
+      - name: Authenticate Canva for finishing only (no prior image OAuth)
+        if: ${{ !inputs.use_canva_images && vars.CANVA_IMAGE_FALLBACK_ENABLED != 'true' }}
         continue-on-error: true
         env:
           CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
