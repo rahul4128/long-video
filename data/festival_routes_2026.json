@@ -20,10 +20,22 @@
       "to": "2026-10-20"
     },
     {
+      "event": "sharad-purnima-2026",
+      "source": "https://www.drikpanchang.com/purnima/sharad/sharad-purnima-date-time.html?geoname-id=1261481&year=2026",
+      "from": "2026-10-25",
+      "to": "2026-10-25"
+    },
+    {
       "event": "karwa-chauth-2026",
       "source": "https://www.drikpanchang.com/festivals/karwa-chauth/karwa-chauth-date-time.html?geoname-id=1273294",
       "from": "2026-10-29",
       "to": "2026-10-29"
+    },
+    {
+      "event": "ahoi-ashtami-2026",
+      "source": "https://www.drikpanchang.com/festivals/ahoi-ashtami/ahoi-ashtami-date-time.html?geoname-id=1273294",
+      "from": "2026-11-01",
+      "to": "2026-11-01"
     },
     {
       "event": "diwali-2026",
