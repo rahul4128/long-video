@@ -5,7 +5,7 @@
   "coverage_start": "2026-09-27",
   "coverage_end": "2026-11-24",
   "checked_at": "2026-10-09",
-  "notes": "Source-linked finite-date festival calendar; expand dates and verify regionally before use beyond coverage. Date-indexed hard gate applies to verified days only; all other dates fall back to discovery.",
+  "notes": "Source-linked dates with rolling 30-day candidate discovery, not a today-only hard gate. Each execution compares all verified sources overlapping TODAY_IST..TODAY_IST+30 in Asia/Kolkata, including ongoing festivals. Daily records are optional creative seeds; day/tithi claims require city-specific confirmation. Current finite coverage ends 2026-11-24; any uncovered future dates must be independently researched and verified or marked UNKNOWN. The 2026-10-18 Navratri finale claim is incorrect for Delhi; Oct 19 is the closing observance and Oct 20 is Vijayadashami, with regional variation.",
   "sources": [
     {
       "event": "sharad-navratri-2026",
@@ -1609,6 +1609,6 @@
   "fallback": {
     "priority": "EVERGREEN_OR_VERIFY",
     "title_regex": ".*",
-    "reason": "No verified event scheduled; seek sources for next 14 days before claiming a new festival."
+    "reason": "No verified event in current rolling 30-day horizon (or finite calendar coverage is incomplete): seek two credible source-linked panchang references for uncovered future dates, mark unverified dates UNKNOWN, or choose strong evergreen content. Do not invent a festival/day-number."
   }
 }
