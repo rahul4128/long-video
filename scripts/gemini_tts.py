@@ -13,6 +13,8 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
+import time
 import wave
 
 import requests
@@ -25,6 +27,112 @@ DEFAULT_STYLE = (
     "and the reveal, and use natural pauses. Avoid announcer theatrics. "
     "Recite the supplied Hindi transcript verbatim; do not add any words."
 )
+
+# Serialize all Gemini TTS requests (including cooldowns) in this process.
+# TTS scenes are otherwise synthesized concurrently and can burst the free tier.
+_TTS_API_LOCK = threading.Lock()
+_LAST_ATTEMPT_AT = 0.0
+_API_ATTEMPTS = 0
+_DAILY_QUOTA_EXHAUSTED = False
+
+
+def _env_int(name, default, low, high):
+    try:
+        return max(low, min(high, int(os.getenv(name, str(default)))))
+    except (ValueError, TypeError):
+        return default
+
+
+def _retry_after(response):
+    """Read a numeric Retry-After or a Google RetryInfo retryDelay, capped."""
+    headers = getattr(response, "headers", {}) or {}
+    try:
+        seconds = float(headers.get("Retry-After", ""))
+        if seconds >= 0:
+            return min(90.0, seconds)
+    except (TypeError, ValueError):
+        pass
+    try:
+        details = response.json().get("error", {}).get("details", [])
+    except (ValueError, TypeError, AttributeError):
+        return None
+    for item in details if isinstance(details, list) else []:
+        if not isinstance(item, dict):
+            continue
+        delay = item.get("retryDelay", "")
+        if isinstance(delay, str) and delay.endswith("s"):
+            try:
+                return min(90.0, max(0.0, float(delay[:-1])))
+            except ValueError:
+                continue
+    return None
+
+
+def _is_daily_quota(response):
+    """Detect non-retryable daily/project exhaustion without leaking API text."""
+    try:
+        err = response.json().get("error", {})
+    except (ValueError, TypeError, AttributeError):
+        return False
+    if not isinstance(err, dict):
+        return False
+    text = str(err.get("message", "")).lower()
+    for detail in err.get("details", []) if isinstance(err.get("details", []), list) else []:
+        if isinstance(detail, dict):
+            text += " " + str(detail.get("violations", ""))[:2500].lower()
+    return any(key in text for key in (
+        "requestsperday", "perday", "per day", "daily quota", "per_day",
+    ))
+
+
+def _post_with_cooldown(transport, payload, api_key, timeout):
+    """Respect Retry-After and cool down on transient 429/503, never daily quotas."""
+    global _LAST_ATTEMPT_AT, _API_ATTEMPTS, _DAILY_QUOTA_EXHAUSTED
+    max_retries = _env_int("GEMINI_TTS_MAX_RETRIES", 2, 0, 3)
+    max_attempts = _env_int("GEMINI_TTS_MAX_API_ATTEMPTS", 18, 1, 50)
+    min_gap = _env_int("GEMINI_TTS_MIN_GAP_SECONDS", 6, 0, 30)
+    base_delay = _env_int("GEMINI_TTS_COOLDOWN_SECONDS", 20, 5, 90)
+    with _TTS_API_LOCK:
+        if _DAILY_QUOTA_EXHAUSTED:
+            raise GeminiTTSError("Gemini TTS daily quota exhausted", "quota_daily_exhausted")
+        for attempt in range(max_retries + 1):
+            if _API_ATTEMPTS >= max_attempts:
+                raise GeminiTTSError("Gemini TTS per-run API request cap reached", "request_budget_exhausted")
+            gap = min_gap - (time.monotonic() - _LAST_ATTEMPT_AT) if _LAST_ATTEMPT_AT else 0.0
+            if gap > 0:
+                time.sleep(gap)
+            _LAST_ATTEMPT_AT = time.monotonic()
+            _API_ATTEMPTS += 1
+            try:
+                response = transport.post(
+                    ENDPOINT,
+                    headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
+                    json=payload, timeout=(12, timeout),
+                )
+            except requests.RequestException as exc:
+                raise GeminiTTSError(
+                    f"Gemini TTS network issue: {type(exc).__name__}", "network_error"
+                ) from exc
+            status = response.status_code
+            if status == 429 and _is_daily_quota(response):
+                _DAILY_QUOTA_EXHAUSTED = True
+                raise GeminiTTSError("Gemini TTS daily project quota exhausted", "quota_daily_exhausted")
+            if status in (429, 503) and attempt < max_retries and _API_ATTEMPTS < max_attempts:
+                provider_delay = _retry_after(response)
+                backoff = min(90.0, base_delay * (2 ** attempt))
+                wait = max(backoff, provider_delay or 0.0)
+                print(
+                    f"Gemini TTS HTTP {status}: cooling down {wait:.0f}s "
+                    f"(retry {attempt + 1}/{max_retries})",
+                    flush=True,
+                )
+                time.sleep(wait)
+                continue
+            if status >= 400:
+                code = ("quota_exceeded" if status == 429 else f"http_{status}")
+                raise GeminiTTSError(f"Gemini TTS HTTP {status}", code)
+            return response
+        raise GeminiTTSError("Gemini TTS retry limit reached", "retry_exhausted")
 
 
 class GeminiTTSError(RuntimeError):
@@ -101,18 +209,9 @@ def generate_gemini_audio(
         "generation_config": {"speech_config": [{"voice": voice}]},
     }
     transport = session or requests
-    try:
-        response = transport.post(
-            ENDPOINT, headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
-            json=payload, timeout=(12, timeout),
-        )
-    except requests.RequestException as exc:
-        raise GeminiTTSError(f"Gemini TTS network issue: {type(exc).__name__}", "network_error") from exc
-    if response.status_code >= 400:
-        # Never print the API's free-text error (may echo user input or metadata).
-        code = ("quota_exceeded" if response.status_code == 429 else
-                f"http_{response.status_code}")
-        raise GeminiTTSError(f"Gemini TTS HTTP {response.status_code}", code)
+    # Transient rate limits get bounded retries; the rest go to Kokoro/Edge.
+    # Never print the API's free-text errors (may contain user content).
+    response = _post_with_cooldown(transport, payload, api_key, timeout)
     try:
         audio = _audio_from_response(response.json())
     except (ValueError, AttributeError) as exc:
