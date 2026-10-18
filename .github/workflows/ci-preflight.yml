@@ -34,7 +34,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends ffmpeg
-          pip install -r requirements.txt
+          pip install -r requirements.txt pynacl
       - name: Check Python syntax
         run: |
           python -m compileall -q -f generate_assets.py spoken_hindi_qc.py editing_style_engine.py editing_director.py color_continuity.py scripts
@@ -57,7 +57,7 @@ jobs:
         run: |
           set -euo pipefail
           for file in \
-            test_canva_image_provider.py test_gemini_tts.py test_image_framing.py test_music_engine.py test_editing_director.py \
+            test_canva_image_provider.py test_canva_token_handoff.py test_gemini_tts.py test_image_framing.py test_music_engine.py test_editing_director.py \
             test_story_visual_relevance.py \
             test_p1_storytelling.py test_preflight_payload.py test_editing_performance_learning.py \
             test_render_style_feedback.py test_editing_style_engine.py \
