@@ -1,5 +1,7 @@
 """Offline tests for encrypted Canva access-token transfer between jobs."""
 import os
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from unittest import TestCase
@@ -13,6 +15,20 @@ from scripts.canva_token_handoff import (
 
 
 class CanvaTokenHandoffTests(TestCase):
+    def test_refresh_entrypoint_imports_without_pythonpath(self):
+        """Actions uses python scripts/refresh_canva_token.py, not -m scripts...."""
+        env = {k: v for k, v in os.environ.items() if not k.startswith("CANVA_")}
+        env.pop("PYTHONPATH", None)
+        env.pop("REPO_SECRETS_TOKEN", None)
+        root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, "scripts/refresh_canva_token.py"],
+            cwd=root, env=env, capture_output=True, text=True, timeout=10,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Missing CANVA_CLIENT_ID", result.stderr)
+        self.assertNotIn("ModuleNotFoundError", result.stderr)
+
     def test_encrypted_token_roundtrip_without_plaintext_leak(self):
         secret = "GitHub-PAT-for-tests-only-" + "x"*40
         access = "canva-access-token-for-tests"
