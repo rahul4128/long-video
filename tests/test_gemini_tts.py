@@ -184,7 +184,7 @@ class GeminiNarrationTests(unittest.TestCase):
         with patch.dict(os.environ, {"GEMINI_TTS_MAX_API_ATTEMPTS": "2"}):
             with self.assertRaises(GeminiTTSError) as e:
                 generate_gemini_audio("नमस्ते", "unused.mp3", api_key="key", session=session)
-        self.assertEqual(e.exception.code, "request_budget_exhausted")
+        self.assertEqual(e.exception.code, "quota_exceeded")
         self.assertEqual(len(session.requests), 2)
 
     def test_only_tts_models_are_allowed(self):
