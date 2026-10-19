@@ -114,14 +114,14 @@ def _relative_issues(event, text, anchor, start, end, publish_day, label):
                 issues.append(f"{label}: {event} is described as upcoming, but starts on {start}")
             # "कल विजयदशमी है" or "विजयदशमी कल है" (not generic 'कल याद करेंगे').
             prefix_tomorrow = re.search(r"(?:कल|tomorrow)\s*$", left[-14:])
-            suffix_tomorrow = re.match(r"\s*(?:कल|tomorrow)\b?", right[:13])
+            suffix_tomorrow = re.match(r"\s*(?:कल|tomorrow)(?:\b|$)", right[:13])
             near_tomorrow = prefix_tomorrow or suffix_tomorrow
             if near_tomorrow and not YESTERDAY.search(nearby):
                 if PRESENT.search(right[:55]) or PRESENT.search(left[-28:]):
                     if not (start <= publish_day + timedelta(days=1) <= end):
                         issues.append(f"{label}: 'tomorrow' for {event} conflicts with event dates {start}..{end}")
             prefix_today = re.search(r"(?:आज|today)\s*$", left[-14:])
-            suffix_today = re.match(r"\s*(?:आज|today)\b?", right[:14])
+            suffix_today = re.match(r"\s*(?:आज|today)(?:\b|$)", right[:14])
             near_today = prefix_today or suffix_today
             if near_today and not (start <= publish_day <= end):
                 issues.append(f"{label}: 'today' for {event} conflicts with event dates {start}..{end}")
