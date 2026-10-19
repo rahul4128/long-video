@@ -101,3 +101,45 @@ def preserve_full_subject(path, aspect_ratio):
     finally:
         if os.path.exists(temp):
             os.remove(temp)
+
+
+
+def video_framing_issue(path, aspect_ratio):
+    """Reject incompatible or pre-letterboxed source video before Shorts render.
+
+    A 9:16 MP4 can itself contain a 16:9 frame surrounded by black. ffprobe
+    dimensions alone will miss this; inspect a sampled source frame as well.
+    This is a technical framing check, not a semantic/anatomy quality check.
+    """
+    if aspect_ratio not in CANVAS:
+        raise ValueError("Unsupported aspect ratio: " + str(aspect_ratio))
+    if not os.path.isfile(path):
+        return "video missing"
+    try:
+        metadata = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height", "-of", "json", str(path)],
+            capture_output=True, text=True, timeout=15, check=True,
+        )
+        stream = (json.loads(metadata.stdout).get("streams") or [{}])[0]
+        width = int(stream.get("width") or 0)
+        height = int(stream.get("height") or 0)
+        if width < 240 or height < 240:
+            return "invalid or undersized video dimensions"
+        target_w, target_h = CANVAS[aspect_ratio]
+        if abs((width / height) / (target_w / target_h) - 1.0) > 0.15:
+            return f"wrong video aspect ratio ({width}x{height}; expected {aspect_ratio})"
+        fd, snapshot = tempfile.mkstemp(suffix=".jpg", prefix="video_frame_")
+        os.close(fd)
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-v", "error", "-ss", "0.4", "-i", str(path),
+                 "-frames:v", "1", "-q:v", "3", snapshot],
+                capture_output=True, timeout=20, check=True,
+            )
+            return framing_issue(snapshot, aspect_ratio)
+        finally:
+            if os.path.isfile(snapshot):
+                os.remove(snapshot)
+    except (OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError):
+        return "unreadable video framing"
