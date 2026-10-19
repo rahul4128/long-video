@@ -25,7 +25,7 @@ from content_qc import validate_payload, fact_check_items
 from visual_qc import assess_sequence, prioritized_repair_tasks
 from scripts.visual_evidence import detect_instructional_category, is_generic_stock_query
 from scripts.visual_relevance_gate import strong_stock_match, named_deity_requires_verified_footage
-from scripts.image_framing import framing_issue, preserve_full_subject
+from scripts.image_framing import framing_issue, preserve_full_subject, video_framing_issue
 from scripts.canva_image_provider import CanvaImageError, generate_canva_image
 from storyteller import build_prosody_map, prepare_storyteller_text
 from hindi_text import to_spoken_hindi, hindi_display_text, pick_hindi, text_free_prompt, has_latin, best_hindi_title
@@ -1710,7 +1710,23 @@ def select_best_visual_candidate(queries: list, beat: dict, beat_prompt: str,
     )
 
     for candidate in viable:
+        # Shorts must not select a horizontal source and letterbox it inside
+        # the 9:16 reel. Unknown dimensions are checked after downloading.
+        width = int(candidate.get("width") or 0)
+        height = int(candidate.get("height") or 0)
+        if orientation == "portrait" and width > 0 and height > 0 and width >= height:
+            print(f"    🛑 Reject horizontal stock for Shorts: {width}x{height}", flush=True)
+            continue
         if _download_ranked_candidate(candidate, dest_path):
+            if orientation == "portrait":
+                issue = video_framing_issue(dest_path, "9:16")
+                if issue:
+                    print(f"    🛑 Reject Shorts clip with invalid framing: {issue}", flush=True)
+                    try:
+                        os.remove(dest_path)
+                    except OSError:
+                        pass
+                    continue
             return candidate
 
     return {}
@@ -2173,7 +2189,7 @@ def _canva_image_budget() -> int:
 
 
 def _try_canva_image(prompt: str, dest: str, aspect_ratio: str) -> bool:
-    """Optional last-resort image provider, capped across concurrent shots."""
+    """Capped credit-bearing Canva image generation, usable first or last."""
     global _CANVA_IMAGES_REQUESTED
     if not _canva_image_enabled() or not _ai_provider_allowed("canva"):
         return False
@@ -2558,8 +2574,24 @@ def generate_ai_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9",
 
     generated = False
 
-    # 1. Prefer services with real width/height controls.
-    if _ai_provider_allowed("huggingface"):
+    # Canva is primary for opted-in image generation, but remains bounded by
+    # CANVA_IMAGE_MAX_PER_RUN (default 1 credit-bearing request per run).
+    # Do not charge Canva again after a failed/misframed first attempt.
+    canva_first = (
+        allow_canva and _canva_image_enabled()
+        and os.getenv("CANVA_IMAGE_PRIORITY", "first").strip().lower() == "first"
+        and _ai_provider_allowed("canva")
+    )
+    canva_attempted = False
+    if canva_first:
+        canva_attempted = True
+        ok = _try_canva_image(prompt, dest_path, aspect_ratio)
+        if ok and frame_ok():
+            generated = True
+            print("  ✅ Canva-first narration-specific image accepted", flush=True)
+
+    # Fall back to native-ratio providers before square-image emergency backup.
+    if not generated and _ai_provider_allowed("huggingface"):
         ok = generate_huggingface_image(prompt, dest_path, aspect_ratio=aspect_ratio)
         ok = bool(ok and frame_ok())
         _ai_provider_record("huggingface", ok)
@@ -2607,9 +2639,9 @@ def generate_ai_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9",
             generated = True
             print("  ✅ Framing-safe AI image from Cloudflare backup", flush=True)
 
-    # 3. Canva Connect API preview: last fallback, explicit opt-in and
-    # fixed per-run credit cap. Do not reuse generic/brown local placeholders.
-    if not generated and allow_canva and _canva_image_enabled() and _ai_provider_allowed("canva"):
+    # Backwards-compatible Canva-last mode when CANVA_IMAGE_PRIORITY=last.
+    # Explicit opt-in and the same strict per-run AI-credit cap still apply.
+    if not generated and not canva_attempted and allow_canva and _canva_image_enabled() and _ai_provider_allowed("canva"):
         ok = _try_canva_image(prompt, dest_path, aspect_ratio)
         ok = bool(ok and frame_ok())
         if ok:
