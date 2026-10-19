@@ -31,17 +31,17 @@ EVENT_ALIASES = {
 # Sentence patterns must mention the event itself; generic "after the festival"
 # isn't enough to infer which festival is meant.
 AFTER = re.compile(
-    r"(?:के\\s+बाद|हो\\s+गया|हो\\s+गई|खत्म|समाप्त|बीत\\s+गए|बीत\\s+गई|"
-    r"पूरा\\s+हो\\s+गया|पूरी\\s+हो\\s+गई|after|post[- ]|has ended|is over)",
+    r"(?:के\s+बाद|हो\s+गया|हो\s+गई|खत्म|समाप्त|बीत\s+गए|बीत\s+गई|"
+    r"पूरा\s+हो\s+गया|पूरी\s+हो\s+गई|after|post[- ]|has ended|is over)",
     re.IGNORECASE,
 )
-BEFORE = re.compile(r"(?:के\\s+पहले|से\\s+पहले|before|आने\\s+वाला|आने\\s+वाली)", re.IGNORECASE)
+BEFORE = re.compile(r"(?:के\s+पहले|से\s+पहले|before|आने\s+वाला|आने\s+वाली)", re.IGNORECASE)
 TODAY = re.compile(r"(?:आज|today)", re.IGNORECASE)
 TOMORROW = re.compile(r"(?:कल|tomorrow)", re.IGNORECASE)
-YESTERDAY = re.compile(r"(?:बीते\\s+कल|yesterday)", re.IGNORECASE)
-PRESENT = re.compile(r"(?:है|होगा|होगी|मनाएंगे|मनाया\\s+जाएगा|is|will be)", re.IGNORECASE)
+YESTERDAY = re.compile(r"(?:बीते\s+कल|yesterday)", re.IGNORECASE)
+PRESENT = re.compile(r"(?:है|होगा|होगी|मनाएंगे|मनाया\s+जाएगा|is|will be)", re.IGNORECASE)
 FINAL = re.compile(r"(?:आखिरी|अंतिम|final|last day)", re.IGNORECASE)
-SENTENCES = re.compile(r"[।!?\\n]+|(?<=\\.)\\s+")
+SENTENCES = re.compile(r"[।!?\n]+|(?<=\.)\s+")
 
 
 def _iso(value):
@@ -102,10 +102,10 @@ def _relative_issues(event, text, anchor, start, end, publish_day, label):
             nearby = _nearby(sentence, match.span())
             # e.g. विजयदशमी के बाद / नवरात्रि खत्म / after Vijayadashami.
             nearby_after = AFTER.search(right[:40])
-            before_after = re.search(r"(?:after|post[- ])\\s*$", left[-15:])
+            before_after = re.search(r"(?:after|post[- ])\s*$", left[-15:])
             past_nine_days = (
                 event == "sharad-navratri-2026"
-                and re.search(r"नौ\\s+दिन|नौ\\s+रात|9\\s+दिन|9\\s+रात", right[:25])
+                and re.search(r"नौ\s+दिन|नौ\s+रात|9\s+दिन|9\s+रात", right[:25])
                 and AFTER.search(right[:65])
             )
             if (nearby_after or before_after or past_nine_days) and publish_day <= end:
@@ -113,15 +113,15 @@ def _relative_issues(event, text, anchor, start, end, publish_day, label):
             if BEFORE.search(right[:25]) and publish_day > start:
                 issues.append(f"{label}: {event} is described as upcoming, but starts on {start}")
             # "कल विजयदशमी है" or "विजयदशमी कल है" (not generic 'कल याद करेंगे').
-            prefix_tomorrow = re.search(r"(?:कल|tomorrow)\\s*$", left[-14:])
-            suffix_tomorrow = re.match(r"\\s*(?:कल|tomorrow)\\b?", right[:13])
+            prefix_tomorrow = re.search(r"(?:कल|tomorrow)\s*$", left[-14:])
+            suffix_tomorrow = re.match(r"\s*(?:कल|tomorrow)\b?", right[:13])
             near_tomorrow = prefix_tomorrow or suffix_tomorrow
             if near_tomorrow and not YESTERDAY.search(nearby):
                 if PRESENT.search(right[:55]) or PRESENT.search(left[-28:]):
                     if not (start <= publish_day + timedelta(days=1) <= end):
                         issues.append(f"{label}: 'tomorrow' for {event} conflicts with event dates {start}..{end}")
-            prefix_today = re.search(r"(?:आज|today)\\s*$", left[-14:])
-            suffix_today = re.match(r"\\s*(?:आज|today)\\b?", right[:14])
+            prefix_today = re.search(r"(?:आज|today)\s*$", left[-14:])
+            suffix_today = re.match(r"\s*(?:आज|today)\b?", right[:14])
             near_today = prefix_today or suffix_today
             if near_today and not (start <= publish_day <= end):
                 issues.append(f"{label}: 'today' for {event} conflicts with event dates {start}..{end}")
@@ -167,7 +167,7 @@ def validate(episode, *, publish_date=None, calendar=None):
     # otherwise it cannot be used as a 'verified' date assertion.
     meta = episode.get("_meta") or {}
     basis = str(meta.get("decisionBasis") or "")
-    asserted = re.search(r"\\bEVENT_DATE\\s*:\\s*(\\d{4}-\\d{2}-\\d{2})", basis)
+    asserted = re.search(r"\bEVENT_DATE\s*:\s*(\d{4}-\d{2}-\d{2})", basis)
     if asserted and checked:
         day = _iso(asserted.group(1))
         if not any(sources[event][0] <= day <= sources[event][1] for event in set(checked)):
