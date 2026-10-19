@@ -119,6 +119,7 @@ jobs:
           NEW_PIPELINE: ${{ inputs.pipeline || 'canva-updated-flow' }}
           REPLAY_RUN_ID: ${{ inputs.reuse_run_id || '' }}
           REVIEW_APPROVED: ${{ inputs.review_approved || 'false' }}
+          PUBLICATION_DATE_IST: ${{ inputs.publish_date_ist || '' }}
         run: python scripts/preflight_payload.py
 
       - name: Store approved story before running tests or generating paid media
