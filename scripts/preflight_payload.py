@@ -11,6 +11,8 @@ import os
 from pathlib import Path
 import re
 
+from scripts.festival_date_gate import validate_festival_date_claims
+
 
 def prepare(env=None, replay_path=None):
     env = env or os.environ
@@ -69,6 +71,18 @@ def prepare(env=None, replay_path=None):
         raise ValueError("Approved story must have both title fields")
     if not isinstance(pipeline, str) or not re.fullmatch(r"[A-Za-z0-9_-]{3,80}", pipeline):
         raise ValueError("Invalid or missing original pipeline label")
+    # Hard gate before ANY paid TTS/images or render. A previously cached story
+    # is rechecked on each run because 'today/tomorrow/after' can become stale.
+    # The date is set by runner/explicit operator, never from LLM-generated copy.
+    date_check = validate_festival_date_claims(
+        episode, publish_date=str(env.get("PUBLICATION_DATE_IST") or "").strip() or None
+    )
+    if not date_check["ok"]:
+        detail = "; ".join(date_check["issues"][:6])
+        raise ValueError(
+            f"Festival-date preflight BLOCKED for {date_check['publish_date_ist']}: {detail}. "
+            "Revise the date-sensitive story and obtain QA approval before paid rendering."
+        )
     if not pipeline.startswith("visual-director-v2-"):
         # Manual tests may have other labels; do not assign them a measured
         # channel style unless the original Make run was explicitly scoped.
@@ -82,6 +96,7 @@ def prepare(env=None, replay_path=None):
         "version": 1, "pipeline": pipeline,
         "payload": approved_json, "payload_sha256": digest,
         "source_run_id": source_run,
+        "festival_date_check": date_check,
     }
     return archive
 
@@ -91,6 +106,11 @@ def main():
     out = Path("out/replay_inputs.json")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(item, ensure_ascii=False), encoding="utf-8")
+    Path("out/festival_date_qc.json").write_text(
+        json.dumps(item["festival_date_check"], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    print("Festival-date preflight: PASS for " + item["festival_date_check"]["publish_date_ist"])
     output_file = os.environ.get("GITHUB_OUTPUT")
     if output_file:
         with open(output_file, "a", encoding="utf-8") as fh:
