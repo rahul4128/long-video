@@ -10,7 +10,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from image_framing import framing_issue
+from image_framing import framing_issue, video_framing_issue
 from visual_relevance_gate import visual_relevance_issues
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -57,6 +57,13 @@ def verify_shot(kind, scene_num, shot):
                 raise ValueError("zero video duration")
         except (OSError, subprocess.CalledProcessError, ValueError, json.JSONDecodeError) as exc:
             raise ValueError(f"{kind} scene {scene_num}: unreadable MP4 {filename}: {exc}") from exc
+        if kind == "Shorts":
+            issue = video_framing_issue(str(path), "9:16")
+            if issue:
+                raise ValueError(
+                    f"Shorts scene {scene_num}: video is not full-bleed portrait "
+                    f"({filename}): {issue}"
+                )
 
 
 from visual_evidence import (
