@@ -68,6 +68,10 @@ on:
         required: false
         type: boolean
         default: false
+      publish_date_ist:
+        description: 'Optional planned publication date YYYY-MM-DD (Asia/Kolkata); defaults to actual render day'
+        required: false
+        type: string
 
 concurrency:
   group: canva-token-rotation
@@ -126,6 +130,24 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # An LLM PASS is not festival-date evidence. Reject contradicted 'today',
+      # 'tomorrow', 'after', or last-day claims BEFORE any image/TTS credits.
+      # The original story is cached above even when this check rejects it.
+      - name: Verify festival-relative dates before paid media generation
+        if: ${{ !inputs.preflight_only || inputs.payload != '' || inputs.reuse_run_id != '' }}
+        env:
+          TARGET_PUBLISH_DATE_IST: ${{ inputs.publish_date_ist || '' }}
+        run: python -m scripts.validate_festival_timing --replay out/replay_inputs.json
+
+      - name: Save independent festival-date QC report for review
+        if: ${{ always() && (!inputs.preflight_only || inputs.payload != '' || inputs.reuse_run_id != '') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: festival-date-qc-${{ github.run_id }}
+          path: out/festival_date_qc.json
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Set up Python for inexpensive regression checks
         uses: actions/setup-python@v7
         with:
@@ -158,7 +180,7 @@ jobs:
           for name in \
             test_image_framing.py test_canva_image_provider.py test_canva_token_handoff.py test_gemini_tts.py test_music_engine.py test_editing_director.py \
             test_story_visual_relevance.py \
-            test_p1_storytelling.py test_preflight_payload.py test_editing_performance_learning.py \
+            test_p1_storytelling.py test_preflight_payload.py test_festival_timing.py test_editing_performance_learning.py \
             test_render_style_feedback.py test_editing_style_engine.py \
             test_verified_edit_skills.py test_color_continuity.py \
             test_master_final_audio.py test_validate_final_audio.py; do
@@ -269,7 +291,7 @@ jobs:
           path: out
 
       - name: Static Python syntax check
-        run: python -m py_compile scripts/canva_token_handoff.py scripts/gemini_tts.py scripts/canva_image_provider.py content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py editing_style_engine.py color_continuity.py scripts/validate_color_continuity.py scripts/master_final_audio.py scripts/validate_final_audio.py spoken_hindi_qc.py scripts/visual_relevance_gate.py scripts/visual_storyboard.py scripts/build_editing_style_signals.py scripts/render_style_attribution.py scripts/ingest_editing_feedback.py
+        run: python -m py_compile scripts/validate_festival_timing.py scripts/canva_token_handoff.py scripts/gemini_tts.py scripts/canva_image_provider.py content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py editing_style_engine.py color_continuity.py scripts/validate_color_continuity.py scripts/master_final_audio.py scripts/validate_final_audio.py spoken_hindi_qc.py scripts/visual_relevance_gate.py scripts/visual_storyboard.py scripts/build_editing_style_signals.py scripts/render_style_attribution.py scripts/ingest_editing_feedback.py
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v7
