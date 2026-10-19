@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 import unittest
 
-from scripts.image_framing import framing_issue, image_dimensions, preserve_full_subject
+from scripts.image_framing import framing_issue, image_dimensions, preserve_full_subject, video_framing_issue
 
 
 def frame(path, video_filter):
@@ -50,6 +50,37 @@ class ImageFramingTests(unittest.TestCase):
             check=True, capture_output=True, timeout=30,
         )
         self.assertIn("embedded horizontal letterbox", framing_issue(p, "9:16"))
+
+
+    def test_native_portrait_video_is_valid(self):
+        p = self.path("portrait.mp4")
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+             "-i", "testsrc2=s=360x640:d=1", "-t", "1", "-c:v", "mpeg4", p],
+            check=True, capture_output=True, timeout=35,
+        )
+        self.assertIsNone(video_framing_issue(p, "9:16"))
+
+    def test_landscape_source_video_rejected_for_shorts(self):
+        p = self.path("landscape.mp4")
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+             "-i", "testsrc2=s=640x360:d=1", "-t", "1", "-c:v", "mpeg4", p],
+            check=True, capture_output=True, timeout=35,
+        )
+        self.assertIn("wrong video aspect ratio", video_framing_issue(p, "9:16"))
+
+    def test_vertical_video_with_horizontal_strip_rejected(self):
+        p = self.path("embedded_strip.mp4")
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error",
+             "-f", "lavfi", "-i", "color=c=black:s=360x640:d=1",
+             "-f", "lavfi", "-i", "testsrc2=s=360x202:d=1",
+             "-filter_complex", "[0:v][1:v]overlay=0:219[out]",
+             "-map", "[out]", "-t", "1", "-c:v", "mpeg4", p],
+            check=True, capture_output=True, timeout=35,
+        )
+        self.assertIn("embedded horizontal letterbox", video_framing_issue(p, "9:16"))
 
     def test_safe_backup_reframe_never_keeps_square_dimensions(self):
         p = self.path("backup.jpg")
