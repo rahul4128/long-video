@@ -28,6 +28,56 @@ class PreflightPayloadTests(unittest.TestCase):
         self.assertIn("run: python -m scripts.preflight_payload", workflow)
         self.assertNotIn("run: python scripts/preflight_payload.py", workflow)
 
+    def test_manual_story_file_option_replaces_large_payload_paste(self):
+        workflow = (Path(__file__).resolve().parents[1] / ".github" /
+                    "workflows" / "render.yml").read_text(encoding="utf-8")
+        self.assertIn("      story_file:", workflow)
+        self.assertIn("STORY_FILE: ${{ inputs.story_file || '' }}", workflow)
+        self.assertIn("inputs.story_file != ''", workflow)
+
+    def test_october_review_story_replays_without_make_credits(self):
+        checked = prepare({
+            "STORY_FILE": "vijayadashami_2026_10_20_review.json",
+            "NEW_PIPELINE": "visual-director-v2-oflifepart31",
+            "PUBLICATION_DATE_IST": "2026-10-20",
+            "REVIEW_APPROVED": "false",
+        })
+        episode = json.loads(checked["payload"])
+        self.assertEqual(len(episode["long_video"]["scenes"]), 6)
+        self.assertEqual(len(episode["shorts"]["scenes"]), 5)
+        self.assertTrue(checked["festival_date_check"]["ok"])
+        self.assertEqual(checked["pipeline"], "visual-director-v2-oflifepart31")
+        self.assertFalse(checked["source_run_id"])
+
+    def test_original_uncorrected_story_remains_blocked_by_dates(self):
+        with self.assertRaisesRegex(ValueError, "Festival-date preflight BLOCKED"):
+            prepare({
+                "STORY_FILE": "vijayadashami_2026_10_20_original.json",
+                "NEW_PIPELINE": "visual-director-v2-oflifepart31",
+                "PUBLICATION_DATE_IST": "2026-10-20",
+            })
+
+    def test_story_file_input_cannot_escape_repository_folder(self):
+        for filename in ("../../.git/config", "../secrets.json", "/tmp/test.json", "bad.json/"):
+            with self.subTest(filename=filename):
+                with self.assertRaisesRegex(ValueError, "story_file must be"):
+                    prepare({"STORY_FILE": filename, "NEW_PIPELINE": "visual-director-v2-oflifepart31"})
+
+    def test_story_file_input_never_automatically_publishes(self):
+        with self.assertRaisesRegex(ValueError, "review-only"):
+            prepare({
+                "STORY_FILE": "vijayadashami_2026_10_20_review.json",
+                "REVIEW_APPROVED": "true",
+                "NEW_PIPELINE": "visual-director-v2-oflifepart31",
+            })
+
+    def test_truncated_payload_reports_recovery_hint(self):
+        with self.assertRaisesRegex(ValueError, "story_file"):
+            prepare({
+                "NEW_DISPATCH_PAYLOAD": '{"seo":{"thumbnailText":"' + "x" * 1000,
+                "NEW_PIPELINE": "visual-director-v2-oflifepart31",
+            })
+
     def test_raw_make_story_is_cached(self):
         src = json.dumps(story(), ensure_ascii=False)
         x = prepare({"NEW_DISPATCH_PAYLOAD": src, "NEW_PIPELINE": "visual-director-v2-oflifepart31"})
