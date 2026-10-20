@@ -96,6 +96,26 @@ class PreflightPayloadTests(unittest.TestCase):
             )
         self.assertEqual(narration["status"], "clear")
 
+    def test_failed_run_191_original_stays_blocked_but_corrected_replay_passes_both_date_gates(self):
+        with self.assertRaisesRegex(ValueError, "Festival-date preflight BLOCKED"):
+            prepare({
+                "STORY_FILE": "vijayadashami_2026_10_20_run191_original.json",
+                "NEW_PIPELINE": "visual-director-v2-oflifepart31",
+                "PUBLICATION_DATE_IST": "2026-10-20",
+                "REVIEW_APPROVED": "false",
+            })
+        verified = prepare({
+            "STORY_FILE": "vijayadashami_2026_10_20_run191_review.json",
+            "NEW_PIPELINE": "visual-director-v2-oflifepart31",
+            "PUBLICATION_DATE_IST": "2026-10-20",
+            "REVIEW_APPROVED": "false",
+        })
+        story = json.loads(verified["payload"])
+        self.assertEqual((len(story["long_video"]["scenes"]), len(story["shorts"]["scenes"])), (6, 5))
+        self.assertTrue(verified["festival_date_check"]["ok"])
+        second = validate_festival_timing(story, publish_date="2026-10-20")
+        self.assertTrue(second["ok"], second["issues"])
+
     def test_original_uncorrected_story_remains_blocked_by_dates(self):
         with self.assertRaisesRegex(ValueError, "Festival-date preflight BLOCKED"):
             prepare({
