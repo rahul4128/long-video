@@ -1,4 +1,4 @@
-"""Pre-render framing checks for AI stills (no paid services or Python imaging dependencies)."""
+"""Pre-render framing checks for AI stills, with CPU-only subject-safe extension."""
 import json
 import os
 import subprocess
@@ -66,42 +66,55 @@ def framing_issue(path, aspect_ratio):
 
 
 def preserve_full_subject(path, aspect_ratio):
-    """Last-resort aspect correction without cropping/stretching the foreground.
+    """Extend a square/landscape source into a full-size portrait/landscape frame.
 
-    If the preferred native-ratio providers are unavailable, an incompatible
-    still is placed over its own softly extended backdrop. This is deliberately
-    less ideal than native 9:16 art, but prevents severed crowns, hands and feet.
+    The whole foreground stays visible (important for hands, faces and deity
+    identity); a softly blurred, color-matched background fills the frame.
+    Feathering the foreground boundary avoids the obvious horizontal strip
+    produced by a hard image-on-blur overlay. No new image-generation credits.
     """
     if aspect_ratio not in CANVAS or not os.path.exists(path):
         return False
+    from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageDraw
+
     width, height = CANVAS[aspect_ratio]
     folder = os.path.dirname(os.path.abspath(path)) or "."
     fd, temp = tempfile.mkstemp(prefix="framed_", suffix=".jpg", dir=folder)
     os.close(fd)
     try:
-        graph = (
-            "[0:v]split=2[backsrc][frontsrc];"
-            f"[backsrc]scale={width}:{height}:force_original_aspect_ratio=increase,"
-            f"crop={width}:{height},boxblur=24:2[back];"
-            f"[frontsrc]scale={width}:{height}:force_original_aspect_ratio=decrease[front];"
-            "[back][front]overlay=(W-w)/2:(H-h)/2:shortest=1,"
-            "format=yuv420p[out]"
-        )
-        subprocess.run(
-            ["ffmpeg", "-y", "-v", "error", "-i", str(path), "-filter_complex",
-             graph, "-map", "[out]", "-frames:v", "1", "-q:v", "3", temp],
-            capture_output=True, timeout=50, check=True,
-        )
+        with Image.open(path) as original:
+            image = ImageOps.exif_transpose(original).convert("RGB")
+            resampling = Image.Resampling.LANCZOS
+            backdrop = ImageOps.fit(image, (width, height), method=resampling)
+            backdrop = ImageEnhance.Color(backdrop).enhance(0.88)
+            backdrop = ImageEnhance.Brightness(backdrop).enhance(0.87)
+            backdrop = backdrop.filter(
+                ImageFilter.GaussianBlur(radius=max(16, int(min(width, height) * 0.057)))
+            )
+            foreground = ImageOps.contain(image, (width, height), method=resampling)
+            left = (width - foreground.width) // 2
+            top = (height - foreground.height) // 2
+            feather = max(8, int(min(foreground.size) * 0.033))
+            mask = Image.new("L", foreground.size, 0)
+            draw = ImageDraw.Draw(mask)
+            draw.rectangle(
+                (feather, feather,
+                 max(feather, foreground.width - feather - 1),
+                 max(feather, foreground.height - feather - 1)),
+                fill=255,
+            )
+            mask = mask.filter(ImageFilter.GaussianBlur(radius=max(5, feather * 0.68)))
+            backdrop.paste(foreground, (left, top), mask)
+            backdrop.save(temp, "JPEG", quality=93, subsampling=0)
         if image_dimensions(temp) != (width, height):
             return False
         os.replace(temp, path)
         return True
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, ValueError):
         return False
     finally:
         if os.path.exists(temp):
             os.remove(temp)
-
 
 
 def video_framing_issue(path, aspect_ratio):
