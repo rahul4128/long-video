@@ -18,6 +18,12 @@ def prepare(env=None, replay_path=None):
     env = env or os.environ
     previous = str(env.get("REPLAY_RUN_ID") or "").strip()
     story_file = str(env.get("STORY_FILE") or "").strip()
+    # Existing GitHub Run workflow forms may not expose new branch-only
+    # workflow_dispatch inputs. Enter @filename.json in the *existing* payload
+    # field as a safe alternative to pasting 10k+ characters of story JSON.
+    raw_manual_payload = env.get("NEW_DISPATCH_PAYLOAD", "")
+    if not story_file and isinstance(raw_manual_payload, str) and raw_manual_payload.strip().startswith("@"):
+        story_file = raw_manual_payload.strip()[1:]
     if previous and story_file:
         raise ValueError("Choose either reuse_run_id or story_file, not both")
     if previous:
