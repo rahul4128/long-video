@@ -35,6 +35,23 @@ class PreflightPayloadTests(unittest.TestCase):
         self.assertIn("STORY_FILE: ${{ inputs.story_file || '' }}", workflow)
         self.assertIn("inputs.story_file != ''", workflow)
 
+    def test_short_at_filename_reference_works_in_legacy_payload_field(self):
+        result = prepare({
+            "NEW_DISPATCH_PAYLOAD": "@vijayadashami_2026_10_20_review.json",
+            "NEW_PIPELINE": "visual-director-v2-oflifepart31",
+            "PUBLICATION_DATE_IST": "2026-10-20",
+            "REVIEW_APPROVED": "false",
+        })
+        episode = json.loads(result["payload"])
+        self.assertEqual(episode["seo_metadata"]["shorts_title"],
+                         "दशहरे पर शस्त्र पूजा की अनदेखी परंपरा")
+        self.assertTrue(result["festival_date_check"]["ok"])
+
+    def test_short_at_filename_reference_never_bypasses_path_safety(self):
+        with self.assertRaisesRegex(ValueError, "story_file must be"):
+            prepare({"NEW_DISPATCH_PAYLOAD": "@../../secrets.json",
+                     "NEW_PIPELINE": "visual-director-v2-oflifepart31"})
+
     def test_october_review_story_replays_without_make_credits(self):
         checked = prepare({
             "STORY_FILE": "vijayadashami_2026_10_20_review.json",
