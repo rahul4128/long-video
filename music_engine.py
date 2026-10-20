@@ -277,6 +277,11 @@ def _synthetic_pad(mood, dest):
 
 def _select_track(mood, target, approved_dir, remote_enabled, budget):
     """Try CC0 catalogs, approved local tracks, then a self-generated bed."""
+    # Prefer creator-approved YouTube/Instagram tracks with SHA256 evidence.
+    # A remote CC0 label alone cannot prove the actual recording rights.
+    for candidate in _approved_candidates(mood, approved_dir):
+        if _transcode(candidate["_local_path"], target):
+            return {k: v for k, v in candidate.items() if k != "_local_path"}
     if remote_enabled and budget["searches"] < 6:
         for supplier in (_openverse_candidates, _wikimedia_candidates):
             if budget["searches"] >= 6:
@@ -294,9 +299,6 @@ def _select_track(mood, target, approved_dir, remote_enabled, budget):
                         return {k: v for k, v in candidate.items() if k != "download_url"}
                 finally:
                     Path(temp).unlink(missing_ok=True)
-    for candidate in _approved_candidates(mood, approved_dir):
-        if _transcode(candidate["_local_path"], target):
-            return {k: v for k, v in candidate.items() if k != "_local_path"}
     if not _synthetic_pad(mood, target):
         raise RuntimeError(f"No usable and licensed music fallback for {mood}")
     return {
@@ -318,7 +320,9 @@ def attach_music(long_scenes, shorts_scenes,
     report_file = Path(report_path)
     report_file.parent.mkdir(parents=True, exist_ok=True)
     approved = approved_dir or os.getenv("APPROVED_MUSIC_DIR") or "public/audio/music/approved"
-    remote = (os.getenv("MUSIC_REMOTE_DISCOVERY_ENABLED", "true").lower() == "true") if remote_enabled is None else remote_enabled
+    # Use verified local or self-synthesized music automatically; discovery
+    # of third-party recordings requires explicit opt-in.
+    remote = (os.getenv("MUSIC_REMOTE_DISCOVERY_ENABLED", "false").lower() == "true") if remote_enabled is None else remote_enabled
     all_scenes = list(long_scenes) + list(shorts_scenes)
     moods = list(dict.fromkeys(scene_mood(scene) for scene in all_scenes))
     tracks = {}
@@ -342,7 +346,11 @@ def attach_music(long_scenes, shorts_scenes,
         scene["musicMood"] = mood
     report = {
         "status": "review_required" if any(t["requires_review"] for t in tracks.values()) else "ready",
-        "rights_notice": "CC0 is declared by the source; verify original recording rights and platform claims before publishing.",
+        "rights_notice": (
+            "Locally synthesized or explicitly approved tracks; check final mix for Content ID conflicts."
+            if not any(t["requires_review"] for t in tracks.values())
+            else "Remote CC0 status is source-declared; verify recording rights before publishing."
+        ),
         "destinations": ["youtube", "instagram"],
         "tracks": list(tracks.values()),
         "scene_music": {
