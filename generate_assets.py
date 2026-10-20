@@ -1734,13 +1734,19 @@ def select_best_visual_candidate(queries: list, beat: dict, beat_prompt: str,
 
 def _visual_beat_prompt(scene_prompt: str, beat: dict) -> str:
     """Build one media-generation/search context string for a visual beat."""
-    searches = beat.get("queries") or []
+    searches = _visual_beat_queries(beat)
     concrete_en = next(
         (q for q in searches
          if q and re.search(r"[a-zA-Z]", str(q))
          and not is_generic_stock_query(q)),
         "",
     )
+    narration = str(beat.get("narrationText") or "").casefold()
+    # Correct a real run #186 mismatch: laptop/pen narration was illustrated
+    # with an AI-generated fruit thali because a stray food query won.
+    work_tools = any(x in narration for x in (
+        "कलम", "लैपटॉप", "औजार", "उपकरण", "laptop", "pen", "work tools"
+    ))
     parts = [
         # Hindi-only beat narration may not ground an English image generator.
         # Use the beat's concrete English subject/action before scene context.
@@ -1749,6 +1755,9 @@ def _visual_beat_prompt(scene_prompt: str, beat: dict) -> str:
         # The FIRST instruction must always specify what this *beat* narrates.
         f"PRIMARY VISUAL FOR THIS SHOT: {beat.get('narrationText', '')}",
         f"Specific on-screen subject: {beat.get('subject', '')}",
+        ("CRITICAL: show a pen, laptop, work tools or a clean desk from the "
+         "narration; no food, fruit thali, vegetables or unrelated rituals"
+         if work_tools else ""),
         f"Observable action: {beat.get('action', '')}",
         f"On-screen setting: {beat.get('setting', '')}",
         f"Episode visual context only (do not repeat if narration moved on): {scene_prompt}",
@@ -1777,6 +1786,22 @@ def _visual_beat_queries(beat: dict, fallback_query: str = "") -> list:
             continue
         if query.casefold() not in {q.casefold() for q in specific}:
             specific.append(query)
+
+    # A generated beat can contain a hallucinated query from another topic.
+    # Never let a food/fruit query override laptop, pen or workplace narration.
+    narrated = " ".join(str(beat.get(k) or "") for k in (
+        "narrationText", "subject", "action"
+    )).casefold()
+    asks_food = any(token in narrated for token in (
+        "food", "fruit", "prasad", "meal", "खाना", "खाने", "फल", "भोजन",
+        "प्रसाद", "थाली", "आहार"
+    ))
+    if not asks_food:
+        food_only = re.compile(
+            r"\b(food|fruit|salad|thali|vegetarian|vegetable|meal|dinner|"
+            r"banana|breakfast|rice|sweets)\b", flags=re.I
+        )
+        specific = [q for q in specific if not food_only.search(q)]
 
     # Put the fully contextual director scene query first when beat suggestions
     # are vague ('person looking') or contain only broad generic subjects.
