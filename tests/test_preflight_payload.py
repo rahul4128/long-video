@@ -20,6 +20,14 @@ def story():
 
 
 class PreflightPayloadTests(unittest.TestCase):
+    def test_workflow_calls_preflight_as_module(self):
+        # Running `python scripts/preflight_payload.py` changes sys.path[0] to
+        # scripts/ and breaks `from scripts.festival_date_gate import ...`.
+        workflow = (Path(__file__).resolve().parents[1] / ".github" /
+                    "workflows" / "render.yml").read_text(encoding="utf-8")
+        self.assertIn("run: python -m scripts.preflight_payload", workflow)
+        self.assertNotIn("run: python scripts/preflight_payload.py", workflow)
+
     def test_raw_make_story_is_cached(self):
         src = json.dumps(story(), ensure_ascii=False)
         x = prepare({"NEW_DISPATCH_PAYLOAD": src, "NEW_PIPELINE": "visual-director-v2-oflifepart31"})
