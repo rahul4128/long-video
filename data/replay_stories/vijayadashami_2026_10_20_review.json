@@ -1,0 +1,265 @@
+{
+  "seo": {
+    "cta": "क्या आपने आज अपने काम के औजारों को याद किया? कमेंट में बताएं।",
+    "chapterPlan": [
+      "दहन का शोर और शांति का अभाव",
+      "शस्त्र पूजा का ऐतिहासिक विकास",
+      "आज के संदर्भ में औजारों का महत्व",
+      "घर पर कैसे करें आभार प्रदर्शन",
+      "सकारात्मकता का सरल समापन",
+      "निष्कर्ष और अगली परंपरा"
+    ],
+    "thumbnailText": "दशहरा: दहन से आगे का सच",
+    "titleVariants": [
+      "शस्त्र पूजा का असली अर्थ क्या है?",
+      "विजयदशमी: दहन से आगे का सच",
+      "दशहरे पर औजारों को क्यों पूजते हैं?"
+    ],
+    "primaryKeyword": "शस्त्र पूजा का महत्व",
+    "disclosureNeeded": true,
+    "secondaryKeywords": [
+      "विजयदशमी परंपरा",
+      "दशहरा महत्व",
+      "औजारों की पूजा",
+      "भारतीय त्योहार",
+      "कार्य के प्रति सम्मान"
+    ],
+    "thumbnailConcepts": [
+      {
+        "visualSubject": "व्यक्ति घर के औजार या कलम की सफाई करते हुए",
+        "emotionAction": "शांति और सम्मान",
+        "composition": "क्लोज-अप शॉट, पृष्ठभूमि में जलता हुआ दीया",
+        "text": "दशहरा: दहन से आगे का सच"
+      }
+    ]
+  },
+  "_meta": {
+    "track": "A",
+    "category": "RELIGION_CULTURE",
+    "series_id": "VIJAYADASHAMI_TRADITION",
+    "qc_verdict": "PASS",
+    "content_role": "educational_presenter",
+    "decisionBasis": "CONTENT_BUCKET: RITUAL_EXPLAINER. PLAYLIST_NAME: व्रत और पूजा के नियम. SERIES_NAME: विजयदशमी की परंपराएं. TARGET_AUDIENCE: नवरात्रि के बाद शांति तलाश रहे दर्शक. TOPIC_LONGEVITY: HIGH. VIEWER_QUESTION: दशहरे पर औजारों की पूजा का सही अर्थ क्या है?. VIEWER_MOTIVATION: CULTURAL_CONNECTION. EVENT_DATE: 2026-10-20. PUBLISH_BEFORE: 2026-10-20. DATE_SOURCE: TIMES_OF_INDIA_RELIGION_SECTION. HOOK_0_5S: दशहरे पर रावण दहन के अलावा और क्या होता है?. RETENTION_BEATS: प्रश्न-इतिहास-व्यावहारिक तरीका-निष्कर्ष. EMOTIONAL_PAYOFF: उपकरणों के प्रति कृतज्ञता ही सच्ची पूजा है. SUBSCRIBER_REASON: त्योहार के गहरे अर्थ और परंपराओं का सरल मार्गदर्शन. RELATED_NEXT_EPISODE: शरद पूर्णिमा की तैयारी. ANALYTICS_HYPOTHESIS: त्योहार के बाद की उपयोगिता और शांति पर केंद्रित वीडियो उच्च वॉच-टाइम देंगे. SOURCE_REFERENCES: पारंपरिक शास्त्र पूजा के विकास का ऐतिहासिक विवरण। EDIT_STYLE=presenter_explainer; EDIT_STYLE_WHY=दर्शकों को दशहरे के उत्सव के बीच एक शांत, सार्थक और व्यावहारिक परंपरा से जोड़ने की आवश्यकता है।",
+    "experiment_id": "vijayadashami-2026-10-20",
+    "agent_critique": "Winner topic checked for Pros/Cons, Fact-safety, Fatigue, and Packaging. The script focuses on the evolution of Shastra Puja to avoid rigid historical claims while providing actionable advice.",
+    "festival_angle": "day_of_event_ritual",
+    "festival_priority": "HIGH",
+    "next_episode_angle": "शरद पूर्णिमा की रात का आध्यात्मिक और स्वास्थ्य लाभ",
+    "shorts_funnel_hook": "दशहरे पर रावण दहन के अलावा एक और परंपरा क्यों निभाई जाती है?",
+    "climax_scene_number": 5,
+    "entertainment_angle": "cultural_connection",
+    "fun_with_fact_angle": "historical_evolution",
+    "viewer_journey_next": "शरद पूर्णिमा की वैज्ञानिक तैयारी",
+    "retention_adaptation": "Fast-paced cuts contrasting symbolic effigy preparations and culturally accurate tool-worship imagery.",
+    "experiment_hypothesis": "Practical ritual application after event-frenzy increases long-form watch time.",
+    "long_video_continuation": "औजारों और कार्यकुशलता के प्रति सम्मान जताने का सरल पारिवारिक तरीका।"
+  },
+  "shorts": {
+    "scenes": [
+      {
+        "text": "दशहरे पर रावण दहन के अलावा एक और परंपरा है, जिसे शायद आप भूल रहे हैं। क्या आपने शस्त्र पूजा का महत्व समझा है?",
+        "imagePrompt": "Burning effigy silhouettes in the dark night sky, dramatic cinematic, high contrast.",
+        "videoSearchQuery": "Dussehra burning effigy night",
+        "visualEntities": [
+          "effigy"
+        ],
+        "visualAttributes": [
+          "fire",
+          "night"
+        ],
+        "visualStrict": false,
+        "soundEffect": "temple_bell"
+      },
+      {
+        "text": "विजयदशमी सिर्फ रावण दहन नहीं, शस्त्र पूजा का भी दिन है। पुराने जमाने में योद्धा अपने अस्त्र पूजते थे।",
+        "imagePrompt": "Ancient Indian sword resting on a decorative stand, warm lighting, close up.",
+        "videoSearchQuery": "Indian ancient sword",
+        "visualEntities": [
+          "sword"
+        ],
+        "visualAttributes": [
+          "historical",
+          "golden"
+        ],
+        "visualStrict": false,
+        "soundEffect": "none"
+      },
+      {
+        "text": "आज के दौर में आपके शस्त्र हैं आपकी कलम, लैपटॉप या औजार। सफलता के लिए इनका सम्मान जरूरी है।",
+        "imagePrompt": "Close up of a modern laptop and fountain pen on a wooden table, soft focus.",
+        "videoSearchQuery": "Laptop and pen workspace",
+        "visualEntities": [
+          "laptop",
+          "pen"
+        ],
+        "visualAttributes": [
+          "modern",
+          "professional"
+        ],
+        "visualStrict": false,
+        "soundEffect": "none"
+      },
+      {
+        "text": "इन्हें साफ करें और अपना आभार प्रकट करें। यह कृतज्ञता आपके काम के प्रति निष्ठा बढ़ाती है।",
+        "imagePrompt": "Person carefully cleaning a book, peaceful morning light, close up of hands.",
+        "videoSearchQuery": "Hands cleaning book",
+        "visualEntities": [
+          "hands"
+        ],
+        "visualAttributes": [
+          "gentle",
+          "caring"
+        ],
+        "visualStrict": false,
+        "soundEffect": "flute_swell"
+      },
+      {
+        "text": "विजयदशमी का सच्चा अर्थ यही है। वीडियो अच्छी लगी तो सब्सक्राइब करें और नई जानकारी के लिए जुड़ें।",
+        "imagePrompt": "Smiling person at a clean, organized desk, warm sunset light, hopeful expression.",
+        "videoSearchQuery": "Person happy at work",
+        "visualEntities": [
+          "person"
+        ],
+        "visualAttributes": [
+          "happy",
+          "warm"
+        ],
+        "visualStrict": false,
+        "soundEffect": "shankh"
+      }
+    ]
+  },
+  "thumbnail": {
+    "imagePrompt": "Close up of hands cleaning a professional tool or book, warm soft diya light in background, cinematic, realistic, high detail, warm atmosphere, no text.",
+    "thumbnailText": "दशहरा: दहन से आगे का सच"
+  },
+  "long_video": {
+    "scenes": [
+      {
+        "text": "विजयदशमी के दिन रावण दहन की तैयारियों और उत्सव की रौनक पर सबका ध्यान रहता है। लेकिन क्या आपने कभी सोचा है कि दशहरे की परंपराएं सिर्फ रावण दहन तक सीमित नहीं हैं? इसी दिन कुछ परिवार अपने शस्त्रों और काम के उपकरणों का सम्मान भी करते हैं। क्या एक कलम, लैपटॉप या काम करने वाला औजार भी इस सांस्कृतिक भावना से जुड़ सकता है? आइए समझते हैं शस्त्र पूजा की परंपरा का अर्थ और इसे आज के जीवन से जोड़ने का सरल तरीका।",
+        "mediaType": "ai_image",
+        "imagePrompt": "A scene of burning effigy silhouettes, embers floating in the night sky, distant firework colors fading, transition from noise to silence, cinematic, atmospheric.",
+        "videoSearchQuery": "Dussehra bonfire aftermath",
+        "visualEntities": [
+          "effigy"
+        ],
+        "visualAttributes": [
+          "embers",
+          "night"
+        ],
+        "visualStrict": false,
+        "soundEffect": "temple_bell"
+      },
+      {
+        "text": "सदियों पहले जब समाज पूरी तरह से योद्धाओं पर निर्भर था, तब विजयदशमी पर शस्त्र पूजा का आयोजन होता था। उस समय तलवारें और ढालें ही जीवन रक्षक थीं। समय बदला और आज के आधुनिक युग में शस्त्र का अर्थ सिर्फ हथियार नहीं है। आज हमारे लिए शस्त्र वही हैं जिनसे हम अपना जीवन चलाते हैं। आपका लैपटॉप, आपका पेन, या कोई भी ऐसा उपकरण जो आपकी उन्नति का माध्यम है।",
+        "mediaType": "ai_image",
+        "imagePrompt": "Ancient Indian warrior tools contrast with modern office tools like laptop and pen, artistic blend, warm lighting, respectful arrangement.",
+        "videoSearchQuery": "Ancient swords vs modern tools",
+        "visualEntities": [
+          "sword",
+          "laptop"
+        ],
+        "visualAttributes": [
+          "historical",
+          "modern"
+        ],
+        "visualStrict": false,
+        "soundEffect": "none"
+      },
+      {
+        "text": "शस्त्र पूजा का असली अर्थ हिंसा या युद्ध नहीं है। यह कृतज्ञता दिखाने का एक तरीका है। यह एक ऐसा पल है जब आप ठहर कर उन सभी चीजों को सम्मान देते हैं जो आपकी सफलता में योगदान देती हैं। जब हम अपने कार्य के उपकरणों को पूजते हैं, तो हम वास्तव में अपने काम को ही पूज रहे होते हैं। यह परंपरा हमें जिम्मेदारी का एहसास दिलाती है और ध्यान केंद्रित करती है।",
+        "mediaType": "ai_image",
+        "imagePrompt": "Person carefully dusting off a professional workspace, books, laptop, serene and focused expression, soft morning light, respectful environment.",
+        "videoSearchQuery": "Organizing workspace thoughtfully",
+        "visualEntities": [
+          "workspace"
+        ],
+        "visualAttributes": [
+          "peaceful",
+          "clean"
+        ],
+        "visualStrict": false,
+        "soundEffect": "none"
+      },
+      {
+        "text": "अब सवाल उठता है कि इसे घर पर कैसे करें? आपको कोई बड़ी पूजा या जटिल विधि की आवश्यकता नहीं है। बस एक साफ जगह का चुनाव करें। अपने औजारों को साफ करें और उन पर चंदन का तिलक लगाएं। थोड़ा सा पुष्प चढ़ाकर अपना आभार प्रकट करें। यह क्रिया आपको याद दिलाती है कि आप अपने काम के प्रति कितने निष्ठावान हैं और आने वाले समय में आपको कैसी प्रगति करनी है।",
+        "mediaType": "ai_image",
+        "imagePrompt": "Simple home puja setup with books and professional items, small diya lit, flowers placed neatly, calm and aesthetic.",
+        "videoSearchQuery": "Simple home tool ritual",
+        "visualEntities": [
+          "diya",
+          "flowers"
+        ],
+        "visualAttributes": [
+          "calm",
+          "home"
+        ],
+        "visualStrict": false,
+        "soundEffect": "flute_swell"
+      },
+      {
+        "text": "क्या आप जानते हैं कि यही वह छोटी परंपरा है जो हमारे पूर्वजों ने दी थी ताकि हम अपने काम को न भूलें? विजयदशमी पर रावण दहन बुराई को खत्म करने का प्रतीक है, और शस्त्र पूजा काम के साधनों के प्रति सम्मान दर्शाने की एक अलग परंपरा है। यह संतुलन ही विजयदशमी का सच्चा समापन है। यह क्रिया आपके मन में काम के प्रति एक गहरी गंभीरता और आत्म-विश्वास पैदा करती है जो पूरे वर्ष साथ रहती है।",
+        "mediaType": "ai_image",
+        "imagePrompt": "Close up of a person looking at their work tools with a satisfied and motivated smile, warm indoor light, feeling of triumph and peace.",
+        "videoSearchQuery": "Motivated person working",
+        "visualEntities": [
+          "person"
+        ],
+        "visualAttributes": [
+          "satisfied",
+          "focused"
+        ],
+        "visualStrict": false,
+        "soundEffect": "none"
+      },
+      {
+        "text": "इस दशहरे पर रावण दहन के उत्सव के साथ अपने काम के साधनों को सम्मान देने का छोटा सा कदम भी उठाएं। अपने काम की चीजों को सम्मान दें, तो देखिए आपकी एकाग्रता कैसे बढ़ती है। क्या आपने आज अपने काम के औजारों को धन्यवाद दिया? हमें कमेंट में बताएं। ऐसी ही अर्थपूर्ण परंपराओं और उनके पीछे के विज्ञान को समझने के लिए हमारे साथ बने रहें और चैनल को सब्सक्राइब जरूर करें ताकि अगली कड़ी में आपको कुछ नया सीखने को मिले।",
+        "mediaType": "ai_image",
+        "imagePrompt": "Peaceful home interior at sunset, person standing at a desk with tools, aesthetic look, warm atmosphere, soft lighting.",
+        "videoSearchQuery": "sunset peaceful home workspace",
+        "visualEntities": [
+          "desk"
+        ],
+        "visualAttributes": [
+          "sunset",
+          "warm"
+        ],
+        "visualStrict": false,
+        "soundEffect": "shankh"
+      }
+    ]
+  },
+  "dispatchedAt": "2026-10-20T09:28:51+05:30",
+  "seo_metadata": {
+    "tags": [
+      "Vijayadashami",
+      "Shastra Puja",
+      "Dussehra Traditions",
+      "Indian Festivals",
+      "Ritual Significance",
+      "Cultural Understanding",
+      "Work Gratitude",
+      "Traditional Practices",
+      "Success Rituals",
+      "Post-Navratri",
+      "Spiritual Depth",
+      "Simple Rituals"
+    ],
+    "hashtags": [
+      "#Vijayadashami",
+      "#ShastraPuja",
+      "#IndianTradition",
+      "#CulturalDepth",
+      "#FestivalMeaning"
+    ],
+    "shorts_title": "दशहरे पर शस्त्र पूजा की अनदेखी परंपरा",
+    "long_video_title": "दशहरा: दहन से आगे का सच और शस्त्र पूजा का महत्व",
+    "shorts_description": "क्या रावण जलाना ही सब कुछ है? दशहरे के उस हिस्से को जानें जो आपको सफलता की दिशा में ले जाता है। सब्सक्राइब करें और जानें परंपराओं का असली अर्थ।",
+    "long_video_description": "रावण दहन तो सिर्फ शुरुआत है। आज के दिन विजयदशमी पर अपनी कार्यकुशलता और औजारों के प्रति कृतज्ञता जताने वाली परंपरा का महत्व समझें। यह वीडियो आपको दिखाएगा कि दशहरे की ऊर्जा को घर के कामों और करियर में कैसे जोड़ें। बिना किसी अंधविश्वास के, एक सरल और सम्मानजनक तरीके से शास्त्र पूजा करना सीखें। त्योहार की शांति को अपने जीवन में उतारें।"
+  },
+  "correlationId": "05e5a780-b52b-46b2-ab8f-cf76f688fa8e",
+  "shorts_thumbnail": {
+    "imagePrompt": "Portrait of a person performing a simple ritual with a tool in a clean home, warm lighting, vertical, no text.",
+    "thumbnailText": "दशहरे की खास परंपरा"
+  }
+}
