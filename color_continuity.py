@@ -79,7 +79,7 @@ def inspect_shots(long_scenes, shorts_scenes, media_root="public/images",
     report = {
         "version": 1, "enabled": enabled, "method": "one_tiny_frame_per_unique_media",
         "limitations": "CSS exposure/saturation only; white-balance drift is flagged, not destructively auto-fixed; artistic low-key scenes are protected",
-        "shots": len(entries), "samples": 0, "warnings": [], "formats": {},
+        "shots": len(entries), "samples": 0, "warnings": [], "mitigations": [], "formats": {},
     }
     if enabled:
         unique = {}
@@ -118,7 +118,20 @@ def inspect_shots(long_scenes, shorts_scenes, media_root="public/images",
                     if prev is not None and prev["scene"] == scene:
                         delta = abs(luma - prev["luma"])
                         if delta > .29:
-                            warnings.append("adjacent_exposure_jump")
+                            # Don't flatten artistic dark scenes with aggressive
+                            # exposure gain. Soften the incoming cut instead;
+                            # Remotion's transitionFor() reads shot.transition.
+                            old_transition = shot.get("transition")
+                            if old_transition != "crossfade":
+                                shot["transition"] = "crossfade"
+                                report["mitigations"].append({
+                                    "format": kind, "scene": scene, "shot": index,
+                                    "type": "high_contrast_cut_softened",
+                                    "previousTransition": old_transition,
+                                    "transition": "crossfade",
+                                    "lumaDelta": round(delta, 4),
+                                })
+                            warnings.append("adjacent_exposure_jump_softened")
                     if abs((data["rgb"][0] - data["rgb"][2]) - target_balance) > .22:
                         warnings.append("white_balance_mismatch_manual_review")
                     prev = {"scene": scene, "luma": luma}
