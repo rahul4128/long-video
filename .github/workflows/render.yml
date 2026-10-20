@@ -120,7 +120,7 @@ jobs:
           REPLAY_RUN_ID: ${{ inputs.reuse_run_id || '' }}
           REVIEW_APPROVED: ${{ inputs.review_approved || 'false' }}
           PUBLICATION_DATE_IST: ${{ inputs.publish_date_ist || '' }}
-        run: python scripts/preflight_payload.py
+        run: python -m scripts.preflight_payload
 
       - name: Store approved story before running tests or generating paid media
         if: ${{ !inputs.preflight_only || inputs.payload != '' || inputs.reuse_run_id != '' }}
