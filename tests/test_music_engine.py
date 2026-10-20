@@ -83,6 +83,32 @@ class MusicEngineTests(unittest.TestCase):
             manifest.write_text(json.dumps([entry]), encoding="utf-8")
             self.assertEqual(len(list(music_engine._approved_candidates("devotional", tmp))), 0)
 
+    def test_unverified_remote_music_requires_explicit_opt_in(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ, {"MUSIC_REMOTE_DISCOVERY_ENABLED": "false"}
+        ), patch.object(music_engine, "_openverse_candidates", side_effect=AssertionError("remote query")):
+            report = music_engine.attach_music(
+                [{"scene_number": 1}], [],
+                music_dir=str(Path(tmp) / "music"),
+                report_path=str(Path(tmp) / "music.json"),
+                approved_dir=str(Path(tmp) / "no-approved-tracks"),
+                remote_enabled=None,
+            )
+            self.assertEqual(report["status"], "ready")
+            self.assertTrue(all(x["license"] == "in-house-generated" for x in report["tracks"]))
+
+    def test_approved_track_preferred_even_if_remote_opted_in(self):
+        entry = {
+            "title": "Reviewed CC0 original", "license": "CC0-1.0",
+            "_local_path": "/reviewed/clip.mp3", "requires_review": False,
+        }
+        with patch.object(music_engine, "_approved_candidates", return_value=iter([entry])), \
+             patch.object(music_engine, "_transcode", return_value=True), \
+             patch.object(music_engine, "_openverse_candidates", side_effect=AssertionError("remote searched")):
+            picked = music_engine._select_track("devotional", "irrelevant.mp3", "approved", True, {"searches": 0, "downloads": 0})
+        self.assertEqual(picked["license"], "CC0-1.0")
+        self.assertNotIn("_local_path", picked)
+
     @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"),
                          "FFmpeg is required for soundtrack tests")
     def test_original_music_fallback_and_scene_mapping(self):
