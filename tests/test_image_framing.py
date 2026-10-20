@@ -82,6 +82,18 @@ class ImageFramingTests(unittest.TestCase):
         )
         self.assertIn("embedded horizontal letterbox", video_framing_issue(p, "9:16"))
 
+    def test_square_fallback_is_full_bleed_with_no_hard_black_bands(self):
+        from PIL import Image
+        p = self.path("bright-square.jpg")
+        frame(p, "color=c=red:s=512x512:d=0.1")
+        self.assertTrue(preserve_full_subject(p, "9:16"))
+        with Image.open(p) as im:
+            self.assertEqual(im.size, (720, 1280))
+            top = im.getpixel((360, 10))
+            center = im.getpixel((360, 640))
+        self.assertGreater(top[0], 40, "Background must fill the portrait, not be black")
+        self.assertGreater(center[0], top[0], "Foreground should remain the visual focus")
+
     def test_safe_backup_reframe_never_keeps_square_dimensions(self):
         p = self.path("backup.jpg")
         frame(p, "testsrc2=s=512x512:d=0.1")
