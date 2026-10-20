@@ -1,0 +1,150 @@
+name: Recover QC-Passed Video Draft (no paid rerender)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Existing render run with successful long, Shorts, thumbnail and media QC jobs'
+        required: true
+        default: '39430769405'
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: recover-qc-draft-${{ inputs.source_run_id }}
+  cancel-in-progress: false
+
+jobs:
+  recover-review-draft:
+    if: ${{ github.ref_name == 'visual-director-v2' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Checkout recovery code
+        uses: actions/checkout@v4
+
+      - name: Check original GitHub run and QC-passed jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_RUN" =~ ^[0-9]{6,20}$ ]] || { echo "::error::Invalid source run"; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" > /tmp/source_run.json
+          jq -e --arg branch "$GITHUB_REF_NAME" '
+            .head_branch == $branch and
+            .name == "Render Devotional Video (Long + Shorts)"
+          ' /tmp/source_run.json >/dev/null || {
+            echo "::error::Source run is not a render on this branch"; exit 1;
+          }
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN/jobs?per_page=100" > /tmp/source_jobs.json
+          for required in preflight generate-assets render-long render-shorts render-thumbnail render-thumbnail-shorts media-qc; do
+            jq -e --arg name "$required" '
+              .jobs | any(.name == $name and .conclusion == "success")
+            ' /tmp/source_jobs.json >/dev/null || {
+              echo "::error::QC prerequisite failed: $required"; exit 1;
+            }
+          done
+          echo "All required original media and QC jobs succeeded." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Download existing verified outputs only (no narration or image calls)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets video shorts thumbnail_final thumbnail_shorts_final qc out
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" --name "generated-assets-$SOURCE_RUN" --dir assets
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" --name "devotional-video-$SOURCE_RUN" --dir video
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" --name "devotional-shorts-$SOURCE_RUN" --dir shorts
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" --name "devotional-thumbnail-$SOURCE_RUN" --dir thumbnail_final
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" --name "devotional-thumbnail-shorts-$SOURCE_RUN" --dir thumbnail_shorts_final
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" --name "media-qc-$SOURCE_RUN" --dir qc
+
+      - name: Validate recovered media, QC and reports
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          required = [
+              'video/final_video.mp4', 'shorts/final_video_shorts.mp4',
+              'thumbnail_final/thumbnail.jpg',
+              'thumbnail_shorts_final/thumbnail_shorts_final.jpg',
+              'video/audio_master_long.json', 'shorts/audio_master_shorts.json',
+              'assets/out/metadata.json', 'assets/out/music_license_report.json',
+              'assets/out/editing_qc_report.json',
+              'assets/out/color_continuity_report.json',
+              'assets/out/spoken_hindi_report.json', 'qc/qc_report.json',
+          ]
+          for name in required:
+              path=Path(name)
+              if not path.is_file() or path.stat().st_size <= 100:
+                  raise SystemExit(f'Missing/empty required verified file: {name}')
+          report=json.loads(Path('qc/qc_report.json').read_text())
+          if report.get('ok') is not True or report.get('failed'):
+              raise SystemExit('Source final media QC did not pass')
+          result=report.get('results') or []
+          for name in ('final_video.mp4', 'final_video_shorts.mp4'):
+              matches=[x for x in result if Path(str(x.get('path') or '')).name == name]
+              if len(matches)!=1 or matches[0].get('ok') is not True or matches[0].get('visualIntegrityErrors'):
+                  raise SystemExit(f'Unverified source MP4: {name}')
+          print('Recovered both QC-passed MP4s, thumbnails and all licensing/creative reports')
+          PY
+
+      - name: Prepare review-only metadata
+        env:
+          PACK_METADATA_JSON: assets/out/metadata.json
+          PACK_OUTPUT: out/youtube_pack.md
+          SOURCE_RUN: ${{ inputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          python scripts/youtube_pack.py
+          {
+            echo "# Recovering existing QC-passed render $SOURCE_RUN"
+            echo
+            echo "Draft for manual creative, festival-date and rights review."
+            echo "No YouTube upload, no Make publication webhook, no Canva refresh or media generation."
+            echo
+            cat out/youtube_pack.md
+          } > out/draft_notes.md
+
+      - name: Create or verify existing review-only draft (never publish)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          TAG="devotional-$SOURCE_RUN"
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > /tmp/releases.json
+          RELEASE_ID=$(jq -r --arg tag "$TAG" '.[] | select(.tag_name == $tag) | .id' /tmp/releases.json | head -n 1)
+          if [ -z "$RELEASE_ID" ]; then
+            SOURCE_SHA=$(jq -r .head_sha /tmp/source_run.json)
+            gh release create "$TAG" \
+              video/final_video.mp4 shorts/final_video_shorts.mp4 \
+              thumbnail_final/thumbnail.jpg thumbnail_shorts_final/thumbnail_shorts_final.jpg \
+              assets/out/music_license_report.json assets/out/editing_qc_report.json \
+              assets/out/color_continuity_report.json assets/out/spoken_hindi_report.json \
+              video/audio_master_long.json shorts/audio_master_shorts.json \
+              qc/qc_report.json \
+              --repo "$GITHUB_REPOSITORY" --target "$SOURCE_SHA" \
+              --title "Review-only recovered render $SOURCE_RUN" \
+              --draft --notes-file out/draft_notes.md
+            gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > /tmp/releases.json
+            RELEASE_ID=$(jq -r --arg tag "$TAG" '.[] | select(.tag_name == $tag) | .id' /tmp/releases.json | head -n 1)
+          fi
+          test -n "$RELEASE_ID"
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" > /tmp/release.json
+          jq -e '
+            .draft == true and
+            (["final_video.mp4","final_video_shorts.mp4","thumbnail.jpg",
+              "thumbnail_shorts_final.jpg","music_license_report.json",
+              "qc_report.json"] - [.assets[].name] | length == 0)
+          ' /tmp/release.json >/dev/null || {
+            echo "::error::Recovered release missing required assets or is not a draft"; exit 1;
+          }
+          echo "Recovered QC-passed files into GitHub draft release ID $RELEASE_ID" >> "$GITHUB_STEP_SUMMARY"
+          echo "No external publishing was performed." >> "$GITHUB_STEP_SUMMARY"
