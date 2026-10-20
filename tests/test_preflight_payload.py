@@ -5,6 +5,7 @@ from pathlib import Path
 import unittest
 
 from scripts.preflight_payload import prepare
+from scripts.validate_festival_timing import validate as validate_festival_timing
 
 
 def story():
@@ -63,6 +64,10 @@ class PreflightPayloadTests(unittest.TestCase):
         self.assertEqual(len(episode["long_video"]["scenes"]), 6)
         self.assertEqual(len(episode["shorts"]["scenes"]), 5)
         self.assertTrue(checked["festival_date_check"]["ok"])
+        # October 20 run #183 failed at the *second* independent date gate,
+        # despite passing preflight_payload's first calendar validation.
+        second_date_gate = validate_festival_timing(episode, publish_date="2026-10-20")
+        self.assertTrue(second_date_gate["ok"], second_date_gate["issues"])
         self.assertEqual(checked["pipeline"], "visual-director-v2-oflifepart31")
         self.assertFalse(checked["source_run_id"])
 
