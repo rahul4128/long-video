@@ -89,10 +89,11 @@ class PreflightPayloadTests(unittest.TestCase):
             "missing_or_invalid_content_role",
         ):
             self.assertNotIn(code, packaging["warnings"])
-        narration = assess_scenes(
-            story["long_video"]["scenes"], story["shorts"]["scenes"],
-            report_path=Path(checked["cache_dir"]) / "spoken_hindi_test.json",
-        )
+        with tempfile.TemporaryDirectory() as tmp:
+            narration = assess_scenes(
+                story["long_video"]["scenes"], story["shorts"]["scenes"],
+                report_path=Path(tmp) / "spoken_hindi_test.json",
+            )
         self.assertEqual(narration["status"], "clear")
 
     def test_original_uncorrected_story_remains_blocked_by_dates(self):
