@@ -64,6 +64,24 @@ class RenderAttributionTests(unittest.TestCase):
             self.assertTrue(ok)
             self.assertEqual(len(json.loads(path.read_text())), 1)
 
+    def test_conflicting_story_rerender_is_quarantined_not_fatal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "history.json"
+            info = {
+                "correlationId": "already-rendered-story",
+                "long_video_title": "दशहरे के दिन शस्त्र पूजा क्यों होती है?",
+                "shorts_title": "शस्त्र पूजा का अर्थ",
+            }
+            report = {"enabled": True, "selectedStyle": "presenter_explainer"}
+            saved, original = append_actual_style(
+                ledger, info, report, run_id=39382937625, scope="oflifepart31", now=NOW)
+            self.assertTrue(saved)
+            saved2, reason = append_actual_style(
+                ledger, info, report, run_id=39430769405, scope="oflifepart31", now=NOW)
+            self.assertFalse(saved2)
+            self.assertEqual(reason, "conflicting_render_correlation_requires_review")
+            self.assertEqual(json.loads(ledger.read_text()), [original])
+
     def test_reject_unattributed_renders(self):
         with tempfile.TemporaryDirectory() as tmp:
             success, reason = append_actual_style(
