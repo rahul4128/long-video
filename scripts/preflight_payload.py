@@ -17,6 +17,9 @@ from scripts.festival_date_gate import validate_festival_date_claims
 def prepare(env=None, replay_path=None):
     env = env or os.environ
     previous = str(env.get("REPLAY_RUN_ID") or "").strip()
+    story_file = str(env.get("STORY_FILE") or "").strip()
+    if previous and story_file:
+        raise ValueError("Choose either reuse_run_id or story_file, not both")
     if previous:
         if not re.fullmatch(r"\d{4,20}", previous):
             raise ValueError("reuse_run_id must be a GitHub run number ID")
@@ -33,14 +36,36 @@ def prepare(env=None, replay_path=None):
         source_run = previous
         verified = doc.get("payload_sha256")
     else:
-        payload_string = env.get("NEW_DISPATCH_PAYLOAD", "")
         pipeline = env.get("NEW_PIPELINE", "")
         source_run = None
         verified = None
+        if story_file:
+            # Read only reviewed episode JSON from this repository, never
+            # arbitrary user-supplied filesystem paths (secrets/traversal).
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,118}\\.json", story_file):
+                raise ValueError("story_file must be a .json filename in data/replay_stories")
+            if str(env.get("REVIEW_APPROVED") or "false").lower() == "true":
+                raise ValueError("A stored story_file is review-only; separate publication approval is required")
+            story_path = Path(__file__).resolve().parents[1] / "data" / "replay_stories" / story_file
+            if not story_path.is_file():
+                raise ValueError(f"Story file not found in data/replay_stories: {story_file}")
+            payload_string = story_path.read_text(encoding="utf-8")
+        else:
+            payload_string = env.get("NEW_DISPATCH_PAYLOAD", "")
 
     if not isinstance(payload_string, str) or not 20 <= len(payload_string) <= 250000:
-        raise ValueError("No complete original Make story JSON available for render")
-    episode = json.loads(payload_string)
+        raise ValueError(
+            "No complete story JSON available. Paste the full payload or select story_file "
+            "from data/replay_stories (avoid copying truncated JSON)."
+        )
+    try:
+        episode = json.loads(payload_string)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Incomplete/invalid story JSON: {len(payload_string)} characters received, "
+            f"error near character {exc.pos}. Do not paste a shortened code preview; "
+            "use story_file for a verified repository copy."
+        ) from exc
     # Accept either Make module 3's raw story JSON or module 5's complete
     # GitHub workflow_dispatch envelope. Reusing module 5 also preserves the
     # original account label without any additional Make/Gemini execution.
