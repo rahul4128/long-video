@@ -49,6 +49,28 @@ class ColorContinuityTests(unittest.TestCase):
             self.assertTrue(any("artistic_or_extreme_lighting_preserved" in w["codes"]
                                 for w in result["warnings"]))
 
+    @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg required")
+    def test_large_exposure_jump_uses_soft_transition_without_brightening_dark_art(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ppm(root / "dark.ppm", (10, 11, 12))
+            ppm(root / "bright.ppm", (210, 200, 191))
+            shots = [
+                {"file": "dark.ppm", "type": "image", "transition": "cut"},
+                {"file": "bright.ppm", "type": "image", "transition": "cut"},
+            ]
+            report = inspect_shots(
+                [{"scene_number": 1, "shots": shots}], [],
+                media_root=root, report_path=root / "report.json",
+            )
+            self.assertEqual(shots[0]["colorCorrection"]["brightness"], 1.0)
+            self.assertEqual(shots[1]["transition"], "crossfade")
+            self.assertTrue(any(m["type"] == "high_contrast_cut_softened" for m in report["mitigations"]))
+            self.assertTrue(any(
+                "artistic_or_extreme_lighting_preserved" in warning["codes"]
+                for warning in report["warnings"]
+            ))
+
     def test_untrusted_parent_path_skipped(self):
         with tempfile.TemporaryDirectory() as tmp:
             scenes = [{"scene_number": 1, "shots": [{"file": "../secret.jpg", "type": "image"}]}]
