@@ -42,7 +42,7 @@ def prepare(env=None, replay_path=None):
         if story_file:
             # Read only reviewed episode JSON from this repository, never
             # arbitrary user-supplied filesystem paths (secrets/traversal).
-            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,118}\\.json", story_file):
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,118}\.json", story_file):
                 raise ValueError("story_file must be a .json filename in data/replay_stories")
             if str(env.get("REVIEW_APPROVED") or "false").lower() == "true":
                 raise ValueError("A stored story_file is review-only; separate publication approval is required")
