@@ -9,6 +9,10 @@ on:
         description: 'Make.com render payload JSON (not required when reusing a prior cached GitHub run)'
         required: false
         type: string
+      story_file:
+        description: 'Optional JSON filename in data/replay_stories (no 10k-character paste needed)'
+        required: false
+        type: string
       reuse_run_id:
         description: 'GitHub run ID with an approved-story-<run_id> artifact (reuse last script without Make/Gemini)'
         required: false
@@ -112,18 +116,19 @@ jobs:
             }
 
       - name: Verify and cache approved episode inputs for low-cost retries
-        if: ${{ !inputs.preflight_only || inputs.payload != '' || inputs.reuse_run_id != '' }}
+        if: ${{ !inputs.preflight_only || inputs.payload != '' || inputs.story_file != '' || inputs.reuse_run_id != '' }}
         id: store
         env:
           NEW_DISPATCH_PAYLOAD: ${{ inputs.payload || toJson(github.event.client_payload) }}
           NEW_PIPELINE: ${{ inputs.pipeline || 'canva-updated-flow' }}
           REPLAY_RUN_ID: ${{ inputs.reuse_run_id || '' }}
+          STORY_FILE: ${{ inputs.story_file || '' }}
           REVIEW_APPROVED: ${{ inputs.review_approved || 'false' }}
           PUBLICATION_DATE_IST: ${{ inputs.publish_date_ist || '' }}
         run: python -m scripts.preflight_payload
 
       - name: Store approved story before running tests or generating paid media
-        if: ${{ !inputs.preflight_only || inputs.payload != '' || inputs.reuse_run_id != '' }}
+        if: ${{ !inputs.preflight_only || inputs.payload != '' || inputs.story_file != '' || inputs.reuse_run_id != '' }}
         uses: actions/upload-artifact@v7
         with:
           name: approved-story-${{ github.run_id }}
@@ -135,13 +140,13 @@ jobs:
       # 'tomorrow', 'after', or last-day claims BEFORE any image/TTS credits.
       # The original story is cached above even when this check rejects it.
       - name: Verify festival-relative dates before paid media generation
-        if: ${{ !inputs.preflight_only || inputs.payload != '' || inputs.reuse_run_id != '' }}
+        if: ${{ !inputs.preflight_only || inputs.payload != '' || inputs.story_file != '' || inputs.reuse_run_id != '' }}
         env:
           TARGET_PUBLISH_DATE_IST: ${{ inputs.publish_date_ist || '' }}
         run: python -m scripts.validate_festival_timing --replay out/replay_inputs.json
 
       - name: Save independent festival-date QC report for review
-        if: ${{ always() && (!inputs.preflight_only || inputs.payload != '' || inputs.reuse_run_id != '') }}
+        if: ${{ always() && (!inputs.preflight_only || inputs.payload != '' || inputs.story_file != '' || inputs.reuse_run_id != '') }}
         uses: actions/upload-artifact@v7
         with:
           name: festival-date-qc-${{ github.run_id }}
