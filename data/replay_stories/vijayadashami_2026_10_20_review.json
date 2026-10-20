@@ -9,7 +9,7 @@
       "सकारात्मकता का सरल समापन",
       "निष्कर्ष और अगली परंपरा"
     ],
-    "thumbnailText": "दशहरा: दहन से आगे का सच",
+    "thumbnailText": "दशहरा: शस्त्र पूजा का सच",
     "titleVariants": [
       "शस्त्र पूजा का असली अर्थ क्या है?",
       "विजयदशमी: दहन से आगे का सच",
@@ -26,10 +26,22 @@
     ],
     "thumbnailConcepts": [
       {
-        "visualSubject": "व्यक्ति घर के औजार या कलम की सफाई करते हुए",
-        "emotionAction": "शांति और सम्मान",
-        "composition": "क्लोज-अप शॉट, पृष्ठभूमि में जलता हुआ दीया",
-        "text": "दशहरा: दहन से आगे का सच"
+        "visualSubject": "पूजा के लिए रखी कलम, लैपटॉप और सजे औजार",
+        "emotionAction": "जिज्ञासा और उत्सव",
+        "composition": "क्लोज-अप, दीये का हल्का प्रकाश; वस्तुएँ स्पष्ट, कोई टेक्स्ट चित्र के भीतर नहीं",
+        "text": "दशहरा: शस्त्र पूजा का सच"
+      },
+      {
+        "visualSubject": "एक ओर दशहरा दीप और दूसरी ओर साफ औजार",
+        "emotionAction": "रहस्य और खुलासा",
+        "composition": "दो अलग स्पष्ट हिस्से, अलग-अलग सामग्री, कोई अस्पष्ट चेहरा या हाथ नहीं",
+        "text": "दशहरे की अनदेखी पूजा"
+      },
+      {
+        "visualSubject": "साफ-सुथरी मेज पर कलम, पुस्तक और छोटा दीया",
+        "emotionAction": "विश्वास और उपयोगिता",
+        "composition": "सादगी, गहरे और गर्म रंगों का संतुलन, बड़े आकार में मुख्य वस्तुएँ",
+        "text": "औजार क्यों पूजते हैं?"
       }
     ]
   },
@@ -38,7 +50,7 @@
     "category": "RELIGION_CULTURE",
     "series_id": "VIJAYADASHAMI_TRADITION",
     "qc_verdict": "PASS",
-    "content_role": "educational_presenter",
+    "content_role": "retention",
     "decisionBasis": "CONTENT_BUCKET: RITUAL_EXPLAINER. PLAYLIST_NAME: व्रत और पूजा के नियम. SERIES_NAME: विजयदशमी की परंपराएं. TARGET_AUDIENCE: नवरात्रि के बाद शांति तलाश रहे दर्शक. TOPIC_LONGEVITY: HIGH. VIEWER_QUESTION: दशहरे पर औजारों की पूजा का सही अर्थ क्या है?. VIEWER_MOTIVATION: CULTURAL_CONNECTION. EVENT_DATE: 2026-10-20. PUBLISH_BEFORE: 2026-10-20. DATE_SOURCE: TIMES_OF_INDIA_RELIGION_SECTION. HOOK_0_5S: दशहरे पर रावण दहन के अलावा और क्या होता है?. RETENTION_BEATS: प्रश्न-इतिहास-व्यावहारिक तरीका-निष्कर्ष. EMOTIONAL_PAYOFF: उपकरणों के प्रति कृतज्ञता ही सच्ची पूजा है. SUBSCRIBER_REASON: त्योहार के गहरे अर्थ और परंपराओं का सरल मार्गदर्शन. RELATED_NEXT_EPISODE: शरद पूर्णिमा की तैयारी. ANALYTICS_HYPOTHESIS: त्योहार के बाद की उपयोगिता और शांति पर केंद्रित वीडियो उच्च वॉच-टाइम देंगे. SOURCE_REFERENCES: पारंपरिक शास्त्र पूजा के विकास का ऐतिहासिक विवरण। EDIT_STYLE=presenter_explainer; EDIT_STYLE_WHY=दर्शकों को दशहरे के उत्सव के बीच एक शांत, सार्थक और व्यावहारिक परंपरा से जोड़ने की आवश्यकता है।",
     "experiment_id": "vijayadashami-2026-10-20",
     "agent_critique": "Winner topic checked for Pros/Cons, Fact-safety, Fatigue, and Packaging. The script focuses on the evolution of Shastra Puja to avoid rigid historical claims while providing actionable advice.",
@@ -52,7 +64,8 @@
     "viewer_journey_next": "शरद पूर्णिमा की वैज्ञानिक तैयारी",
     "retention_adaptation": "Fast-paced cuts contrasting symbolic effigy preparations and culturally accurate tool-worship imagery.",
     "experiment_hypothesis": "Practical ritual application after event-frenzy increases long-form watch time.",
-    "long_video_continuation": "औजारों और कार्यकुशलता के प्रति सम्मान जताने का सरल पारिवारिक तरीका।"
+    "long_video_continuation": "औजारों और कार्यकुशलता के प्रति सम्मान जताने का सरल पारिवारिक तरीका।",
+    "presenter_style": "educational_presenter"
   },
   "shorts": {
     "scenes": [
@@ -131,7 +144,7 @@
   },
   "thumbnail": {
     "imagePrompt": "Close up of hands cleaning a professional tool or book, warm soft diya light in background, cinematic, realistic, high detail, warm atmosphere, no text.",
-    "thumbnailText": "दशहरा: दहन से आगे का सच"
+    "thumbnailText": "दशहरा: शस्त्र पूजा का सच"
   },
   "long_video": {
     "scenes": [
@@ -213,7 +226,7 @@
         "soundEffect": "none"
       },
       {
-        "text": "इस दशहरे पर रावण दहन के उत्सव के साथ अपने काम के साधनों को सम्मान देने का छोटा सा कदम भी उठाएं। अपने काम की चीजों को सम्मान दें, तो देखिए आपकी एकाग्रता कैसे बढ़ती है। क्या आपने आज अपने काम के औजारों को धन्यवाद दिया? हमें कमेंट में बताएं। ऐसी ही अर्थपूर्ण परंपराओं और उनके पीछे के विज्ञान को समझने के लिए हमारे साथ बने रहें और चैनल को सब्सक्राइब जरूर करें ताकि अगली कड़ी में आपको कुछ नया सीखने को मिले।",
+        "text": "इस दशहरे पर रावण दहन के उत्सव के साथ अपने काम के साधनों को सम्मान देने का छोटा सा कदम भी उठाएं। अपने काम की चीजों को सम्मान दें, तो देखिए आपकी एकाग्रता कैसे बढ़ती है। क्या आपने आज अपने काम के औजारों को धन्यवाद दिया? हमें कमेंट में बताएं। ऐसी परंपराओं के अर्थ को आसान भाषा में समझने के लिए हमारे साथ बने रहें। हम इनके पीछे की मान्यताओं और कारणों पर भी बात करेंगे। चैनल को सब्सक्राइब करें, ताकि अगली कड़ी में कुछ नया सीख सकें।",
         "mediaType": "ai_image",
         "imagePrompt": "Peaceful home interior at sunset, person standing at a desk with tools, aesthetic look, warm atmosphere, soft lighting.",
         "videoSearchQuery": "sunset peaceful home workspace",
