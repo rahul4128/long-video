@@ -123,6 +123,18 @@ class StoryFirstStockTests(unittest.TestCase):
         }]}], "Shorts")
         self.assertFalse(issues)
 
+    def test_unrelated_food_query_does_not_poison_tool_visuals(self):
+        from generate_assets import _visual_beat_queries, _visual_beat_prompt
+        beat = {
+            "narrationText": "आज के दौर में आपकी कलम, लैपटॉप और औजार ही आपके काम के साधन हैं।",
+            "subject": "laptop",
+            "queries": ["Indian vegetarian fruit food thali closeup", "Laptop and pen workspace"],
+        }
+        self.assertEqual(_visual_beat_queries(beat, "Laptop and pen workspace"), ["Laptop and pen workspace"])
+        generated_prompt = _visual_beat_prompt("A cinematic scene with work tools", beat)
+        self.assertNotIn("Indian vegetarian fruit food thali closeup", generated_prompt)
+        self.assertIn("no food, fruit thali", generated_prompt)
+
     def test_hindi_concept_becomes_specific_visible_indian_context(self):
         q = _build_queries({
             "videoSearchQuery": "person feeling tired",
