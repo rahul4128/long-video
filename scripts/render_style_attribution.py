@@ -64,7 +64,10 @@ def append_actual_style(ledger, metadata, report, *, run_id, scope, now=None):
             continue
         if old.get("account") == scope and old.get("correlationId") == correlation:
             if str(old.get("githubRunId")) != run_id:
-                raise ValueError("Conflicting render correlation; explicit review required")
+                # The same story can be rerendered after media-QC improvements.
+                # Preserve the original analytics attribution rather than
+                # overwriting its identity, but NEVER block the draft release.
+                return False, "conflicting_render_correlation_requires_review"
             rows[i] = entry
             break
     else:
