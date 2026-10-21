@@ -4121,7 +4121,26 @@ async def process():
     os.makedirs("public/audio/sfx", exist_ok=True)
     resolve_sound_effect_audio("transition_whoosh", "public/audio/sfx/whoosh.mp3")
 
-    # 2. Render ONE final high-CTR 16:9 thumbnail.
+    # 2. Resolve required scene visual beats before optional thumbnail image generation.
+    # This reserves scarce free-tier image capacity for narration-critical visuals.
+
+    # 2a. Parallel Visuals (Pexels + Pixabay + Coverr + FLUX.1 for Long & Shorts)
+    long_items = [(i + 1, s) for i, s in enumerate(long_scenes)]
+    shorts_items = [(i + 1, s) for i, s in enumerate(shorts_scenes)]
+
+    # max_workers=8 (was 4): this stage is I/O-bound (HTTP calls to stock/AI
+    # APIs), not CPU-bound, so doubling it is safe and meaningfully faster.
+    # Also submit long + shorts scenes together rather than as two sequential
+    # executor.map() calls - the old code fully finished every long scene
+    # before starting a single shorts scene, even though they're completely
+    # independent work and could easily interleave.
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        long_futures = [executor.submit(process_long_scene_visual, item) for item in long_items]
+        shorts_futures = [executor.submit(process_shorts_scene_visual, item) for item in shorts_items]
+        long_visuals = [recover_shots(f.result(), i + 1, "16:9") for i, f in enumerate(long_futures)]
+        shorts_visuals = [recover_shots(f.result(), i + 1, "9:16") for i, f in enumerate(shorts_futures)]
+
+    # 3. Render ONE final high-CTR 16:9 thumbnail AFTER required scene visuals.
     # The pipeline intentionally keeps only one long-video thumbnail and one
     # Shorts thumbnail. thumbnailConcepts may still arrive from Make for
     # creative planning, but they are not rendered into extra files.
@@ -4156,6 +4175,29 @@ async def process():
             "center": "upper area",
         }.get(layout, "one side")
 
+
+    def _accepted_opening_references(all_scenes):
+        # Real approved shots only. Never recycle generic fallback textures as
+        # thumbnails: they misrepresent the video's narration and fail CTR goals.
+        references = []
+        for scene_shots in all_scenes[:2]:
+            for shot in scene_shots:
+                if shot.get("source") in ("local_atmosphere_fallback", "local_continuity_fallback"):
+                    continue
+                filename = str(shot.get("file") or "")
+                if filename and os.path.basename(filename) == filename:
+                    candidate = os.path.join("public/images", filename)
+                    if os.path.isfile(candidate):
+                        references.append(candidate)
+        return references
+
+    def _thumbnail_from_opening(scene_visuals, target, orientation):
+        for reference in _accepted_opening_references(scene_visuals):
+            if _derive_local_visual(reference, target, orientation, variant_seed=2):
+                print("  ✅ Thumbnail background derived from a narration-matched opening shot.", flush=True)
+                return True
+        return False
+
     thumbnail_text_position = _thumb_layout(thumb_prompt, seo_metadata.get("long_video_title", ""), False)
     thumb_prompt = (
         f"{thumb_prompt}. YouTube creator thumbnail art direction: ONE dominant focal subject, "
@@ -4168,13 +4210,14 @@ async def process():
     thumb_dest = "public/images/thumbnail.jpg"
     long_thumb_ok = generate_ai_image(thumb_prompt, thumb_dest, aspect_ratio="16:9", pollinations_width=1920, pollinations_height=1080, allow_canva=os.getenv("CANVA_IMAGE_THUMBNAILS_ENABLED", "false").lower() == "true")
     if not long_thumb_ok:
-        print("  ⚠️ All AI image providers failed for Long thumbnail; using safe local background.", flush=True)
-        create_local_visual_fallback(thumb_dest, orientation="landscape", allow_reference_reuse=False)
+        print("  ⚠️ AI thumbnail unavailable; checking approved opening shots before local fallback.", flush=True)
+        if not _thumbnail_from_opening(long_visuals, thumb_dest, "landscape"):
+            create_local_visual_fallback(thumb_dest, orientation="landscape", allow_reference_reuse=False)
     if framing_issue(thumb_dest, "16:9"):
         raise RuntimeError("Long thumbnail failed mandatory framing QC")
     subprocess.run(["cp", thumb_dest, "out/thumbnail.jpg"], check=False)
 
-    # 2b. Remotion hook-text props. The text position is dynamic instead of
+    # 3b. Remotion hook-text props. The text position is dynamic instead of
     # forcing every thumbnail into a bottom-only text band.
     thumbnail_hook_text = pick_hindi(
         thumbnail_data.get("thumbnailText"),
@@ -4195,7 +4238,7 @@ async def process():
             f, ensure_ascii=False, indent=2,
         )
 
-    # 2c. ONE Shorts-specific 9:16 thumbnail with its own hook and layout.
+    # 3c. ONE Shorts-specific 9:16 thumbnail with its own hook and layout.
     shorts_thumb_prompt = shorts_thumbnail_data.get("imagePrompt") or f"{thumbnail_data.get('imagePrompt') or thumb_prompt}, vertical 9:16 composition"
     shorts_thumbnail_text_position = _thumb_layout(shorts_thumb_prompt, seo_metadata.get("shorts_title", ""), True)
     shorts_thumb_prompt = (
@@ -4209,8 +4252,9 @@ async def process():
     shorts_thumb_dest = "public/images/thumbnail_shorts.jpg"
     shorts_thumb_ok = generate_ai_image(shorts_thumb_prompt, shorts_thumb_dest, aspect_ratio="9:16", pollinations_width=1080, pollinations_height=1920, allow_canva=os.getenv("CANVA_IMAGE_THUMBNAILS_ENABLED", "false").lower() == "true")
     if not shorts_thumb_ok:
-        print("  ⚠️ All AI image providers failed for Shorts thumbnail; using safe local background.", flush=True)
-        create_local_visual_fallback(shorts_thumb_dest, orientation="portrait", allow_reference_reuse=False)
+        print("  ⚠️ AI Shorts thumbnail unavailable; checking approved opening shots before local fallback.", flush=True)
+        if not _thumbnail_from_opening(shorts_visuals, shorts_thumb_dest, "portrait"):
+            create_local_visual_fallback(shorts_thumb_dest, orientation="portrait", allow_reference_reuse=False)
     if framing_issue(shorts_thumb_dest, "9:16"):
         raise RuntimeError("Shorts thumbnail failed mandatory framing QC")
     subprocess.run(["cp", shorts_thumb_dest, "out/thumbnail_shorts.jpg"], check=False)
@@ -4238,21 +4282,7 @@ async def process():
     thumbnail_variants = []
     print("🖼️ Thumbnail output policy: 1 long + 1 Shorts thumbnail only.", flush=True)
 
-    # 3. Parallel Visuals (Pexels + Pixabay + Coverr + FLUX.1 for Long & Shorts)
-    long_items = [(i + 1, s) for i, s in enumerate(long_scenes)]
-    shorts_items = [(i + 1, s) for i, s in enumerate(shorts_scenes)]
 
-    # max_workers=8 (was 4): this stage is I/O-bound (HTTP calls to stock/AI
-    # APIs), not CPU-bound, so doubling it is safe and meaningfully faster.
-    # Also submit long + shorts scenes together rather than as two sequential
-    # executor.map() calls - the old code fully finished every long scene
-    # before starting a single shorts scene, even though they're completely
-    # independent work and could easily interleave.
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        long_futures = [executor.submit(process_long_scene_visual, item) for item in long_items]
-        shorts_futures = [executor.submit(process_shorts_scene_visual, item) for item in shorts_items]
-        long_visuals = [recover_shots(f.result(), i + 1, "16:9") for i, f in enumerate(long_futures)]
-        shorts_visuals = [recover_shots(f.result(), i + 1, "9:16") for i, f in enumerate(shorts_futures)]
 
     # 4. Parallel Audio Generation (Long + Shorts) - each task also returns
     # that scene's word-level caption timing (see generate_clean_audio).
