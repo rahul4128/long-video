@@ -1,6 +1,6 @@
 {
   "account": "oflifepart31",
-  "generatedAt": "2026-10-20T03:56:08.446116+00:00",
+  "generatedAt": "2026-10-21T13:53:38.800038+00:00",
   "matchedVideos": [],
   "rejected": [
     {
@@ -42,6 +42,16 @@
       "reason": "not_mature_or_predates_render",
       "format": "shorts",
       "githubRunId": "39185514833"
+    },
+    {
+      "reason": "not_mature_or_predates_render",
+      "format": "long",
+      "githubRunId": "39382937625"
+    },
+    {
+      "reason": "not_mature_or_predates_render",
+      "format": "shorts",
+      "githubRunId": "39382937625"
     }
   ],
   "eligibleGroups": 0,
