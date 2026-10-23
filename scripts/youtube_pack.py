@@ -105,7 +105,13 @@ def build(meta: dict) -> str:
               "", "**Description**", _block(shorts_desc),
               "", "**Thumbnail/cover:** `thumbnail_shorts_final.jpg` (pick it as the cover frame in the app)",
               "- *Related video*: link the long video above (this is what turns Shorts views into watch hours)",
-              "", "## 3. Instagram Reel (same Short file)", _block(f"{shorts_title}\n\n{shorts_desc}")]
+              "", "## 3. Instagram Reel (dedicated 1080x1920)",
+              "- Use `final_video_instagram.mp4` and `instagram_cover.jpg` ONLY if `instagram_status.json` says ready_for_manual_review.",
+              "- The cover derives from the first approved portrait scene, with 2–4 readable Hindi words.",
+              "- Never upload a letterboxed 16:9 YouTube video to Instagram.",
+              "- Copy `instagram_post.txt` for an Instagram-specific Follow / Save / Share CTA and 3–5 focused hashtags.",
+              "- Select the cover deliberately. Profile highlights, replies and bio links are handled manually in Instagram.",
+              "- If status requires review, fix the narration, story, length or cover before publishing."]
 
     # Audit trail: source/creator/rights for all selected music is stored in
     # music_license_report.json on the GitHub draft release.
