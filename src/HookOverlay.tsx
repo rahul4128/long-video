@@ -7,14 +7,16 @@ const { fontFamily } = loadFont();
 // Big Hindi hook text for the first ~1.8 s of the video. It repeats the
 // thumbnail promise on screen so a viewer who just clicked sees the promise
 // confirmed immediately - the first 1-2 seconds decide most swipe-aways.
-export const HookOverlay: React.FC<{ text?: string; format?: 'long' | 'shorts' }> = ({
+export const HookOverlay: React.FC<{ text?: string; format?: 'long' | 'shorts'; platform?: 'youtube' | 'instagram' }> = ({
   text,
   format = 'long',
+  platform = 'youtube',
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   if (!text) return null;
 
+  const isInstagram = platform === 'instagram';
   const visibleFrames = Math.round(fps * 1.8);
   if (frame > visibleFrames) return null;
 
@@ -23,7 +25,7 @@ export const HookOverlay: React.FC<{ text?: string; format?: 'long' | 'shorts' }
   const opacity = interpolate(
     frame,
     [0, 4, visibleFrames - 8, visibleFrames],
-    [0, 1, 1, 0],
+    [isInstagram ? 1 : 0, 1, 1, 0],
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' },
   );
   const isShorts = format === 'shorts';
@@ -33,9 +35,9 @@ export const HookOverlay: React.FC<{ text?: string; format?: 'long' | 'shorts' }
       style={{
         justifyContent: isShorts ? 'flex-start' : 'center',
         alignItems: 'center',
-        paddingTop: isShorts ? 360 : 0,
-        paddingLeft: 60,
-        paddingRight: 60,
+        paddingTop: isInstagram ? 380 : isShorts ? 360 : 0,
+        paddingLeft: isInstagram ? 94 : 60,
+        paddingRight: isInstagram ? 94 : 60,
         opacity,
         pointerEvents: 'none',
       }}
@@ -43,7 +45,7 @@ export const HookOverlay: React.FC<{ text?: string; format?: 'long' | 'shorts' }
       <div
         style={{
           transform: `scale(${scale})`,
-          maxWidth: isShorts ? '92%' : '80%',
+          maxWidth: isInstagram ? '100%' : isShorts ? '92%' : '80%',
           textAlign: 'center',
           background: 'rgba(0,0,0,0.45)',
           borderRadius: 24,
@@ -54,7 +56,9 @@ export const HookOverlay: React.FC<{ text?: string; format?: 'long' | 'shorts' }
           style={{
             fontFamily,
             fontWeight: 900,
-            fontSize: isShorts ? 92 : 84,
+            fontSize: isInstagram ? 76 : isShorts ? 92 : 84,
+            whiteSpace: 'pre-line',
+            wordBreak: 'keep-all',
             lineHeight: 1.2,
             color: '#FFD54A',
             WebkitTextStroke: '2px rgba(0,0,0,0.9)',
