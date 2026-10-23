@@ -28,6 +28,7 @@ from scripts.visual_relevance_gate import strong_stock_match, named_deity_requir
 from scripts.image_framing import framing_issue, preserve_full_subject, video_framing_issue
 from scripts.canva_image_provider import CanvaImageError, generate_canva_image
 from storyteller import build_prosody_map, prepare_storyteller_text
+from scripts.episode_voice import synthesize_episode
 from hindi_text import to_spoken_hindi, hindi_display_text, pick_hindi, text_free_prompt, has_latin, best_hindi_title
 try:
     import clip_rerank
@@ -3083,7 +3084,7 @@ async def _generate_edge_chunked_audio(clean_text: str, audio_dest: str) -> list
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
-async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") -> list:
+async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "", *, engine=None, strict_engine=False) -> list:
     """Narration chain: optional Gemini 3.8 TTS -> Kokoro -> Edge-TTS.
 
     Gemini is selected by AUDIO_TTS_ENGINE=gemini; all other modes retain
@@ -3097,7 +3098,7 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") 
         clean_text = prepare_storyteller_text(original_text)
         # Gemini is an optional higher-quality engine; Kokoro/Edge remain as
         # fallbacks. All speech engines use the same normalized Hindi transcript.
-        engine = os.getenv("AUDIO_TTS_ENGINE", "kokoro").strip().lower()
+        engine = (engine or os.getenv("AUDIO_TTS_ENGINE", "kokoro")).strip().lower()
 
         if engine == "gemini":
             if os.getenv("GEMINI_API_KEY", "").strip() and _gemini_tts_claim_request():
@@ -3109,10 +3110,16 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") 
                     raise GeminiTTSError("Gemini TTS returned no usable narration", "invalid_audio")
                 except GeminiTTSError as e:
                     _gemini_tts_block_on_error(e)
+                    if strict_engine:
+                        raise
                     print(f"::warning title=Gemini TTS fallback::{os.path.basename(audio_dest)}: {e.code}; trying Kokoro, then Edge.", flush=True)
                 except Exception as e:
+                    if strict_engine:
+                        raise
                     print(f"::warning title=Gemini TTS fallback::{os.path.basename(audio_dest)}: {type(e).__name__}; trying Kokoro, then Edge.", flush=True)
             else:
+                if strict_engine:
+                    raise RuntimeError("Gemini TTS quota/key is unavailable for this episode")
                 print(f"::warning title=Gemini TTS fallback::{os.path.basename(audio_dest)}: key unavailable or per-run request limit reached; trying Kokoro, then Edge.", flush=True)
 
         # Own-voice narration (human element): IndicF5 clones the creator's
@@ -3137,6 +3144,8 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") 
                 print("::warning title=Own voice NOT used::IndicF5 is not installed; narration uses Edge-TTS.", flush=True)
                 if os.getenv("INDICF5_STRICT", "False").strip().lower() == "true":
                     raise RuntimeError("INDICF5_STRICT=true: IndicF5 engine not installed; stopping instead of using Edge-TTS.")
+            if strict_engine:
+                raise RuntimeError("IndicF5 failed to synthesize a complete narration chunk")
             engine = "edge"
 
         # Kokoro is the local fallback. audio_engine.py adds real silence after cinematic
@@ -3158,6 +3167,9 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") 
             else:
                 print("Kokoro notice: package unavailable - falling back to Edge-TTS.", flush=True)
                 print("::warning title=Kokoro voice NOT used::Kokoro is not installed - narration uses Edge-TTS.", flush=True)
+
+        if strict_engine and engine in ("gemini", "kokoro", "auto"):
+            raise RuntimeError("Chosen episode narrator did not produce a complete chunk")
 
         # Edge remains available as an explicit engine and as the automatic
         # fallback when Kokoro fails.
@@ -3220,6 +3232,8 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "") 
                 print(f"Edge-TTS attempt {attempt} failed: {e}", flush=True)
                 await asyncio.sleep(1.5)
 
+        if strict_engine:
+            raise RuntimeError("Edge-TTS failed; refusing silent placeholder narration")
         subprocess.run(
             [
                 "ffmpeg", "-y", "-f", "lavfi",
@@ -4287,17 +4301,24 @@ async def process():
     # 4. Parallel Audio Generation (Long + Shorts) - each task also returns
     # that scene's word-level caption timing (see generate_clean_audio).
     audio_tasks = []
-    for i, scene in enumerate(long_scenes):
-        idx = i + 1
-        narration = scene.get("text") or scene.get("narration_chunk", "")
-        audio_tasks.append(generate_clean_audio(narration, f"public/audio/chunk_{idx}.mp3", scene.get("director", {}).get("audioBeat", scene.get("director", {}).get("entertainmentBeat", ""))))
+    for scenes, prefix in ((long_scenes, "chunk"), (shorts_scenes, "shorts_chunk")):
+        for i, scene in enumerate(scenes):
+            director = scene.get("director", {})
+            audio_tasks.append({
+                "text": scene.get("text") or scene.get("narration_chunk", ""),
+                "beat": director.get("audioBeat", director.get("entertainmentBeat", "")),
+                "path": f"public/audio/{prefix}_{i + 1}.mp3",
+            })
 
-    for i, scene in enumerate(shorts_scenes):
-        idx = i + 1
-        narration = scene.get("text") or scene.get("narration_chunk", "")
-        audio_tasks.append(generate_clean_audio(narration, f"public/audio/shorts_chunk_{idx}.mp3", scene.get("director", {}).get("audioBeat", scene.get("director", {}).get("entertainmentBeat", ""))))
+    # All Long + Shorts narrations succeed with ONE engine before files commit.
+    audio_word_timings, episode_voice_report = await synthesize_episode(
+        audio_tasks, generate_clean_audio, get_audio_duration,
+        lambda text: prepare_storyteller_text(
+            _naturalize_text(to_spoken_hindi(text)) or "हरि ॐ तत्सत्"
+        ),
+        requested=os.getenv("AUDIO_TTS_ENGINE", "kokoro"),
+    )
 
-    audio_word_timings = await asyncio.gather(*audio_tasks)
     long_word_timings = audio_word_timings[:len(long_scenes)]
     shorts_word_timings = audio_word_timings[len(long_scenes):]
 
@@ -4618,6 +4639,7 @@ async def process():
         ) if meta_data.get(k)
     }
     metadata_for_upload["factCheck"] = fact_check_items(payload)
+    metadata_for_upload["narrationVoice"] = episode_voice_report
     metadata_for_upload["spokenHindi"] = {
         "status": spoken_hindi_report["status"],
         "severeScenes": spoken_hindi_report["severeScenes"],
