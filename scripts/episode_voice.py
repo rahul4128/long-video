@@ -13,7 +13,7 @@ import tempfile
 
 
 def engine_candidates(requested):
-    requested = (requested or "kokoro").strip().lower()
+    requested = (requested or "gemini").strip().lower()
     chains = {
         "gemini": ("gemini", "kokoro", "edge"),
         "kokoro": ("kokoro", "edge"),
