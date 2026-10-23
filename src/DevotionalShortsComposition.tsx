@@ -3,9 +3,13 @@ import {
   AbsoluteFill,
   Audio,
   Series,
+  Sequence,
   staticFile,
   useVideoConfig,
 } from 'remotion';
+import { loadFont } from '@remotion/google-fonts/NotoSansDevanagari';
+
+const { fontFamily } = loadFont();
 import { DevotionalVideoProps } from './types';
 import { Scene } from './Scene';
 import { Subtitles } from './Subtitles';
@@ -16,7 +20,7 @@ export const DevotionalShortsComposition: React.FC<DevotionalVideoProps & { plat
   hookText = '',
   platform = 'youtube',
 }) => {
-  const { fps } = useVideoConfig();
+  const { fps, durationInFrames } = useVideoConfig();
 
   return (
     <AbsoluteFill style={{ backgroundColor: '#000000' }}>
@@ -68,6 +72,38 @@ export const DevotionalShortsComposition: React.FC<DevotionalVideoProps & { plat
 
       {/* First-1.8s on-screen Hindi hook */}
       <HookOverlay text={hookText} format="shorts" platform={platform} />
+
+      {/* A platform-specific ending, not a YouTube "Subscribe" overlay. */}
+      {platform === 'instagram' && (
+        <Sequence
+          from={Math.max(0, durationInFrames - Math.round(fps * 1.7))}
+          durationInFrames={Math.min(durationInFrames, Math.round(fps * 1.7))}
+        >
+          <AbsoluteFill
+            style={{
+              justifyContent: 'flex-start',
+              alignItems: 'center',
+              paddingTop: 270,
+              pointerEvents: 'none',
+            }}
+          >
+            <div
+              style={{
+                fontFamily,
+                fontWeight: 900,
+                fontSize: 52,
+                color: '#FFE8A1',
+                padding: '18px 30px',
+                borderRadius: 22,
+                background: 'rgba(18, 10, 6, 0.84)',
+                textShadow: '0 4px 14px #000',
+              }}
+            >
+              फॉलो • सेव • शेयर
+            </div>
+          </AbsoluteFill>
+        </Sequence>
+      )}
     </AbsoluteFill>
   );
 };
