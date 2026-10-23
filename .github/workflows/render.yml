@@ -396,6 +396,7 @@ jobs:
           GEMINI_TTS_VOICE: ${{ vars.GEMINI_TTS_VOICE || 'Kore' }}
           GEMINI_TTS_STYLE: ${{ vars.GEMINI_TTS_STYLE || '' }}
           GEMINI_TTS_MAX_REQUESTS: ${{ vars.GEMINI_TTS_MAX_REQUESTS || '12' }}
+          GEMINI_TTS_DAILY_REMAINING: ${{ vars.GEMINI_TTS_DAILY_REMAINING || '' }}
           GEMINI_TTS_MAX_API_ATTEMPTS: ${{ vars.GEMINI_TTS_MAX_API_ATTEMPTS || '18' }}
           GEMINI_TTS_MAX_RETRIES: ${{ vars.GEMINI_TTS_MAX_RETRIES || '2' }}
           GEMINI_TTS_COOLDOWN_SECONDS: ${{ vars.GEMINI_TTS_COOLDOWN_SECONDS || '20' }}
@@ -432,7 +433,7 @@ jobs:
           PY
 
       - name: Save narration cache for future retries
-        if: always()
+        if: ${{ always() && hashFiles('.tts_cache/**/*.mp3') != '' }}
         uses: actions/cache/save@v4
         with:
           path: .tts_cache
