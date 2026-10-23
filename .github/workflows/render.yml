@@ -417,6 +417,10 @@ jobs:
       - name: Fail closed if Long or Shorts scene visuals are missing
         run: python scripts/validate_native_visuals.py
 
+      # Uses only approved portrait shots; never calls Gemini or Canva.
+      - name: Prepare Instagram-specific review assets and cover
+        run: python scripts/build_instagram_reel.py
+
       - name: Validate music files, copyright evidence and scene coverage
         run: python scripts/validate_music.py
 
@@ -526,6 +530,7 @@ jobs:
             public/audio
             public/props.json
             public/props_shorts.json
+            public/props_instagram.json
             public/thumbnail_props*.json
             out/thumbnail.jpg
             out/thumbnail_shorts.jpg
@@ -543,6 +548,8 @@ jobs:
             out/editing_qc_report.json
             out/color_continuity_report.json
             out/spoken_hindi_report.json
+            out/instagram_status.json
+            out/instagram_post.txt
           retention-days: 1
 
   # ---------------------------------------------------------------
@@ -666,6 +673,23 @@ jobs:
             --output out/final_video_shorts.mastered.mp4 --report out/audio_master_shorts.json
           mv -f out/final_video_shorts.mastered.mp4 out/final_video_shorts.mp4
 
+      # Reuse the same Node install and QC-approved portrait scene assets.
+      - name: Render separate Instagram 9:16 Reel and Hindi-safe cover
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          if python -c 'import json; from pathlib import Path; p=Path("out/instagram_status.json"); assert p.exists() and json.loads(p.read_text())["status"] == "ready_for_manual_review"'; then
+            trap 'rm -f out/final_video_instagram.mp4 out/instagram_cover.jpg out/audio_master_instagram.json' ERR
+            npx remotion render InstagramReelComposition out/final_video_instagram.mp4 --props=public/props_instagram.json --concurrency=$(nproc)
+            python scripts/master_final_audio.py --input out/final_video_instagram.mp4 \
+              --output out/final_video_instagram.mastered.mp4 --report out/audio_master_instagram.json
+            mv -f out/final_video_instagram.mastered.mp4 out/final_video_instagram.mp4
+            npx remotion still InstagramCoverComposition out/instagram_cover.jpg --props=public/thumbnail_props_instagram.json
+            python scripts/validate_instagram_reel.py
+          else
+            echo "::warning title=Instagram review required::Story, cover, spoken CTA, or length failed the Instagram-only gate; YouTube render proceeds."
+          fi
+
       - name: Upload Shorts Video Artifact
         uses: actions/upload-artifact@v7
         with:
@@ -673,6 +697,11 @@ jobs:
           path: |
             out/final_video_shorts.mp4
             out/audio_master_shorts.json
+            out/final_video_instagram.mp4
+            out/instagram_cover.jpg
+            out/audio_master_instagram.json
+            out/instagram_status.json
+            out/instagram_post.txt
           retention-days: 14
 
   # ---------------------------------------------------------------
@@ -1005,6 +1034,9 @@ jobs:
               cat out/youtube_pack.md 2>/dev/null || echo "_YouTube pack not generated._"
               echo
               cat out/canva_notes.md 2>/dev/null || echo "_Canva finishing not run._"
+              echo
+              echo "## Instagram upload — manual review only"
+              cat shorts/instagram_post.txt 2>/dev/null || echo "Reel not ready; check instagram_status.json."
             } > release_notes.md
             gh release create "$TAG" \
               "video/final_video.mp4" \
@@ -1027,6 +1059,14 @@ jobs:
             echo "Reusing existing release ID $RELEASE_ID for $TAG"
           fi
           test -n "$RELEASE_ID"
+          # Never attach incomplete Instagram files. Instagram posting stays manual.
+          if [ -s shorts/final_video_instagram.mp4 ] && [ -s shorts/instagram_cover.jpg ] && [ -s shorts/audio_master_instagram.json ]; then
+            gh release upload "$TAG" shorts/final_video_instagram.mp4 shorts/instagram_cover.jpg \
+              shorts/audio_master_instagram.json shorts/instagram_post.txt \
+              --repo "${{ github.repository }}" --clobber
+          else
+            echo "Instagram files require review; original YouTube release unaffected."
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
 
