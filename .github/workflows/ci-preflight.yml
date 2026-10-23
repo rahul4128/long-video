@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - visual-director-v2
+      - codex/episode-voice-consistency-20261023
       - codex/instagram-reels-quality-20261023
     paths:
       - '**.py'
@@ -58,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           for file in \
-            test_canva_image_provider.py test_canva_token_handoff.py test_gemini_tts.py test_image_framing.py test_music_engine.py test_editing_director.py \
+            test_canva_image_provider.py test_canva_token_handoff.py test_gemini_tts.py test_episode_voice.py test_image_framing.py test_music_engine.py test_editing_director.py \
             test_story_visual_relevance.py \
             test_p1_storytelling.py test_preflight_payload.py test_festival_date_gate.py test_festival_timing.py test_editing_performance_learning.py \
             test_render_style_feedback.py test_editing_style_engine.py \
@@ -66,4 +67,5 @@ jobs:
             test_master_final_audio.py test_validate_final_audio.py; do
             python -m unittest discover -s tests -p "$file" -v
           done
+
           python -m unittest discover -s tests -p 'test_instagram_reel.py' -v
