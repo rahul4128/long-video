@@ -297,7 +297,7 @@ jobs:
           path: out
 
       - name: Static Python syntax check
-        run: python -m py_compile scripts/validate_festival_timing.py scripts/canva_token_handoff.py scripts/gemini_tts.py scripts/canva_image_provider.py content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py editing_style_engine.py color_continuity.py scripts/validate_color_continuity.py scripts/master_final_audio.py scripts/validate_final_audio.py spoken_hindi_qc.py scripts/visual_relevance_gate.py scripts/visual_storyboard.py scripts/build_editing_style_signals.py scripts/render_style_attribution.py scripts/ingest_editing_feedback.py
+        run: python -m py_compile scripts/validate_festival_timing.py scripts/canva_token_handoff.py scripts/gemini_tts.py scripts/episode_voice.py scripts/canva_image_provider.py content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py editing_style_engine.py color_continuity.py scripts/validate_color_continuity.py scripts/master_final_audio.py scripts/validate_final_audio.py spoken_hindi_qc.py scripts/visual_relevance_gate.py scripts/visual_storyboard.py scripts/build_editing_style_signals.py scripts/render_style_attribution.py scripts/ingest_editing_feedback.py
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v7
@@ -372,6 +372,16 @@ jobs:
             python -c "import torch, torchvision, open_clip; from torchvision.ops import nms; print('OpenCLIP runtime ready: torch=' + torch.__version__ + ', torchvision=' + torchvision.__version__)"
           fi
 
+      # Cache is keyed internally by SHA256(text, engine, voice, model/style).
+      # Run-scoped keys save new audio while restore-keys fetch older cache.
+      - name: Restore content-addressed narration cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .tts_cache
+          key: episode-tts-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            episode-tts-${{ runner.os }}-${{ github.ref_name }}-
+
       - name: Generate Unified Assets (4K B-Roll + FLUX.1 + Voiceover)
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -407,6 +417,26 @@ jobs:
         run: |
           export DISPATCH_PAYLOAD="$(python -c 'import json; print(json.load(open("out/replay_inputs.json", encoding="utf-8"))["payload"])')"
           python generate_assets.py
+
+      - name: Validate episode narrator consistency before rendering
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report = json.loads(Path("out/voice_episode_report.json").read_text())
+          assert report["status"] == "passed"
+          assert report["engine"] in ("gemini", "kokoro", "edge", "indicf5")
+          assert report["mixed_engines"] is False
+          assert report["chunk_count"] > 1
+          print("One engine for all", report["chunk_count"], "Long + Shorts chunks:", report["engine"])
+          PY
+
+      - name: Save narration cache for future retries
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .tts_cache
+          key: episode-tts-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
 
       # Audit exactly what the editor chose before costly Remotion rendering.
       - name: Build storyboard contact sheets matched to Hindi narration
@@ -449,6 +479,7 @@ jobs:
             out/visual_storyboard_*.json
             out/partial_props_*.json
             out/spoken_hindi_report.json
+            out/voice_episode_report.json
           if-no-files-found: warn
           retention-days: 2
 
@@ -543,6 +574,7 @@ jobs:
             out/editing_qc_report.json
             out/color_continuity_report.json
             out/spoken_hindi_report.json
+            out/voice_episode_report.json
           retention-days: 1
 
   # ---------------------------------------------------------------
