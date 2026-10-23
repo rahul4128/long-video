@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - visual-director-v2
+      - codex/episode-voice-consistency-20261023
     paths:
       - '**.py'
       - 'scripts/**'
