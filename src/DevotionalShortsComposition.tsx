@@ -11,9 +11,10 @@ import { Scene } from './Scene';
 import { Subtitles } from './Subtitles';
 import { HookOverlay } from './HookOverlay';
 
-export const DevotionalShortsComposition: React.FC<DevotionalVideoProps> = ({
+export const DevotionalShortsComposition: React.FC<DevotionalVideoProps & { platform?: 'youtube' | 'instagram' }> = ({
   scenes = [],
   hookText = '',
+  platform = 'youtube',
 }) => {
   const { fps } = useVideoConfig();
 
@@ -57,6 +58,7 @@ export const DevotionalShortsComposition: React.FC<DevotionalVideoProps> = ({
                 visualBeats={scene.visualBeats}
                 captionStyle={scene.captionStyle || 'focus'}
                 format="shorts"
+                platform={platform}
                 sceneDurationInFrames={sceneDurationInFrames}
               />
             </Series.Sequence>
@@ -65,7 +67,7 @@ export const DevotionalShortsComposition: React.FC<DevotionalVideoProps> = ({
       </Series>
 
       {/* First-1.8s on-screen Hindi hook */}
-      <HookOverlay text={hookText} format="shorts" />
+      <HookOverlay text={hookText} format="shorts" platform={platform} />
     </AbsoluteFill>
   );
 };
