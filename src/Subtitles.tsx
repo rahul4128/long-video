@@ -17,6 +17,7 @@ interface SubtitlesProps {
   words?: WordTiming[];
   visualBeats?: VisualBeat[];
   format?: 'long' | 'shorts';
+  platform?: 'youtube' | 'instagram';
   captionStyle?: 'calm' | 'focus';
   sceneDurationInFrames?: number;
 }
@@ -24,7 +25,7 @@ interface SubtitlesProps {
 const MAX_CHUNK_CHARS = 38;
 const MAX_CHUNK_WORDS = 7;
 
-function groupWordsIntoChunks(words: WordTiming[]): WordTiming[][] {
+function groupWordsIntoChunks(words: WordTiming[], maxWords = MAX_CHUNK_WORDS, maxChars = MAX_CHUNK_CHARS): WordTiming[][] {
   const chunks: WordTiming[][] = [];
   let current: WordTiming[] = [];
   let currentChars = 0;
@@ -33,8 +34,8 @@ function groupWordsIntoChunks(words: WordTiming[]): WordTiming[][] {
     const wordLen = (w.word || '').length + 1;
     if (
       current.length > 0 &&
-      (currentChars + wordLen > MAX_CHUNK_CHARS ||
-        current.length >= MAX_CHUNK_WORDS)
+      (currentChars + wordLen > maxChars ||
+        current.length >= maxWords)
     ) {
       chunks.push(current);
       current = [];
@@ -55,6 +56,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
   words,
   visualBeats = [],
   format = 'long',
+  platform = 'youtube',
   captionStyle = 'focus',
   sceneDurationInFrames,
 }) => {
@@ -79,8 +81,9 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
       : [];
 
   const effectiveWords = words && words.length > 0 ? words : fallbackWords;
+  const isInstagram = platform === 'instagram';
   const chunks =
-    effectiveWords.length > 0 ? groupWordsIntoChunks(effectiveWords) : [];
+    effectiveWords.length > 0 ? groupWordsIntoChunks(effectiveWords, isInstagram ? 4 : MAX_CHUNK_WORDS, isInstagram ? 27 : MAX_CHUNK_CHARS) : [];
 
   let activeChunk: WordTiming[] | null = null;
   if (chunks.length > 0) {
@@ -206,9 +209,9 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
         style={{
           justifyContent: 'flex-start',
           alignItems: 'center',
-          paddingTop: isShorts ? 330 : 130,
-          paddingLeft: isShorts ? 62 : 150,
-          paddingRight: isShorts ? 62 : 150,
+          paddingTop: isInstagram ? 390 : isShorts ? 330 : 130,
+          paddingLeft: isInstagram ? 86 : isShorts ? 62 : 150,
+          paddingRight: isInstagram ? 86 : isShorts ? 62 : 150,
           pointerEvents: 'none',
           opacity: emphasisOpacity,
         }}
@@ -273,9 +276,9 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
         style={{
           justifyContent: 'flex-end',
           alignItems: 'center',
-          paddingBottom: isShorts ? 105 : 70,
-          paddingLeft: isShorts ? 42 : 80,
-          paddingRight: isShorts ? 42 : 80,
+          paddingBottom: isInstagram ? 340 : isShorts ? 105 : 70,
+          paddingLeft: isInstagram ? 84 : isShorts ? 42 : 80,
+          paddingRight: isInstagram ? 84 : isShorts ? 42 : 80,
           pointerEvents: 'none',
         }}
       >
@@ -296,7 +299,7 @@ export const Subtitles: React.FC<SubtitlesProps> = ({
           <p
             style={{
               margin: 0,
-              fontSize: isShorts ? 43 : 36,
+              fontSize: isInstagram ? 48 : isShorts ? 43 : 36,
               fontFamily,
               fontWeight: 700,
               lineHeight: isShorts ? 1.38 : 1.45,

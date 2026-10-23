@@ -5,6 +5,7 @@ on:
     branches:
       - visual-director-v2
       - codex/episode-voice-consistency-20261023
+      - codex/instagram-reels-quality-20261023
     paths:
       - '**.py'
       - 'scripts/**'
@@ -66,3 +67,5 @@ jobs:
             test_master_final_audio.py test_validate_final_audio.py; do
             python -m unittest discover -s tests -p "$file" -v
           done
+
+          python -m unittest discover -s tests -p 'test_instagram_reel.py' -v
