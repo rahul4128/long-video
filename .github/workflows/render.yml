@@ -297,7 +297,7 @@ jobs:
           path: out
 
       - name: Static Python syntax check
-        run: python -m py_compile scripts/validate_festival_timing.py scripts/canva_token_handoff.py scripts/gemini_tts.py scripts/build_instagram_reel.py scripts/validate_instagram_reel.py scripts/canva_image_provider.py content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py editing_style_engine.py color_continuity.py scripts/validate_color_continuity.py scripts/master_final_audio.py scripts/validate_final_audio.py spoken_hindi_qc.py scripts/visual_relevance_gate.py scripts/visual_storyboard.py scripts/build_editing_style_signals.py scripts/render_style_attribution.py scripts/ingest_editing_feedback.py
+        run: python -m py_compile scripts/validate_festival_timing.py scripts/canva_token_handoff.py scripts/gemini_tts.py scripts/canva_image_provider.py content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py editing_style_engine.py color_continuity.py scripts/validate_color_continuity.py scripts/master_final_audio.py scripts/validate_final_audio.py spoken_hindi_qc.py scripts/visual_relevance_gate.py scripts/visual_storyboard.py scripts/build_editing_style_signals.py scripts/render_style_attribution.py scripts/ingest_editing_feedback.py
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v7
@@ -419,7 +419,9 @@ jobs:
 
       # Uses only approved portrait shots; never calls Gemini or Canva.
       - name: Prepare Instagram-specific review assets and cover
-        run: python scripts/build_instagram_reel.py
+        run: |
+          python -m py_compile scripts/build_instagram_reel.py scripts/validate_instagram_reel.py
+          python scripts/build_instagram_reel.py
 
       - name: Validate music files, copyright evidence and scene coverage
         run: python scripts/validate_music.py
@@ -535,6 +537,8 @@ jobs:
             out/thumbnail.jpg
             out/thumbnail_shorts.jpg
             out/metadata.json
+            out/instagram_status.json
+            out/instagram_post.txt
             out/content_qc_report.json
             out/visual_director_plan.json
             out/visual_search_report.json
@@ -548,8 +552,6 @@ jobs:
             out/editing_qc_report.json
             out/color_continuity_report.json
             out/spoken_hindi_report.json
-            out/instagram_status.json
-            out/instagram_post.txt
           retention-days: 1
 
   # ---------------------------------------------------------------
