@@ -2834,8 +2834,8 @@ def _gemini_tts_block_on_error(exc: GeminiTTSError) -> None:
     # Daily quota/auth errors are non-recoverable and use Kokoro afterwards.
     code = str(getattr(exc, "code", "") or "").lower()
     if any(term in code for term in (
-        "quota_daily_exhausted", "daily_quota", "quota_exceeded",
-        "resource_exhausted", "billing", "authentication", "invalid_api_key",
+        "quota_daily_exhausted", "daily_quota", "request_budget_exhausted",
+        "billing", "authentication", "invalid_api_key",
     )):
         global _GEMINI_TTS_BLOCKED
         with _GEMINI_TTS_STATE_LOCK:
