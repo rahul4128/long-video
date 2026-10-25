@@ -1849,8 +1849,12 @@ def _generate_visual_beat_image(scene_prompt: str, beat: dict, orientation: str,
         f"{shot_type} cinematic composition, designed for {camera} motion, "
         f"{realism_phrase}, {period_phrase}, {lighting_phrase}, "
         "Narration-matched subject and action MUST be visibly present. "
-        "Do not add a generic smiling person, random temple, unrelated deity, "
-        "abstract energy effects or unrelated wellness B-roll to fill space. "
+        "This is an Indian devotional/mythology KATHA. Show culturally accurate "
+        "Indian locations, clothing, ornaments, temple architecture and puja objects "
+        "only when they directly belong to this exact story. If a specific deity is "
+        "named, preserve the correct identity, iconography and attributes. "
+        "No identity swaps, Western models, croissants, kettles, unrelated Western "
+        "lifestyle stock, random temple, unrelated deity or wellness B-roll. "
         "If the line is conceptual, use a specific real object or culturally accurate "
         "scene from this episode that clearly illustrates the current sentence. "
         "Consistent visual language, single coherent moment, no collage, no text. "
@@ -4169,7 +4173,13 @@ async def process():
     # The pipeline intentionally keeps only one long-video thumbnail and one
     # Shorts thumbnail. thumbnailConcepts may still arrive from Make for
     # creative planning, but they are not rendered into extra files.
-    thumb_prompt = thumbnail_data.get("imagePrompt") or "Lord Krishna radiant divine aura with glowing Sudarshan Chakra, dramatic 8k thumbnail"
+    # No generic Krishna thumbnail for an episode about another deity.
+    episode_subject = (seo_metadata.get("long_video_title") or
+                       seo_metadata.get("shorts_title") or "Indian devotional katha")
+    thumb_prompt = thumbnail_data.get("imagePrompt") or (
+        f"Story-specific Indian devotional image illustrating {episode_subject}; "
+        "correct deity identity and authentic Indian setting, no unrelated subjects"
+    )
 
     def _thumb_layout(base_prompt: str, title: str, vertical: bool = False):
         source = shorts_thumbnail_data if vertical else thumbnail_data
@@ -4227,7 +4237,9 @@ async def process():
     thumb_prompt = (
         f"{thumb_prompt}. YouTube creator thumbnail art direction: ONE dominant focal subject, "
         f"dramatic emotion/action, strong contrast, cinematic lighting, clean uncluttered composition, "
-        f"no text, no watermark, no collage, no split screen. Keep the main subject unobstructed and "
+        f"no text, no watermark, no collage, no split screen. "
+        f"Match the story and named deity in '{episode_subject}', using accurate Indian attire "
+        f"and sacred imagery; no random Western food or models. Keep the subject unobstructed and "
         f"leave intentional clean negative space on the {_opposite_side(thumbnail_text_position)} "
         f"for a short Hindi hook."
     )
@@ -4269,7 +4281,9 @@ async def process():
     shorts_thumb_prompt = (
         f"{shorts_thumb_prompt}. YouTube Shorts cover art direction: ONE dominant focal subject, "
         f"dramatic emotion/action, strong contrast, cinematic lighting, clean uncluttered composition, "
-        f"no text, no watermark, no collage, no split screen. Keep the main subject unobstructed and "
+        f"no text, no watermark, no collage, no split screen. "
+        f"Match the story and named deity in '{episode_subject}', using accurate Indian attire "
+        f"and sacred imagery; no random Western food or models. Keep the subject unobstructed and "
         f"leave intentional clean negative space on the {_opposite_side(shorts_thumbnail_text_position)} "
         f"for a short Hindi hook."
     )
