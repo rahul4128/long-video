@@ -71,7 +71,7 @@ class PreflightPayloadTests(unittest.TestCase):
         self.assertEqual(checked["pipeline"], "visual-director-v2-oflifepart31")
         self.assertFalse(checked["source_run_id"])
 
-    def test_saved_story_has_no_packaging_or_spoken_hindi_warnings(self):
+    def test_saved_story_has_no_blocking_hindi_or_packaging_issues(self):
         from content_qc import validate_payload
         from spoken_hindi_qc import assess_scenes
         checked = prepare({
@@ -94,7 +94,10 @@ class PreflightPayloadTests(unittest.TestCase):
                 story["long_video"]["scenes"], story["shorts"]["scenes"],
                 report_path=Path(tmp) / "spoken_hindi_test.json",
             )
-        self.assertEqual(narration["status"], "clear")
+        # New everyday-Hindi style warnings are advisory for older approved
+        # stories. Fatal/severe content failures remain disallowed.
+        self.assertIn(narration["status"], ("clear", "review"))
+        self.assertEqual(narration["severeScenes"], 0)
 
     def test_failed_run_191_original_stays_blocked_but_corrected_replay_passes_both_date_gates(self):
         with self.assertRaisesRegex(ValueError, "Festival-date preflight BLOCKED"):

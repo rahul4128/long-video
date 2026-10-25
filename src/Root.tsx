@@ -4,8 +4,6 @@ import { DevotionalComposition } from './DevotionalComposition';
 import { DevotionalShortsComposition } from './DevotionalShortsComposition';
 import { ThumbnailComposition, ThumbnailProps } from './ThumbnailComposition';
 import { ShortsThumbnailComposition } from './ShortsThumbnailComposition';
-import { InstagramReelComposition } from './InstagramReelComposition';
-import { InstagramCoverComposition } from './InstagramCoverComposition';
 import { DevotionalVideoProps } from './types';
 import defaultPropsLong from '../public/props.json';
 import defaultPropsShorts from '../public/props_shorts.json';
@@ -56,24 +54,6 @@ export const RemotionRoot: React.FC = () => {
         width={1080}
         height={1920}
         defaultProps={typedPropsShorts}
-      />
-
-      {/* Instagram: portrait-only export, independent from YouTube Long framing. */}
-      <Composition
-        id="InstagramReelComposition"
-        component={InstagramReelComposition as unknown as React.ComponentType<Record<string, unknown>>}
-        durationInFrames={durationInFramesShorts}
-        fps={shortsFps}
-        width={1080}
-        height={1920}
-        defaultProps={{ ...typedPropsShorts, platform: 'instagram' }}
-      />
-      <Still
-        id="InstagramCoverComposition"
-        component={InstagramCoverComposition as unknown as React.ComponentType<Record<string, unknown>>}
-        width={1080}
-        height={1920}
-        defaultProps={typedPropsThumbnailShorts}
       />
 
       {/* 3. High-CTR Thumbnail (16:9 still, background image + bold Hindi

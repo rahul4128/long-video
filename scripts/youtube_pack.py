@@ -68,6 +68,43 @@ def _block(text):
     return "```\n" + (text or "").strip() + "\n```"
 
 
+
+def instagram_caption_english(meta: dict) -> str:
+    """English-only release copy; Hindi stays in the actual narrated video."""
+    raw = " ".join(str(meta.get(key) or "") for key in (
+        "shorts_title", "long_video_title", "long_video_description"
+    )).lower()
+    entities = [
+        (("वृंदावन", "vrindavan"), "Vrindavan", "#Vrindavan"),
+        (("कृष्ण", "krishna", "कान्हा", "गोविंद"), "Lord Krishna", "#Krishna"),
+        (("राधा", "radha"), "Radha", "#RadhaKrishna"),
+        (("शिव", "महादेव", "shiva"), "Lord Shiva", "#LordShiva"),
+        (("राम", "ramayan", "rama"), "Lord Rama", "#Ramayana"),
+        (("हनुमान", "hanuman"), "Lord Hanuman", "#Hanuman"),
+        (("दुर्गा", "नवरात्र", "siddhidatri", "सिद्धिदात्री"), "Goddess Durga", "#Navratri"),
+        (("विष्णु", "vishnu"), "Lord Vishnu", "#Vishnu"),
+        (("महाभारत", "mahabharat"), "the Mahabharata", "#Mahabharata"),
+        (("करवा चौथ", "karwa"), "Karva Chauth", "#KarvaChauth"),
+    ]
+    found = [(label, tag) for terms, label, tag in entities if any(term in raw for term in terms)]
+    subjects = [label for label, _ in found[:2]]
+    subject_text = " and ".join(subjects) if subjects else "Indian devotional traditions"
+    hashtags = [tag for _, tag in found[:2]]
+    for tag in ("#DevotionalStories", "#IndianMythology", "#SanatanDharma"):
+        if tag not in hashtags and len(hashtags) < 5:
+            hashtags.append(tag)
+    # No automatic Hindi-to-English transliteration or fabricated plot summary.
+    # The actual YouTube Hindi title/story stays unchanged.
+    return (
+        f"A short devotional story about {subject_text}. "
+        "Watch till the end for the complete moment.\\n\\n"
+        "What part of this story stayed with you? Tell us in the comments. "
+        "Follow for more Indian mythology stories, save this Reel, "
+        "and share it with a friend.\\n\\n"
+        + " ".join(hashtags)
+    ).replace("\\n", "\n")
+
+
 def build(meta: dict) -> str:
     long_title = (meta.get("long_video_title") or "").strip()
     shorts_title = (meta.get("shorts_title") or "").strip()
@@ -105,13 +142,13 @@ def build(meta: dict) -> str:
               "", "**Description**", _block(shorts_desc),
               "", "**Thumbnail/cover:** `thumbnail_shorts_final.jpg` (pick it as the cover frame in the app)",
               "- *Related video*: link the long video above (this is what turns Shorts views into watch hours)",
-              "", "## 3. Instagram Reel (dedicated 1080x1920)",
-              "- Use `final_video_instagram.mp4` and `instagram_cover.jpg` ONLY if `instagram_status.json` says ready_for_manual_review.",
-              "- The cover derives from the first approved portrait scene, with 2–4 readable Hindi words.",
-              "- Never upload a letterboxed 16:9 YouTube video to Instagram.",
-              "- Copy `instagram_post.txt` for an Instagram-specific Follow / Save / Share CTA and 3–5 focused hashtags.",
-              "- Select the cover deliberately. Profile highlights, replies and bio links are handled manually in Instagram.",
-              "- If status requires review, fix the narration, story, length or cover before publishing."]
+              "", "## 3. Instagram Reel — reuse the YouTube Short (9:16)",
+              "- Upload `final_video_shorts.mp4` directly to Instagram; no separate render needed.",
+              "- Use `thumbnail_shorts_final.jpg` as the cover after checking the profile crop.",
+              "- Copy the following English caption (video narration may remain in natural Hindi):",
+              "", "**Instagram caption — English (copy and paste)**",
+              _block(instagram_caption_english(meta)),
+              "- Review the cover and claims before posting; do not use a horizontal long video."]
 
     # Audit trail: source/creator/rights for all selected music is stored in
     # music_license_report.json on the GitHub draft release.

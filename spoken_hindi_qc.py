@@ -16,6 +16,10 @@ FORMAL = {
     "उपर्युक्त": "ऊपर बताई", "निम्नलिखित": "ये बातें",
     "अत्यंत": "बहुत", "प्रतिपादित": "बताया", "तदुपरांत": "उसके बाद",
     "अनिवार्यतः": "ज़रूर", "प्रायः": "अक्सर",
+    "अतः": "इसलिए", "पश्चात": "इसके बाद",
+    "परिणामस्वरूप": "इस वजह से", "कदाचित": "शायद",
+    "तत्पश्चात": "फिर", "वस्तुतः": "असल में",
+    "सर्वप्रथम": "सबसे पहले", "अवगत": "पता",
 }
 CONCEPTS = ("निष्काम कर्म", "अहंकार", "मोक्ष", "तिथि", "मुहूर्त", "संकल्प",
             "प्रदोष", "अभिषेक", "अर्घ्य", "उपवास", "परिक्रमा")
@@ -32,7 +36,7 @@ def assess_text(text, kind="long", scene=1):
     long_lengths = []
     for sentence in sentences:
         count = len(WORD_RE.findall(sentence))
-        if count > 32:
+        if count > 24:
             flags.append({"type": "long_spoken_sentence", "words": count})
             long_lengths.append(count)
     formal_found = sorted(word for word in FORMAL if re.search(

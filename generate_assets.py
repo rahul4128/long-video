@@ -28,7 +28,6 @@ from scripts.visual_relevance_gate import strong_stock_match, named_deity_requir
 from scripts.image_framing import framing_issue, preserve_full_subject, video_framing_issue
 from scripts.canva_image_provider import CanvaImageError, generate_canva_image
 from storyteller import build_prosody_map, prepare_storyteller_text
-from scripts.episode_voice import synthesize_episode
 from hindi_text import to_spoken_hindi, hindi_display_text, pick_hindi, text_free_prompt, has_latin, best_hindi_title
 try:
     import clip_rerank
@@ -1850,8 +1849,12 @@ def _generate_visual_beat_image(scene_prompt: str, beat: dict, orientation: str,
         f"{shot_type} cinematic composition, designed for {camera} motion, "
         f"{realism_phrase}, {period_phrase}, {lighting_phrase}, "
         "Narration-matched subject and action MUST be visibly present. "
-        "Do not add a generic smiling person, random temple, unrelated deity, "
-        "abstract energy effects or unrelated wellness B-roll to fill space. "
+        "This is an Indian devotional/mythology KATHA. Show culturally accurate "
+        "Indian locations, clothing, ornaments, temple architecture and puja objects "
+        "only when they directly belong to this exact story. If a specific deity is "
+        "named, preserve the correct identity, iconography and attributes. "
+        "No identity swaps, Western models, croissants, kettles, unrelated Western "
+        "lifestyle stock, random temple, unrelated deity or wellness B-roll. "
         "If the line is conceptual, use a specific real object or culturally accurate "
         "scene from this episode that clearly illustrates the current sentence. "
         "Consistent visual language, single coherent moment, no collage, no text. "
@@ -2801,6 +2804,13 @@ from scripts.gemini_tts import GeminiTTSError, generate_gemini_audio
 _GEMINI_TTS_STATE_LOCK = threading.Lock()
 _GEMINI_TTS_REQUESTS = 0
 _GEMINI_TTS_BLOCKED = False
+_TTS_NARRATOR_BY_PATH = {}
+_TTS_NARRATOR_LOCK = threading.Lock()
+
+def _record_narrator(path, engine, timings):
+    with _TTS_NARRATOR_LOCK:
+        _TTS_NARRATOR_BY_PATH[os.path.normpath(path)] = engine
+    return timings
 
 
 def _gemini_tts_claim_request() -> bool:
@@ -2820,11 +2830,16 @@ def _gemini_tts_claim_request() -> bool:
 
 
 def _gemini_tts_block_on_error(exc: GeminiTTSError) -> None:
-    # Fail over for the rest of this run after ANY TTS failure. This prevents
-    # repeated credit-using requests when the model/API returned bad audio.
-    global _GEMINI_TTS_BLOCKED
-    with _GEMINI_TTS_STATE_LOCK:
-        _GEMINI_TTS_BLOCKED = True
+    # Keep trying Gemini on later segments after transient errors.
+    # Daily quota/auth errors are non-recoverable and use Kokoro afterwards.
+    code = str(getattr(exc, "code", "") or "").lower()
+    if any(term in code for term in (
+        "quota_daily_exhausted", "daily_quota", "request_budget_exhausted",
+        "billing", "authentication", "invalid_api_key",
+    )):
+        global _GEMINI_TTS_BLOCKED
+        with _GEMINI_TTS_STATE_LOCK:
+            _GEMINI_TTS_BLOCKED = True
 
 def _fit_long_narration_to_target(audio_paths: list, word_timings: list, target_seconds: float = 205.0) -> float:
     """Keep long-form narration inside the production duration target.
@@ -3098,7 +3113,7 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "", 
         clean_text = prepare_storyteller_text(original_text)
         # Gemini is an optional higher-quality engine; Kokoro/Edge remain as
         # fallbacks. All speech engines use the same normalized Hindi transcript.
-        engine = (engine or os.getenv("AUDIO_TTS_ENGINE", "kokoro")).strip().lower()
+        engine = (engine or os.getenv("AUDIO_TTS_ENGINE", "gemini")).strip().lower()
 
         if engine == "gemini":
             if os.getenv("GEMINI_API_KEY", "").strip() and _gemini_tts_claim_request():
@@ -3106,7 +3121,7 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "", 
                     await asyncio.to_thread(generate_gemini_audio, clean_text, audio_dest)
                     if os.path.exists(audio_dest) and get_audio_duration(audio_dest) > 0.8:
                         print(f"  🎙️ Gemini TTS narration generated: {os.path.basename(audio_dest)}", flush=True)
-                        return _fallback_word_timings(clean_text, audio_dest)
+                        return _record_narrator(audio_dest, "gemini", _fallback_word_timings(clean_text, audio_dest))
                     raise GeminiTTSError("Gemini TTS returned no usable narration", "invalid_audio")
                 except GeminiTTSError as e:
                     _gemini_tts_block_on_error(e)
@@ -3129,7 +3144,7 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "", 
                 try:
                     ok = await asyncio.to_thread(generate_indicf5_audio, clean_text, audio_dest)
                     if ok and os.path.exists(audio_dest):
-                        return _fallback_word_timings(clean_text, audio_dest)
+                        return _record_narrator(audio_dest, "indicf5", _fallback_word_timings(clean_text, audio_dest))
                 except Exception as e:
                     import traceback
                     print(f"IndicF5 notice: {e} - falling back to Edge-TTS.", flush=True)
@@ -3157,7 +3172,7 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "", 
                         generate_kokoro_audio, clean_text, audio_dest
                     )
                     if ok and os.path.exists(audio_dest):
-                        return _fallback_word_timings(clean_text, audio_dest)
+                        return _record_narrator(audio_dest, "kokoro", _fallback_word_timings(clean_text, audio_dest))
                 except Exception as e:
                     print(
                         f"Kokoro notice: {e} - falling back to Edge-TTS.",
@@ -3178,7 +3193,7 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "", 
                 try:
                     timings = await _generate_edge_chunked_audio(clean_text, audio_dest)
                     if os.path.exists(audio_dest):
-                        return timings
+                        return _record_narrator(audio_dest, "edge", timings)
                 except Exception as e:
                     print(
                         f"Edge-TTS chunked attempt {attempt} failed: {e}",
@@ -3220,14 +3235,14 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "", 
                         shutil.copyfile(raw_path, audio_dest)
                     if os.path.exists(raw_path):
                         os.remove(raw_path)
-                    return [
+                    return _record_narrator(audio_dest, "edge", [
                         {
                             "word": cue.content,
                             "start": round(cue.start.total_seconds(), 3),
                             "end": round(cue.end.total_seconds(), 3),
                         }
                         for cue in submaker.cues
-                    ]
+                    ])
             except Exception as e:
                 print(f"Edge-TTS attempt {attempt} failed: {e}", flush=True)
                 await asyncio.sleep(1.5)
@@ -3243,7 +3258,7 @@ async def generate_clean_audio(narration: str, audio_dest: str, beat: str = "", 
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        return []
+        return _record_narrator(audio_dest, "silent_placeholder", [])
 
 
 def estimate_scene_duration_seconds(narration_text: str) -> float:
@@ -4158,7 +4173,13 @@ async def process():
     # The pipeline intentionally keeps only one long-video thumbnail and one
     # Shorts thumbnail. thumbnailConcepts may still arrive from Make for
     # creative planning, but they are not rendered into extra files.
-    thumb_prompt = thumbnail_data.get("imagePrompt") or "Lord Krishna radiant divine aura with glowing Sudarshan Chakra, dramatic 8k thumbnail"
+    # No generic Krishna thumbnail for an episode about another deity.
+    episode_subject = (seo_metadata.get("long_video_title") or
+                       seo_metadata.get("shorts_title") or "Indian devotional katha")
+    thumb_prompt = thumbnail_data.get("imagePrompt") or (
+        f"Story-specific Indian devotional image illustrating {episode_subject}; "
+        "correct deity identity and authentic Indian setting, no unrelated subjects"
+    )
 
     def _thumb_layout(base_prompt: str, title: str, vertical: bool = False):
         source = shorts_thumbnail_data if vertical else thumbnail_data
@@ -4216,7 +4237,9 @@ async def process():
     thumb_prompt = (
         f"{thumb_prompt}. YouTube creator thumbnail art direction: ONE dominant focal subject, "
         f"dramatic emotion/action, strong contrast, cinematic lighting, clean uncluttered composition, "
-        f"no text, no watermark, no collage, no split screen. Keep the main subject unobstructed and "
+        f"no text, no watermark, no collage, no split screen. "
+        f"Match the story and named deity in '{episode_subject}', using accurate Indian attire "
+        f"and sacred imagery; no random Western food or models. Keep the subject unobstructed and "
         f"leave intentional clean negative space on the {_opposite_side(thumbnail_text_position)} "
         f"for a short Hindi hook."
     )
@@ -4258,7 +4281,9 @@ async def process():
     shorts_thumb_prompt = (
         f"{shorts_thumb_prompt}. YouTube Shorts cover art direction: ONE dominant focal subject, "
         f"dramatic emotion/action, strong contrast, cinematic lighting, clean uncluttered composition, "
-        f"no text, no watermark, no collage, no split screen. Keep the main subject unobstructed and "
+        f"no text, no watermark, no collage, no split screen. "
+        f"Match the story and named deity in '{episode_subject}', using accurate Indian attire "
+        f"and sacred imagery; no random Western food or models. Keep the subject unobstructed and "
         f"leave intentional clean negative space on the {_opposite_side(shorts_thumbnail_text_position)} "
         f"for a short Hindi hook."
     )
@@ -4310,14 +4335,33 @@ async def process():
                 "path": f"public/audio/{prefix}_{i + 1}.mp3",
             })
 
-    # All Long + Shorts narrations succeed with ONE engine before files commit.
-    audio_word_timings, episode_voice_report = await synthesize_episode(
-        audio_tasks, generate_clean_audio, get_audio_duration,
-        lambda text: prepare_storyteller_text(
-            _naturalize_text(to_spoken_hindi(text)) or "हरि ॐ तत्सत्"
-        ),
-        requested=os.getenv("AUDIO_TTS_ENGINE", "kokoro"),
-    )
+    # Gemini is attempted per segment, with Kokoro only for failed segments.
+    # Completed Gemini chunks are kept: never re-synthesize the entire episode.
+    _TTS_NARRATOR_BY_PATH.clear()
+    audio_word_timings = await asyncio.gather(*(
+        generate_clean_audio(task["text"], task["path"], task["beat"])
+        for task in audio_tasks
+    ))
+    engines = [
+        _TTS_NARRATOR_BY_PATH.get(os.path.normpath(task["path"]), "unknown")
+        for task in audio_tasks
+    ]
+    if "unknown" in engines or "silent_placeholder" in engines:
+        raise RuntimeError("Narration is silent or missing; refusing to render")
+    episode_voice_report = {
+        "status": "passed",
+        "mode": "per_segment_gemini_first",
+        "requested_engine": os.getenv("AUDIO_TTS_ENGINE", "gemini"),
+        "chunk_count": len(audio_tasks),
+        "chunks": [
+            {"file": os.path.basename(task["path"]), "engine": engine}
+            for task, engine in zip(audio_tasks, engines)
+        ],
+        "counts": {engine: engines.count(engine) for engine in sorted(set(engines))},
+        "mixed_engines": len(set(engines)) > 1,
+    }
+    with open("out/voice_episode_report.json", "w", encoding="utf-8") as f:
+        json.dump(episode_voice_report, f, ensure_ascii=False, indent=2)
 
     long_word_timings = audio_word_timings[:len(long_scenes)]
     shorts_word_timings = audio_word_timings[len(long_scenes):]

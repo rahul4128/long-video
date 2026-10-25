@@ -185,7 +185,7 @@ jobs:
         run: |
           set -euo pipefail
           for name in \
-            test_image_framing.py test_canva_image_provider.py test_canva_token_handoff.py test_gemini_tts.py test_instagram_reel.py test_music_engine.py test_editing_director.py \
+            test_image_framing.py test_canva_image_provider.py test_canva_token_handoff.py test_gemini_tts.py test_episode_voice.py test_instagram_release_caption.py test_music_engine.py test_editing_director.py \
             test_story_visual_relevance.py \
             test_p1_storytelling.py test_preflight_payload.py test_festival_date_gate.py test_festival_timing.py test_editing_performance_learning.py \
             test_render_style_feedback.py test_editing_style_engine.py \
@@ -298,7 +298,7 @@ jobs:
           path: out
 
       - name: Static Python syntax check
-        run: python -m py_compile scripts/validate_festival_timing.py scripts/canva_token_handoff.py scripts/gemini_tts.py scripts/episode_voice.py scripts/canva_image_provider.py content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py editing_style_engine.py color_continuity.py scripts/validate_color_continuity.py scripts/master_final_audio.py scripts/validate_final_audio.py spoken_hindi_qc.py scripts/visual_relevance_gate.py scripts/visual_storyboard.py scripts/build_editing_style_signals.py scripts/render_style_attribution.py scripts/ingest_editing_feedback.py
+        run: python -m py_compile scripts/validate_festival_timing.py scripts/canva_token_handoff.py scripts/gemini_tts.py scripts/canva_image_provider.py content_qc.py visual_qc.py director.py generate_assets.py audio_engine.py qc.py hindi_text.py clip_rerank.py indicf5_engine.py scripts/canva_asset_bridge.py scripts/youtube_pack.py scripts/validate_native_visuals.py scripts/image_framing.py music_engine.py scripts/validate_music.py editing_director.py scripts/validate_editing.py editing_style_engine.py color_continuity.py scripts/validate_color_continuity.py scripts/master_final_audio.py scripts/validate_final_audio.py spoken_hindi_qc.py scripts/visual_relevance_gate.py scripts/visual_storyboard.py scripts/build_editing_style_signals.py scripts/render_style_attribution.py scripts/ingest_editing_feedback.py
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v7
@@ -373,16 +373,6 @@ jobs:
             python -c "import torch, torchvision, open_clip; from torchvision.ops import nms; print('OpenCLIP runtime ready: torch=' + torch.__version__ + ', torchvision=' + torchvision.__version__)"
           fi
 
-      # Cache is keyed internally by SHA256(text, engine, voice, model/style).
-      # Run-scoped keys save new audio while restore-keys fetch older cache.
-      - name: Restore content-addressed narration cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .tts_cache
-          key: episode-tts-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: |
-            episode-tts-${{ runner.os }}-${{ github.ref_name }}-
-
       - name: Generate Unified Assets (4K B-Roll + FLUX.1 + Voiceover)
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -420,25 +410,19 @@ jobs:
           export DISPATCH_PAYLOAD="$(python -c 'import json; print(json.load(open("out/replay_inputs.json", encoding="utf-8"))["payload"])')"
           python generate_assets.py
 
-      - name: Validate episode narrator consistency before rendering
+      - name: Verify per-segment Gemini-first narration report
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
           report = json.loads(Path("out/voice_episode_report.json").read_text())
           assert report["status"] == "passed"
-          assert report["engine"] in ("gemini", "kokoro", "edge", "indicf5")
-          assert report["mixed_engines"] is False
-          assert report["chunk_count"] > 1
-          print("One engine for all", report["chunk_count"], "Long + Shorts chunks:", report["engine"])
+          assert report["mode"] == "per_segment_gemini_first"
+          assert len(report["chunks"]) == report["chunk_count"] > 0
+          assert all(item["engine"] in ("gemini", "kokoro", "edge", "indicf5")
+                     for item in report["chunks"])
+          print("Narrators per segment:", report["counts"])
           PY
-
-      - name: Save narration cache for future retries
-        if: ${{ always() && hashFiles('.tts_cache/**/*.mp3') != '' }}
-        uses: actions/cache/save@v4
-        with:
-          path: .tts_cache
-          key: episode-tts-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
 
       # Audit exactly what the editor chose before costly Remotion rendering.
       - name: Build storyboard contact sheets matched to Hindi narration
@@ -448,12 +432,6 @@ jobs:
 
       - name: Fail closed if Long or Shorts scene visuals are missing
         run: python scripts/validate_native_visuals.py
-
-      # Uses only approved portrait shots; never calls Gemini or Canva.
-      - name: Prepare Instagram-specific review assets and cover
-        run: |
-          python -m py_compile scripts/build_instagram_reel.py scripts/validate_instagram_reel.py
-          python scripts/build_instagram_reel.py
 
       - name: Validate music files, copyright evidence and scene coverage
         run: python scripts/validate_music.py
@@ -565,13 +543,10 @@ jobs:
             public/audio
             public/props.json
             public/props_shorts.json
-            public/props_instagram.json
             public/thumbnail_props*.json
             out/thumbnail.jpg
             out/thumbnail_shorts.jpg
             out/metadata.json
-            out/instagram_status.json
-            out/instagram_post.txt
             out/content_qc_report.json
             out/visual_director_plan.json
             out/visual_search_report.json
@@ -709,23 +684,6 @@ jobs:
             --output out/final_video_shorts.mastered.mp4 --report out/audio_master_shorts.json
           mv -f out/final_video_shorts.mastered.mp4 out/final_video_shorts.mp4
 
-      # Reuse the same Node install and QC-approved portrait scene assets.
-      - name: Render separate Instagram 9:16 Reel and Hindi-safe cover
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          if python -c 'import json; from pathlib import Path; p=Path("out/instagram_status.json"); assert p.exists() and json.loads(p.read_text())["status"] == "ready_for_manual_review"'; then
-            trap 'rm -f out/final_video_instagram.mp4 out/instagram_cover.jpg out/audio_master_instagram.json' ERR
-            npx remotion render InstagramReelComposition out/final_video_instagram.mp4 --props=public/props_instagram.json --concurrency=$(nproc)
-            python scripts/master_final_audio.py --input out/final_video_instagram.mp4 \
-              --output out/final_video_instagram.mastered.mp4 --report out/audio_master_instagram.json
-            mv -f out/final_video_instagram.mastered.mp4 out/final_video_instagram.mp4
-            npx remotion still InstagramCoverComposition out/instagram_cover.jpg --props=public/thumbnail_props_instagram.json
-            python scripts/validate_instagram_reel.py
-          else
-            echo "::warning title=Instagram review required::Story, cover, spoken CTA, or length failed the Instagram-only gate; YouTube render proceeds."
-          fi
-
       - name: Upload Shorts Video Artifact
         uses: actions/upload-artifact@v7
         with:
@@ -733,11 +691,6 @@ jobs:
           path: |
             out/final_video_shorts.mp4
             out/audio_master_shorts.json
-            out/final_video_instagram.mp4
-            out/instagram_cover.jpg
-            out/audio_master_instagram.json
-            out/instagram_status.json
-            out/instagram_post.txt
           retention-days: 14
 
   # ---------------------------------------------------------------
@@ -1070,9 +1023,6 @@ jobs:
               cat out/youtube_pack.md 2>/dev/null || echo "_YouTube pack not generated._"
               echo
               cat out/canva_notes.md 2>/dev/null || echo "_Canva finishing not run._"
-              echo
-              echo "## Instagram upload — manual review only"
-              cat shorts/instagram_post.txt 2>/dev/null || echo "Reel not ready; check instagram_status.json."
             } > release_notes.md
             gh release create "$TAG" \
               "video/final_video.mp4" \
@@ -1095,14 +1045,6 @@ jobs:
             echo "Reusing existing release ID $RELEASE_ID for $TAG"
           fi
           test -n "$RELEASE_ID"
-          # Never attach incomplete Instagram files. Instagram posting stays manual.
-          if [ -s shorts/final_video_instagram.mp4 ] && [ -s shorts/instagram_cover.jpg ] && [ -s shorts/audio_master_instagram.json ]; then
-            gh release upload "$TAG" shorts/final_video_instagram.mp4 shorts/instagram_cover.jpg \
-              shorts/audio_master_instagram.json shorts/instagram_post.txt \
-              --repo "${{ github.repository }}" --clobber
-          else
-            echo "Instagram files require review; original YouTube release unaffected."
-          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
 
