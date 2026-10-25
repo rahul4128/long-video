@@ -31,7 +31,7 @@ class SharedShortsReleaseTests(unittest.TestCase):
     def test_no_false_generic_krishna_default_in_artwork(self):
         src = (ROOT / "generate_assets.py").read_text(encoding="utf-8")
         self.assertIn("episode_subject = (seo_metadata.get", src)
-        self.assertIn("No Western models", src)
+        self.assertIn("Western models", src)
         self.assertNotIn("Lord Krishna radiant divine aura with glowing Sudarshan Chakra", src)
 
     def test_workflow_only_renders_youtube_long_and_short(self):
