@@ -94,6 +94,42 @@ class ImageFramingTests(unittest.TestCase):
         self.assertGreater(top[0], 40, "Background must fill the portrait, not be black")
         self.assertGreater(center[0], top[0], "Foreground should remain the visual focus")
 
+    def test_square_devotional_scene_reframes_without_letterbox(self):
+        """Run #40203247762: detail concentrated in center, flat top/bottom.
+
+        Old heavy-blur framing left visible empty portrait margins, causing
+        the pipeline to replace the AI scene with forbidden abstract filler.
+        This is a deterministic local image test, with no generation credits.
+        """
+        from PIL import Image
+        detail = self.path("story_detail.jpg")
+        square = self.path("cloudflare_square.jpg")
+        frame(detail, "testsrc2=s=512x242:d=0.1")
+        scene = Image.new("RGB", (512, 512), (22, 24, 33))
+        with Image.open(detail) as important_content:
+            scene.paste(important_content.convert("RGB"), (0, 135))
+        scene.save(square, "JPEG", quality=92)
+
+        self.assertIn("wrong aspect ratio", framing_issue(square, "9:16"))
+        self.assertTrue(preserve_full_subject(square, "9:16"))
+        self.assertEqual(image_dimensions(square), (720, 1280))
+        self.assertIsNone(framing_issue(square, "9:16"))
+        with Image.open(square) as result:
+            # Subject/scene remains completely visible in the middle rather
+            # than forcing a narrow crop of a square goddess/royal portrait.
+            self.assertEqual(result.size, (720, 1280))
+            center_pixel = result.getpixel((360, 640))
+        self.assertTrue(all(0 <= component <= 255 for component in center_pixel))
+
+    def test_unreadable_source_does_not_replace_original(self):
+        p = self.path("tiny.jpg")
+        from PIL import Image
+        Image.new("RGB", (32, 32), (90, 60, 40)).save(p)
+        old_bytes = open(p, "rb").read()
+        self.assertFalse(preserve_full_subject(p, "9:16"))
+        self.assertEqual(open(p, "rb").read(), old_bytes)
+
+
     def test_safe_backup_reframe_never_keeps_square_dimensions(self):
         p = self.path("backup.jpg")
         frame(p, "testsrc2=s=512x512:d=0.1")
