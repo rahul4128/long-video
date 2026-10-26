@@ -20,7 +20,12 @@ import wave
 import requests
 
 ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/interactions"
-MODELS = {"gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"}
+# Both 3.8 models support the same Interactions API speech schema.
+# Older 3.1/2.5 TTS models use different request formats and are NOT safe
+# drop-in fallbacks with the current payload.
+PRIMARY_MODEL = "gemini-3.8-flash-tts"
+SECONDARY_MODEL = "gemini-3.8-flash-lite-tts"
+MODELS = {PRIMARY_MODEL, SECONDARY_MODEL}
 DEFAULT_STYLE = (
     "Speak in natural Hindi with warm, authentic, emotionally engaging Indian "
     "devotional storytelling. Gently vary expression for wonder, significance "
@@ -33,7 +38,17 @@ DEFAULT_STYLE = (
 _TTS_API_LOCK = threading.Lock()
 _LAST_ATTEMPT_AT = 0.0
 _API_ATTEMPTS = 0
-_DAILY_QUOTA_EXHAUSTED = False
+_DAILY_QUOTA_EXHAUSTED = False  # True only when all supported models are exhausted.
+_MODEL_DAILY_QUOTA_EXHAUSTED = set()
+
+
+def _tts_model_candidates(preferred):
+    """Switch 3.8 Flash and Flash-Lite without changing the speech schema."""
+    if preferred not in MODELS:
+        raise GeminiTTSError("Unsupported Gemini TTS model", "invalid_model")
+    alternative = SECONDARY_MODEL if preferred == PRIMARY_MODEL else PRIMARY_MODEL
+    return (preferred, alternative)
+
 
 
 def _env_int(name, default, low, high):
@@ -85,7 +100,7 @@ def _is_daily_quota(response):
     ))
 
 
-def _post_with_cooldown(transport, payload, api_key, timeout):
+def _post_with_cooldown(transport, payload, api_key, timeout, *, model):
     """Respect Retry-After and cool down on transient 429/503, never daily quotas."""
     global _LAST_ATTEMPT_AT, _API_ATTEMPTS, _DAILY_QUOTA_EXHAUSTED
     max_retries = _env_int("GEMINI_TTS_MAX_RETRIES", 2, 0, 3)
@@ -93,8 +108,8 @@ def _post_with_cooldown(transport, payload, api_key, timeout):
     min_gap = _env_int("GEMINI_TTS_MIN_GAP_SECONDS", 6, 0, 30)
     base_delay = _env_int("GEMINI_TTS_COOLDOWN_SECONDS", 20, 5, 90)
     with _TTS_API_LOCK:
-        if _DAILY_QUOTA_EXHAUSTED:
-            raise GeminiTTSError("Gemini TTS daily quota exhausted", "quota_daily_exhausted")
+        if _DAILY_QUOTA_EXHAUSTED or model in _MODEL_DAILY_QUOTA_EXHAUSTED:
+            raise GeminiTTSError("Gemini TTS model daily quota exhausted", "quota_daily_exhausted")
         for attempt in range(max_retries + 1):
             if _API_ATTEMPTS >= max_attempts:
                 raise GeminiTTSError("Gemini TTS per-run API request cap reached", "request_budget_exhausted")
@@ -115,8 +130,12 @@ def _post_with_cooldown(transport, payload, api_key, timeout):
                 ) from exc
             status = response.status_code
             if status == 429 and _is_daily_quota(response):
-                _DAILY_QUOTA_EXHAUSTED = True
-                raise GeminiTTSError("Gemini TTS daily project quota exhausted", "quota_daily_exhausted")
+                # Do not circuit-break the *other* Gemini TTS model until it
+                # reports its own limit. Google's 429 may be per-model.
+                _MODEL_DAILY_QUOTA_EXHAUSTED.add(model)
+                _DAILY_QUOTA_EXHAUSTED = MODELS.issubset(_MODEL_DAILY_QUOTA_EXHAUSTED)
+                print(f"Gemini TTS model quota exhausted: {model}; trying another model if available.", flush=True)
+                raise GeminiTTSError("Gemini TTS model daily quota exhausted", "quota_daily_exhausted")
             if status in (429, 503) and attempt < max_retries and _API_ATTEMPTS < max_attempts:
                 provider_delay = _retry_after(response)
                 backoff = min(90.0, base_delay * (2 ** attempt))
@@ -191,9 +210,8 @@ def generate_gemini_audio(
                os.getenv("GEMINI_API_KEY", "")).strip()
     if not api_key:
         raise GeminiTTSError("GEMINI_API_KEY secret missing in GitHub Actions", "missing_key")
-    model = model or os.getenv("GEMINI_TTS_MODEL", "gemini-3.8-flash-tts")
-    if model not in MODELS:
-        raise GeminiTTSError("Unsupported Gemini TTS model", "invalid_model")
+    model = model or os.getenv("GEMINI_TTS_MODEL", PRIMARY_MODEL)
+    candidates = _tts_model_candidates(model)
     speech = " ".join(str(text or "").split())
     if not speech or len(speech) > 12500:
         raise GeminiTTSError("Gemini TTS transcript is empty or oversized", "invalid_text")
@@ -211,12 +229,44 @@ def generate_gemini_audio(
     transport = session or requests
     # Transient rate limits get bounded retries; the rest go to Kokoro/Edge.
     # Never print the API's free-text errors (may contain user content).
-    response = _post_with_cooldown(transport, payload, api_key, timeout)
-    try:
-        audio = _audio_from_response(response.json())
-    except (ValueError, AttributeError) as exc:
-        raise GeminiTTSError("Gemini TTS returned invalid JSON", "invalid_response") from exc
-    _verify_wav(audio)
+    audio = None
+    selected_model = None
+    last_error = None
+    for candidate in candidates:
+        # Once quota for a model is confirmed, never burn another API request
+        # on that model during this GitHub run.
+        if candidate in _MODEL_DAILY_QUOTA_EXHAUSTED:
+            continue
+        payload["model"] = candidate
+        try:
+            response = _post_with_cooldown(
+                transport, payload, api_key, timeout, model=candidate
+            )
+        except GeminiTTSError as exc:
+            last_error = exc
+            # Only model availability/rate-limit errors permit switching the
+            # request to the other Gemini model. Auth failures, malformed
+            # requests and audio errors do not become unbounded model retries.
+            if exc.code in ("quota_daily_exhausted", "quota_exceeded", "http_404"):
+                print(f"Gemini TTS {candidate} unavailable ({exc.code}); next model if allowed.", flush=True)
+                continue
+            raise
+        try:
+            audio = _audio_from_response(response.json())
+        except (ValueError, AttributeError) as exc:
+            raise GeminiTTSError("Gemini TTS returned invalid JSON", "invalid_response") from exc
+        _verify_wav(audio)
+        selected_model = candidate
+        break
+
+    if selected_model is None:
+        if MODELS.issubset(_MODEL_DAILY_QUOTA_EXHAUSTED):
+            raise GeminiTTSError(
+                "All available Gemini TTS models hit daily quota", "quota_daily_exhausted"
+            )
+        if last_error is not None:
+            raise last_error
+        raise GeminiTTSError("No Gemini TTS model requests available", "quota_daily_exhausted")
     target = Path(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
     wav_path = None
@@ -236,6 +286,7 @@ def generate_gemini_audio(
         if proc.returncode != 0 or not mp3_path.is_file() or mp3_path.stat().st_size < 1500:
             raise GeminiTTSError("Gemini TTS audio conversion failed", "conversion_failed")
         os.replace(mp3_path, target)
+        print(f"  🎙️ Gemini TTS model used: {selected_model}", flush=True)
         return True
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise GeminiTTSError(f"Gemini TTS file/FFmpeg issue: {type(exc).__name__}", "conversion_failed") from exc
