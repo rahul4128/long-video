@@ -2212,13 +2212,13 @@ def _canva_image_enabled() -> bool:
 
 def _canva_image_budget() -> int:
     try:
-        return max(1, min(50, int(os.getenv("CANVA_IMAGE_MAX_PER_RUN", "1"))))
+        return max(1, min(200, int(os.getenv("CANVA_IMAGE_MAX_PER_RUN", "80"))))
     except (ValueError, TypeError):
-        return 1
+        return 80
 
 
 def _try_canva_image(prompt: str, dest: str, aspect_ratio: str) -> bool:
-    """Capped credit-bearing Canva image generation, usable first or last."""
+    """Generate all needed Canva-backed beats up to run cap or account credits."""
     global _CANVA_IMAGES_REQUESTED
     if not _canva_image_enabled() or not _ai_provider_allowed("canva"):
         return False
@@ -2236,7 +2236,7 @@ def _try_canva_image(prompt: str, dest: str, aspect_ratio: str) -> bool:
         return False
     try:
         generate_canva_image(prompt, dest, aspect_ratio=aspect_ratio)
-        print("  ✅ Canva image generated for narration-specific visual beat", flush=True)
+        print(f"  ✅ Canva AI image {_CANVA_IMAGES_REQUESTED}/{_canva_image_budget()} ready", flush=True)
         return True
     except CanvaImageError as exc:
         print(f"  ⚠️ Canva image: {exc}", flush=True)
@@ -2604,8 +2604,8 @@ def generate_ai_image(prompt: str, dest_path: str, aspect_ratio: str = "16:9",
     generated = False
 
     # Canva is primary for opted-in image generation, but remains bounded by
-    # CANVA_IMAGE_MAX_PER_RUN (default 1 credit-bearing request per run).
-    # Do not charge Canva again after a failed/misframed first attempt.
+    # CANVA_IMAGE_MAX_PER_RUN defaults to 80 for a complete story.
+    # Real account AI credit limits are still binding.
     canva_first = (
         allow_canva and _canva_image_enabled()
         and os.getenv("CANVA_IMAGE_PRIORITY", "first").strip().lower() == "first"
@@ -4245,7 +4245,7 @@ async def process():
     )
     print(f"🖼️ Generating ONE High-CTR Long Thumbnail ({thumbnail_text_position})...", flush=True)
     thumb_dest = "public/images/thumbnail.jpg"
-    long_thumb_ok = generate_ai_image(thumb_prompt, thumb_dest, aspect_ratio="16:9", pollinations_width=1920, pollinations_height=1080, allow_canva=os.getenv("CANVA_IMAGE_THUMBNAILS_ENABLED", "false").lower() == "true")
+    long_thumb_ok = generate_ai_image(thumb_prompt, thumb_dest, aspect_ratio="16:9", pollinations_width=1920, pollinations_height=1080, allow_canva=os.getenv("CANVA_IMAGE_THUMBNAILS_ENABLED", "true").lower() == "true")
     if not long_thumb_ok:
         print("  ⚠️ AI thumbnail unavailable; checking approved opening shots before local fallback.", flush=True)
         if not _thumbnail_from_opening(long_visuals, thumb_dest, "landscape"):
@@ -4289,7 +4289,7 @@ async def process():
     )
     print(f"🖼️ Generating ONE High-CTR Shorts Thumbnail ({shorts_thumbnail_text_position})...", flush=True)
     shorts_thumb_dest = "public/images/thumbnail_shorts.jpg"
-    shorts_thumb_ok = generate_ai_image(shorts_thumb_prompt, shorts_thumb_dest, aspect_ratio="9:16", pollinations_width=1080, pollinations_height=1920, allow_canva=os.getenv("CANVA_IMAGE_THUMBNAILS_ENABLED", "false").lower() == "true")
+    shorts_thumb_ok = generate_ai_image(shorts_thumb_prompt, shorts_thumb_dest, aspect_ratio="9:16", pollinations_width=1080, pollinations_height=1920, allow_canva=os.getenv("CANVA_IMAGE_THUMBNAILS_ENABLED", "true").lower() == "true")
     if not shorts_thumb_ok:
         print("  ⚠️ AI Shorts thumbnail unavailable; checking approved opening shots before local fallback.", flush=True)
         if not _thumbnail_from_opening(shorts_visuals, shorts_thumb_dest, "portrait"):
