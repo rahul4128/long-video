@@ -4245,7 +4245,7 @@ async def process():
     )
     print(f"🖼️ Generating ONE High-CTR Long Thumbnail ({thumbnail_text_position})...", flush=True)
     thumb_dest = "public/images/thumbnail.jpg"
-    long_thumb_ok = generate_ai_image(thumb_prompt, thumb_dest, aspect_ratio="16:9", pollinations_width=1920, pollinations_height=1080, allow_canva=os.getenv("CANVA_IMAGE_THUMBNAILS_ENABLED", "false").lower() == "true")
+    long_thumb_ok = generate_ai_image(thumb_prompt, thumb_dest, aspect_ratio="16:9", pollinations_width=1920, pollinations_height=1080, allow_canva=os.getenv("CANVA_IMAGE_THUMBNAILS_ENABLED", "true").lower() == "true")
     if not long_thumb_ok:
         print("  ⚠️ AI thumbnail unavailable; checking approved opening shots before local fallback.", flush=True)
         if not _thumbnail_from_opening(long_visuals, thumb_dest, "landscape"):
@@ -4289,7 +4289,7 @@ async def process():
     )
     print(f"🖼️ Generating ONE High-CTR Shorts Thumbnail ({shorts_thumbnail_text_position})...", flush=True)
     shorts_thumb_dest = "public/images/thumbnail_shorts.jpg"
-    shorts_thumb_ok = generate_ai_image(shorts_thumb_prompt, shorts_thumb_dest, aspect_ratio="9:16", pollinations_width=1080, pollinations_height=1920, allow_canva=os.getenv("CANVA_IMAGE_THUMBNAILS_ENABLED", "false").lower() == "true")
+    shorts_thumb_ok = generate_ai_image(shorts_thumb_prompt, shorts_thumb_dest, aspect_ratio="9:16", pollinations_width=1080, pollinations_height=1920, allow_canva=os.getenv("CANVA_IMAGE_THUMBNAILS_ENABLED", "true").lower() == "true")
     if not shorts_thumb_ok:
         print("  ⚠️ AI Shorts thumbnail unavailable; checking approved opening shots before local fallback.", flush=True)
         if not _thumbnail_from_opening(shorts_visuals, shorts_thumb_dest, "portrait"):
