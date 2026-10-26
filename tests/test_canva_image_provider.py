@@ -27,7 +27,7 @@ class Response:
 class Session:
     def __init__(self, create, poll=None, image=None):
         self.create = create if isinstance(create, list) else [create]
-        self.poll = poll
+        self.poll = poll if isinstance(poll, list) else [poll]
         self.image = image
         self.sent = []
         self.gets = []
@@ -38,7 +38,7 @@ class Session:
 
     def get(self, url, **kwargs):
         self.gets.append(url)
-        return self.poll if "/image-generations/" in url else self.image
+        return self.poll[min(len(self.gets)-1, len(self.poll)-1)] if "/image-generations/" in url else self.image
 
 
 def test_png():
@@ -106,6 +106,25 @@ class CanvaImageProviderTests(unittest.TestCase):
             session.sent[1]["json"]["idempotency_key"],
         )
         self.assertTrue(any(call.args[0] >= 5 for call in sleep.call_args_list))
+
+    def test_poll_rate_limit_cools_down_and_keeps_the_existing_job(self):
+        session = Session(
+            Response(payload={"job": {"id": "j-poll", "status": "in_progress"}}),
+            poll=[
+                Response(429, {"code": "too_many_requests", "message": "Slow polling"}),
+                Response(payload={"job": {"id": "j-poll", "status": "success",
+                                          "result": {"image": {"url": "https://canva.example/img"}}}}),
+            ],
+            image=Response(content=test_png()),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch("scripts.canva_image_provider.time.sleep") as sleep:
+                path = str(Path(tmp) / "poll.jpg")
+                generate_canva_image("Indian temple", path, token="fake", session=session)
+                self.assertTrue(Path(path).exists())
+        self.assertEqual(len(session.sent), 1, "Polling must not create another paid job")
+        self.assertEqual(len(session.gets), 3)
+        self.assertTrue(any(call.args[0] >= 4 for call in sleep.call_args_list))
 
     def test_credit_quota_cooldown_waits_only_for_short_provider_reset(self):
         now = 1900000000
