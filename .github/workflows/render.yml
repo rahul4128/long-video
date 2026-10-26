@@ -18,10 +18,10 @@ on:
         required: false
         type: string
       use_canva_images:
-        description: 'Opt in to Canva AI image fallback (consumes Canva AI credits)'
+        description: 'Use Canva AI for all narration-specific images when needed (consumes user AI credits)'
         required: false
         type: boolean
-        default: false
+        default: true
       canva_smoke_only:
         description: 'Test exactly one Canva image (no rendering, no publishing)'
         required: false
@@ -33,10 +33,10 @@ on:
         type: boolean
         default: false
       canva_image_max_per_run:
-        description: 'Hard cap on Canva AI generations for this run (1-50)'
+        description: 'Max Canva AI images this run (default 80, 1-200; actual Canva quota applies)'
         required: false
         type: string
-        default: '1'
+        default: '80'
       tts_engine:
         description: 'Narrator: gemini (Gemini->Kokoro->Edge), kokoro, edge or indicf5'
         required: false
@@ -333,11 +333,11 @@ jobs:
       # Refresh Canva OAuth in the same job that generates scene images.
       # Do not expose the rotating refresh token to logs. Explicit opt-in only.
       - name: Install Canva OAuth dependency for image fallback
-        if: ${{ inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
+        if: ${{ github.event_name == 'repository_dispatch' || inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
         run: pip install pynacl
 
       - name: Authenticate Canva for image fallback and rotate refresh token
-        if: ${{ inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
+        if: ${{ github.event_name == 'repository_dispatch' || inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
         continue-on-error: true
         env:
           CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
@@ -349,7 +349,7 @@ jobs:
         run: python scripts/refresh_canva_token.py
 
       - name: Save encrypted Canva access-token handoff for this run only
-        if: ${{ inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
+        if: ${{ github.event_name == 'repository_dispatch' || inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: canva-access-encrypted-${{ github.run_id }}
@@ -392,8 +392,11 @@ jobs:
           GEMINI_TTS_MAX_RETRIES: ${{ vars.GEMINI_TTS_MAX_RETRIES || '2' }}
           GEMINI_TTS_COOLDOWN_SECONDS: ${{ vars.GEMINI_TTS_COOLDOWN_SECONDS || '20' }}
           GEMINI_TTS_MIN_GAP_SECONDS: ${{ vars.GEMINI_TTS_MIN_GAP_SECONDS || '6' }}
-          CANVA_IMAGE_FALLBACK_ENABLED: ${{ (inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true') && 'true' || 'false' }}
-          CANVA_IMAGE_MAX_PER_RUN: ${{ inputs.canva_image_max_per_run || vars.CANVA_IMAGE_MAX_PER_RUN || '1' }}
+          CANVA_IMAGE_FALLBACK_ENABLED: ${{ (github.event_name == 'repository_dispatch' || inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true') && 'true' || 'false' }}
+          CANVA_IMAGE_MAX_PER_RUN: ${{ inputs.canva_image_max_per_run || vars.CANVA_IMAGE_MAX_PER_RUN || '80' }}
+          CANVA_IMAGE_MIN_GAP_SECONDS: ${{ vars.CANVA_IMAGE_MIN_GAP_SECONDS || '5' }}
+          CANVA_IMAGE_MAX_RETRIES: ${{ vars.CANVA_IMAGE_MAX_RETRIES || '2' }}
+          CANVA_IMAGE_MAX_COOLDOWN_SECONDS: ${{ vars.CANVA_IMAGE_MAX_COOLDOWN_SECONDS || '120' }}
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
           HF_TOKEN: ${{ secrets.HUGGINGFACE_API_KEY }}
           AUDIO_TTS_ENGINE: ${{ inputs.tts_engine || 'gemini' }}
@@ -952,7 +955,7 @@ jobs:
       # An earlier asset job may have used & rotated Canva's single-use
       # refresh token, so never refresh the same snapshot again here.
       - name: Download encrypted Canva access-token from asset generation
-        if: ${{ inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
+        if: ${{ github.event_name == 'repository_dispatch' || inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
         continue-on-error: true
         uses: actions/download-artifact@v7
         with:
@@ -960,7 +963,7 @@ jobs:
           path: out
 
       - name: Reuse Canva access token without consuming refresh token twice
-        if: ${{ inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
+        if: ${{ github.event_name == 'repository_dispatch' || inputs.use_canva_images || vars.CANVA_IMAGE_FALLBACK_ENABLED == 'true' }}
         continue-on-error: true
         env:
           REPO_SECRETS_TOKEN: ${{ secrets.REPO_SECRETS_TOKEN }}
@@ -968,7 +971,7 @@ jobs:
         run: python scripts/canva_token_handoff.py
 
       - name: Authenticate Canva for finishing only (no prior image OAuth)
-        if: ${{ !inputs.use_canva_images && vars.CANVA_IMAGE_FALLBACK_ENABLED != 'true' }}
+        if: ${{ github.event_name != 'repository_dispatch' && !inputs.use_canva_images && vars.CANVA_IMAGE_FALLBACK_ENABLED != 'true' }}
         continue-on-error: true
         env:
           CANVA_CLIENT_ID: ${{ secrets.CANVA_CLIENT_ID }}
