@@ -6,10 +6,27 @@ then Edge as a last resort. Earlier episode-wide atomic fallback was rolled
 back at the creator's request.
 
 Audio generation runs Long + Shorts narration chunks together. Gemini
-successes remain unchanged when a later segment fails. Transient Gemini
-errors fall back for the affected segment; a confirmed daily quota/auth
-failure blocks later Gemini attempts to avoid waste. The configured
-per-run Gemini request cap remains in force.
+successes remain unchanged when a later segment fails.
+
+Per narration segment the Gemini model order is:
+1. gemini-3.8-flash-tts (primary expressive devotional narration).
+2. gemini-3.8-flash-lite-tts (same-schema backup if primary hits daily quota,
+   exhausted transient 429 backoff, or is unavailable as 404).
+3. Kokoro, then Edge TTS, only if compatible Gemini TTS models cannot speak
+   this segment. The narrator's Hindi transcript, voice name and delivery
+   style stay consistent across both Gemini 3.8 model requests.
+
+Gemini's transient 429/503 errors obey bounded Retry-After cooldowns. Daily
+quotas are tracked separately for each model, preventing repeated calls to
+an exhausted model within this Actions run. If both hit quota, stop Gemini
+requests for later segments and fall back to Kokoro. All API requests count
+toward the existing GEMINI_TTS_MAX_API_ATTEMPTS per-run budget; these alternate
+models are NOT a guarantee of extra free calls (project-level limits may be
+shared). Transient failures in one scene do not trigger episode-wide re-voicing.
+
+Use the GitHub Actions logs to inspect which Gemini TTS model actually
+produced each scene. Testing uses fake sessions only; no API calls or model
+quotas are consumed by the regression suite.
 
 out/voice_episode_report.json records each output filename and its actual
 engine: gemini, kokoro, edge or indicf5. A mix is now permitted and disclosed.
