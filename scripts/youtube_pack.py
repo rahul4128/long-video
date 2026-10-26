@@ -69,7 +69,7 @@ def _block(text):
 
 
 
-def instagram_caption_english(meta: dict) -> str:
+def instagram_caption_english(meta: dict, *, long_video: bool = False) -> str:
     """English-only release copy; Hindi stays in the actual narrated video."""
     raw = " ".join(str(meta.get(key) or "") for key in (
         "shorts_title", "long_video_title", "long_video_description"
@@ -95,11 +95,17 @@ def instagram_caption_english(meta: dict) -> str:
             hashtags.append(tag)
     # No automatic Hindi-to-English transliteration or fabricated plot summary.
     # The actual YouTube Hindi title/story stays unchanged.
-    return (
+    opening = (
+        f"Watch this full devotional story about {subject_text}. "
+        "Discover the complete story and its meaning."
+        if long_video else
         f"A short devotional story about {subject_text}. "
-        "Watch till the end for the complete moment.\\n\\n"
+        "Watch till the end for the complete moment."
+    )
+    return (
+        opening + "\\n\\n"
         "What part of this story stayed with you? Tell us in the comments. "
-        "Follow for more Indian mythology stories, save this Reel, "
+        "Follow for more Indian mythology stories, save this video, "
         "and share it with a friend.\\n\\n"
         + " ".join(hashtags)
     ).replace("\\n", "\n")
@@ -142,13 +148,20 @@ def build(meta: dict) -> str:
               "", "**Description**", _block(shorts_desc),
               "", "**Thumbnail/cover:** `thumbnail_shorts_final.jpg` (pick it as the cover frame in the app)",
               "- *Related video*: link the long video above (this is what turns Shorts views into watch hours)",
-              "", "## 3. Instagram Reel — reuse the YouTube Short (9:16)",
-              "- Upload `final_video_shorts.mp4` directly to Instagram; no separate render needed.",
-              "- Use `thumbnail_shorts_final.jpg` as the cover after checking the profile crop.",
-              "- Copy the following English caption (video narration may remain in natural Hindi):",
-              "", "**Instagram caption — English (copy and paste)**",
+              "", "## 3. Instagram — reuse both original YouTube videos",
+              "### Short / Reel — same original 9:16 YouTube Short",
+              "- Upload `final_video_shorts.mp4` directly to Instagram (do not generate another Reel).",
+              "- Cover: `thumbnail_shorts_final.jpg` (check Instagram profile crop).",
+              "- Video narration can remain in natural everyday Hindi; Instagram captions are English.",
+              "", "**English Instagram Short caption (copy and paste)**",
               _block(instagram_caption_english(meta)),
-              "- Review the cover and claims before posting; do not use a horizontal long video."]
+              "", "### Long video — same original 16:9 YouTube Long",
+              "- Upload `final_video.mp4` without creating a second video or audio track.",
+              "- Cover: `thumbnail.jpg` (check Instagram's cover/crop preview).",
+              "- 16:9 is horizontal, not native 9:16: expect empty space or cropping in Instagram Reels. Review in-app before posting.",
+              "", "**English Instagram Long caption (copy and paste)**",
+              _block(instagram_caption_english(meta, long_video=True)),
+              "- Review deity identity, festival/date references, video length and rights before either post."]
 
     # Audit trail: source/creator/rights for all selected music is stored in
     # music_license_report.json on the GitHub draft release.
