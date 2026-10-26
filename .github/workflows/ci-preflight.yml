@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - visual-director-v2
+      - fix/canva-all-beats-cooldown-20261026
       - fix/gemini-tts-model-quota-fallback-20261026
       - fix/portrait-backup-frame-qc-20261026
       - fix/segment-gemini-devotional-shorts-english-20261025
