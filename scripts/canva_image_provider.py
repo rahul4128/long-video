@@ -89,6 +89,29 @@ def _post_image_generation(client, headers, body):
 
 
 
+def _poll_generation_job(client, url, headers, deadline):
+    """Bounded cooldown for separately rate-limited Canva job polling."""
+    retries = _env_int("CANVA_IMAGE_MAX_RETRIES", 2, 0, 4)
+    for attempt in range(retries + 1):
+        response = client.get(url, headers=headers, timeout=35)
+        if response.status_code not in (429, 500, 502, 503, 504):
+            return response
+        try:
+            code = str((response.json() or {}).get("code") or "")
+        except (ValueError, TypeError, AttributeError):
+            code = ""
+        if code in ("credit_quota_exceeded", "credit_quota_cooldown"):
+            return response
+        if attempt >= retries:
+            return response
+        wait = max(4.0 * (2 ** attempt), _retry_after(response) or 0)
+        wait = min(60.0, wait)
+        if time.monotonic() + wait >= deadline:
+            return response
+        print(f"Canva image poll HTTP {response.status_code}: cooling down {wait:.0f}s", flush=True)
+        time.sleep(wait)
+    return response
+
 class CanvaImageError(RuntimeError):
     def __init__(self, message, code="unknown"):
         self.code = str(code or "unknown")
@@ -145,7 +168,7 @@ def generate_canva_image(prompt, destination, aspect_ratio="16:9", *, token=None
             if time.monotonic() >= deadline:
                 raise CanvaImageError("Canva image generation timed out", "timeout")
             time.sleep(4)
-            polled = client.get(f"{API_BASE}/{job_id}", headers=headers, timeout=35)
+            polled = _poll_generation_job(client, f"{API_BASE}/{job_id}", headers, deadline)
             job = _api_json(polled).get("job") or {}
         if job.get("status") != "success":
             failure = job.get("error") or {}
