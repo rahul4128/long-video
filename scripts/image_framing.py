@@ -66,15 +66,21 @@ def framing_issue(path, aspect_ratio):
 
 
 def preserve_full_subject(path, aspect_ratio):
-    """Extend a square/landscape source into a full-size portrait/landscape frame.
+    """Reframe backup art without losing the character/deity's head or hands.
 
-    The whole foreground stays visible (important for hands, faces and deity
-    identity); a softly blurred, color-matched background fills the frame.
-    Feathering the foreground boundary avoids the obvious horizontal strip
-    produced by a hard image-on-blur overlay. No new image-generation credits.
+    Cloudflare sometimes returns square 1024x1024 images for 9:16 scenes.
+    A very blurry letterbox background can leave flat top and bottom bars
+    around an otherwise correct centered foreground. Rather than pretending
+    these pass QC (or falling through to an abstract placeholder), try several
+    local, story-derived backgrounds made ONLY from the original image.
+
+    Commit the replacement only after the *existing* framing_issue validator
+    accepts the complete portrait. Otherwise leave the source unchanged so a
+    different provider/real repair can be tried. No network/model credits.
     """
-    if aspect_ratio not in CANVAS or not os.path.exists(path):
+    if aspect_ratio not in CANVAS or not os.path.isfile(path):
         return False
+
     from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageDraw
 
     width, height = CANVAS[aspect_ratio]
@@ -84,13 +90,10 @@ def preserve_full_subject(path, aspect_ratio):
     try:
         with Image.open(path) as original:
             image = ImageOps.exif_transpose(original).convert("RGB")
+            if min(image.size) < 256:
+                return False
+
             resampling = Image.Resampling.LANCZOS
-            backdrop = ImageOps.fit(image, (width, height), method=resampling)
-            backdrop = ImageEnhance.Color(backdrop).enhance(0.88)
-            backdrop = ImageEnhance.Brightness(backdrop).enhance(0.87)
-            backdrop = backdrop.filter(
-                ImageFilter.GaussianBlur(radius=max(16, int(min(width, height) * 0.057)))
-            )
             foreground = ImageOps.contain(image, (width, height), method=resampling)
             left = (width - foreground.width) // 2
             top = (height - foreground.height) // 2
@@ -104,12 +107,41 @@ def preserve_full_subject(path, aspect_ratio):
                 fill=255,
             )
             mask = mask.filter(ImageFilter.GaussianBlur(radius=max(5, feather * 0.68)))
-            backdrop.paste(foreground, (left, top), mask)
-            backdrop.save(temp, "JPEG", quality=93, subsampling=0)
-        if image_dimensions(temp) != (width, height):
-            return False
-        os.replace(temp, path)
-        return True
+
+            # The full image is always in front. The central-crop alternatives
+            # affect ONLY the soft extended backdrop, never the foreground.
+            # Using the original scene's middle section avoids reintroducing
+            # the empty upper/lower margins of some square AI pictures.
+            for fraction, blur_ratio in (
+                (1.0, 0.022),
+                (0.70, 0.013),
+                (0.56, 0.009),
+            ):
+                if fraction == 1.0:
+                    backdrop_source = image
+                else:
+                    region_height = max(32, round(image.height * fraction))
+                    top_crop = (image.height - region_height) // 2
+                    backdrop_source = image.crop((
+                        0, top_crop, image.width, top_crop + region_height
+                    ))
+
+                backdrop = ImageOps.fit(
+                    backdrop_source, (width, height), method=resampling
+                )
+                backdrop = ImageEnhance.Color(backdrop).enhance(0.90)
+                backdrop = ImageEnhance.Brightness(backdrop).enhance(0.90)
+                backdrop = backdrop.filter(
+                    ImageFilter.GaussianBlur(radius=max(2, round(width * blur_ratio)))
+                )
+                backdrop.paste(foreground, (left, top), mask)
+                backdrop.save(temp, "JPEG", quality=93, subsampling=0)
+
+                if (image_dimensions(temp) == (width, height)
+                        and framing_issue(temp, aspect_ratio) is None):
+                    os.replace(temp, path)
+                    return True
+        return False
     except (OSError, ValueError):
         return False
     finally:

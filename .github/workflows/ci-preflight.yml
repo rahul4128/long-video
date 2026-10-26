@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - visual-director-v2
+      - fix/portrait-backup-frame-qc-20261026
       - fix/segment-gemini-devotional-shorts-english-20261025
       - codex/episode-voice-consistency-20261023
       - codex/instagram-reels-quality-20261023
