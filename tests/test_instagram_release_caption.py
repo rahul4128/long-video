@@ -18,7 +18,7 @@ class SharedShortsReleaseTests(unittest.TestCase):
         }
         pack = build(meta)
         self.assertIn("reuse both original YouTube videos", pack)
-        section = pack.split("## 3. Instagram Reel", 1)[1].split("## 4.", 1)[0]
+        section = pack.split("## 3. Instagram — reuse both original YouTube videos", 1)[1].split("## 4.", 1)[0]
         self.assertIn("final_video_shorts.mp4", section)
         self.assertIn("final_video.mp4", section)
         self.assertIn("thumbnail_shorts_final.jpg", section)
