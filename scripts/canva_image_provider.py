@@ -8,6 +8,7 @@ from io import BytesIO
 import os
 from pathlib import Path
 import time
+import threading
 import uuid
 from urllib.parse import urlparse
 
@@ -15,6 +16,77 @@ import requests
 from PIL import Image, UnidentifiedImageError
 
 API_BASE = "https://api.canva.com/rest/v1/image-generations"
+# Canva documents a 20-create-per-minute limit. One global lock avoids
+# simultaneous scene workers overflowing the *same user's* request limit.
+_CREATE_LOCK = threading.Lock()
+_LAST_CREATE_AT = 0.0
+
+
+def _env_int(name, default, low, high):
+    try:
+        return max(low, min(high, int(os.getenv(name, str(default)) or default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _retry_after(response):
+    try:
+        return max(0.0, min(180.0, float((getattr(response, "headers", {}) or {}).get("Retry-After", ""))))
+    except (TypeError, ValueError):
+        return None
+
+
+def _post_image_generation(client, headers, body):
+    """Cooldown and retry Canva create, never duplicating a billed image job.
+
+    Keep exactly the same idempotency key on every transient retry. A real
+    exhausted monthly AI credit allowance returns immediately. A short Canva
+    credit cooldown may be observed once when Canva supplies cooldown_ends_at.
+    """
+    global _LAST_CREATE_AT
+    min_gap = _env_int("CANVA_IMAGE_MIN_GAP_SECONDS", 5, 3, 30)
+    retries = _env_int("CANVA_IMAGE_MAX_RETRIES", 2, 0, 4)
+    max_wait = _env_int("CANVA_IMAGE_MAX_COOLDOWN_SECONDS", 120, 10, 180)
+    cooled_credit_once = False
+    with _CREATE_LOCK:
+        for attempt in range(retries + 2):
+            remaining = min_gap - (time.monotonic() - _LAST_CREATE_AT) if _LAST_CREATE_AT else 0
+            if remaining > 0:
+                time.sleep(remaining)
+            _LAST_CREATE_AT = time.monotonic()
+            response = client.post(
+                API_BASE, headers=headers, timeout=35, json=body,
+            )
+            if response.status_code not in (429, 500, 502, 503, 504):
+                return response
+            try:
+                error = response.json()
+                code = str(error.get("code") or "")
+            except (ValueError, TypeError, AttributeError):
+                error, code = {}, ""
+            if code == "credit_quota_exceeded":
+                return response  # Never retry genuine exhausted AI allowance.
+            if code == "credit_quota_cooldown":
+                try:
+                    end_at = float((error.get("quota_usage") or {}).get("cooldown_ends_at") or 0)
+                except (ValueError, TypeError):
+                    end_at = 0
+                wait = end_at - time.time() + 1 if end_at else max_wait + 1
+                if (not cooled_credit_once and 0 < wait <= max_wait
+                        and attempt <= retries):
+                    cooled_credit_once = True
+                    print(f"Canva AI credit cooldown: sleeping {wait:.0f}s before retry", flush=True)
+                    time.sleep(wait)
+                    continue
+                return response  # Do not wait hours or retry indefinitely.
+            if attempt >= retries:
+                return response
+            wait = min(max_wait, max(5 * (2 ** attempt), _retry_after(response) or 0))
+            print(f"Canva image API HTTP {response.status_code}: cooling down {wait:.0f}s "
+                  f"(retry {attempt + 1}/{retries})", flush=True)
+            time.sleep(wait)
+    return response
+
 
 
 class CanvaImageError(RuntimeError):
@@ -59,10 +131,10 @@ def generate_canva_image(prompt, destination, aspect_ratio="16:9", *, token=None
     client = session if session is not None else requests
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     try:
-        created = client.post(
-            API_BASE, headers=headers, timeout=35,
-            json={"prompt": clean_prompt, "idempotency_key": key,
-                  "aspect_ratio": api_ratio, "asset_upload": {"type": "none"}},
+        created = _post_image_generation(
+            client, headers,
+            {"prompt": clean_prompt, "idempotency_key": key,
+             "aspect_ratio": api_ratio, "asset_upload": {"type": "none"}},
         )
         job = _api_json(created).get("job") or {}
         job_id = job.get("id")
