@@ -237,10 +237,12 @@ def generate_gemini_audio(
         # on that model during this GitHub run.
         if candidate in _MODEL_DAILY_QUOTA_EXHAUSTED:
             continue
-        payload["model"] = candidate
+        # Give each request its own payload so model attribution stays
+        # stable in logs/tests and concurrent debugging.
+        candidate_payload = {**payload, "model": candidate}
         try:
             response = _post_with_cooldown(
-                transport, payload, api_key, timeout, model=candidate
+                transport, candidate_payload, api_key, timeout, model=candidate
             )
         except GeminiTTSError as exc:
             last_error = exc
