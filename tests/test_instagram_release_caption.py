@@ -17,9 +17,12 @@ class SharedShortsReleaseTests(unittest.TestCase):
             "long_video_description": "वृंदावन में भगवान शिव की कथा",
         }
         pack = build(meta)
-        self.assertIn("reuse the YouTube Short (9:16)", pack)
+        self.assertIn("reuse both original YouTube videos", pack)
         section = pack.split("## 3. Instagram Reel", 1)[1].split("## 4.", 1)[0]
         self.assertIn("final_video_shorts.mp4", section)
+        self.assertIn("final_video.mp4", section)
+        self.assertIn("thumbnail_shorts_final.jpg", section)
+        self.assertIn("thumbnail.jpg", section)
         self.assertNotIn("final_video_instagram.mp4", section)
         caption = instagram_caption_english(meta)
         self.assertIn("Lord Shiva", caption)
@@ -27,6 +30,10 @@ class SharedShortsReleaseTests(unittest.TestCase):
         self.assertIn("#DevotionalStories", caption)
         self.assertNotRegex(caption, r"[\u0900-\u097f]")
         self.assertNotRegex(section, r"[\u0900-\u097f]")
+        full_caption = instagram_caption_english(meta, long_video=True)
+        self.assertIn("full devotional story", full_caption)
+        self.assertNotRegex(full_caption, r"[\u0900-\u097f]")
+        self.assertIn("16:9 is horizontal, not native 9:16", section)
 
     def test_no_false_generic_krishna_default_in_artwork(self):
         src = (ROOT / "generate_assets.py").read_text(encoding="utf-8")
