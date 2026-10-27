@@ -406,6 +406,10 @@ jobs:
           CLIP_RERANK_ENABLED: ${{ vars.CLIP_RERANK_ENABLED || 'true' }}
           HOOK_OVERLAY_ENABLED: ${{ vars.HOOK_OVERLAY_ENABLED || 'true' }}
           EDITORIAL_EDITING_ENABLED: ${{ vars.EDITORIAL_EDITING_ENABLED || 'true' }}
+          # Creator requested NO burned-in narration captions or repeat text cards.
+          # Audio word timings remain available for beat-synced cuts and SFX.
+          SUBTITLES_ENABLED: 'false'
+          EDITORIAL_TEXT_OVERLAYS_ENABLED: 'false'
           COLOR_MATCH_ENABLED: ${{ vars.COLOR_MATCH_ENABLED || 'true' }}
           SPOKEN_HINDI_STRICT: ${{ vars.SPOKEN_HINDI_STRICT || 'false' }}
           EDITING_METRICS_SCOPE: ${{ needs.preflight.outputs.pipeline }}
@@ -439,7 +443,7 @@ jobs:
       - name: Validate music files, copyright evidence and scene coverage
         run: python scripts/validate_music.py
 
-      - name: Validate narration-led editing and caption budgets
+      - name: Validate narration-led editing rhythm and subtitle-free composition
         run: python scripts/validate_editing.py
 
       - name: Validate sampled color and continuity plan
