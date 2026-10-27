@@ -11,7 +11,7 @@ from pathlib import Path
 from editing_style_engine import select_edit_style
 
 TREATMENTS = {"clean", "detail", "impact", "breathing", "question"}
-TRANSITIONS = {"cut", "crossfade", "blur_cut", "whip_pan", "flash_cut"}
+TRANSITIONS = {"cut", "crossfade", "blur_cut", "whip_pan", "flash_cut", "masked_reveal"}
 RHYTHMS = {"quick", "measured", "linger"}
 CUE_WORDS = ("लेकिन", "असल", "यही", "तभी", "कैसे", "क्यों", "देखिए", "रहस्य", "सच", "क्या",
              "जानिए", "इसलिए", "नहीं", "पहली", "बात", "बदल", "अचानक")
@@ -62,7 +62,7 @@ def _word_focus(scene):
     return bool("?" in text or "?" in str(director.get("mood") or "") or pattern in {"hook", "curiosity"})
 
 
-def _decorate_scene(scene, format_name, style_plan=None):
+def _decorate_scene(scene, format_name, style_plan=None, *, allow_mask=True):
     shots = scene.get("shots") or []
     if not shots:
         return {"shots": 0, "cuts": 0, "accent": 0, "impact": 0, "warnings": ["missing_shots"]}
@@ -124,6 +124,15 @@ def _decorate_scene(scene, format_name, style_plan=None):
             "narrated_support"
         )
         shot["editAccent"] = style
+        # Evidence-only focus pull: direct attention to a sourced detail,
+        # not a generic random zoom. Restrict to one natural beat per scene.
+        shot["editFocusPull"] = bool(
+            index == focus_idx and index > 0 and
+            shot["editTreatment"] in {"detail", "question"} and
+            kind in {"detail", "close_up"} and
+            style in {"curiosity_reveal", "presenter_explainer"} and
+            not shot.get("comparisonApproved")
+        )
         # Move camera with the actual beat; never cut, accelerate or truncate
         # the voiceover. Fast question/action, measured explanation, and
         # room to absorb an emotional reveal. Deterministic given each story.
@@ -163,7 +172,17 @@ def _decorate_scene(scene, format_name, style_plan=None):
         if index == 0:
             shot["transition"] = "cut"
         elif index == focus_idx and pattern in {"climax", "reveal"}:
+            # Canva-style revealing mask: only when a narration-specific
+            # close-up/detail actually supplies the story payoff. Max 2 in
+            # the Long and 1 in Shorts; no faux before/after or subject edits.
+            evidence_reveal = (
+                allow_mask and style == "curiosity_reveal" and
+                kind in {"detail", "close_up"} and
+                (beat.get("emphasisStyle") in {"reveal", "climax"} or
+                 str(beat.get("emphasisText") or "").strip())
+            )
             shot["transition"] = (
+                "masked_reveal" if evidence_reveal else
                 "flash_cut" if style == "curiosity_reveal" else
                 "whip_pan" if style == "festival_energy" else
                 "blur_cut"
@@ -214,6 +233,8 @@ def _decorate_scene(scene, format_name, style_plan=None):
         "impact": impact_count,
         "warnings": [],
         "rhythms": dict(Counter(s.get("editRhythm") for s in shots)),
+        "maskedReveals": sum(s.get("transition") == "masked_reveal" for s in shots),
+        "focusPulls": sum(bool(s.get("editFocusPull")) for s in shots),
         "subtitleText": False,
         "style": style,
         "graphics": sum(bool(s.get("documentaryGraphic")) for s in shots),
@@ -227,6 +248,8 @@ def _decorate_scene(scene, format_name, style_plan=None):
             ("flash_cut", shot.get("transition") == "flash_cut"),
             ("soft_transition", shot.get("transition") == "crossfade"),
             ("story_driven_motion", bool(shot.get("editRhythm"))),
+            ("masked_reveal", shot.get("transition") == "masked_reveal"),
+            ("detail_focus_pull", bool(shot.get("editFocusPull"))),
             ("b_roll", True),
         ) if on}),
         "treatments": dict(Counter(s.get("editTreatment") for s in shots)),
@@ -244,6 +267,8 @@ def validate_editing(scenes):
             raise ValueError("Too many text/graphics cards in one scene")
         if sum(s.get("transition") == "blur_cut" for s in shots) > 1:
             raise ValueError("Excessive blur transitions")
+        if sum(s.get("transition") == "masked_reveal" for s in shots) > 1:
+            raise ValueError("Excessive masked transitions")
         media_pool = {str(s.get("file") or "") for s in shots}
         for shot in shots:
             if shot.get("editPurpose") and shot["editPurpose"] not in {
@@ -301,6 +326,13 @@ def validate_editing(scenes):
                 raise ValueError("Invalid spotlight flag")
             if shot.get("editBeatSnap") not in (True, False, None):
                 raise ValueError("Invalid snap flag")
+            if shot.get("editFocusPull") not in (True, False, None):
+                raise ValueError("Invalid focus pull flag")
+            if shot.get("transition") == "masked_reveal":
+                if shot is shots[0] or str(shot.get("shotType") or "") not in {"detail", "close_up"}:
+                    raise ValueError("Masked reveals require a non-first narrated detail")
+                if not shot.get("beatIndex") and not shot.get("narrationCue"):
+                    raise ValueError("Masked reveal must be attached to a narration beat")
             if shot.get("editAccent") and shot.get("editAccent") not in (
                 "cinematic_devotional", "curiosity_reveal", "presenter_explainer",
                 "emotional_story", "festival_energy"
@@ -327,8 +359,12 @@ def attach_editing(long_scenes, shorts_scenes,
     if enabled:
         for name, scenes in (("long", long_scenes), ("shorts", shorts_scenes)):
             details = []
+            masked_budget = 2 if name == "long" else 1
             for scene in scenes:
-                result = _decorate_scene(scene, name, style_plan)
+                result = _decorate_scene(
+                    scene, name, style_plan, allow_mask=(masked_budget > 0)
+                )
+                masked_budget -= result.get("maskedReveals", 0)
                 details.append({"scene": scene.get("scene_number"), **result})
             validate_editing(scenes)
             report["formats"][name] = details
