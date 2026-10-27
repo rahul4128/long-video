@@ -19,6 +19,7 @@ export const DevotionalShortsComposition: React.FC<DevotionalVideoProps & { plat
   scenes = [],
   hookText = '',
   platform = 'youtube',
+  showSubtitles = false,
 }) => {
   const { fps, durationInFrames } = useVideoConfig();
 
@@ -56,6 +57,7 @@ export const DevotionalShortsComposition: React.FC<DevotionalVideoProps & { plat
                 fadeOut={index === scenes.length - 1}
                 smoothEntry={index > 0}
               />
+              {showSubtitles && (
               <Subtitles
                 text={scene.narration_chunk}
                 words={scene.words}
@@ -64,7 +66,8 @@ export const DevotionalShortsComposition: React.FC<DevotionalVideoProps & { plat
                 format="shorts"
                 platform={platform}
                 sceneDurationInFrames={sceneDurationInFrames}
-              />
+              /> 
+              )}
             </Series.Sequence>
           );
         })}
