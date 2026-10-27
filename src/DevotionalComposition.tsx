@@ -17,6 +17,7 @@ export const DevotionalComposition: React.FC<DevotionalVideoProps> = ({
   scenes = [],
   bgmSwellSceneNumbers = [],
   hookText = '',
+  showSubtitles = false,
 }) => {
   const { fps } = useVideoConfig();
   const frame = useCurrentFrame();
@@ -104,14 +105,16 @@ export const DevotionalComposition: React.FC<DevotionalVideoProps> = ({
                 fadeIn={false}
                 fadeOut={index === scenes.length - 1}
               />
-              <Subtitles
+              {showSubtitles && (
+                <Subtitles
                 text={scene.narration_chunk}
                 words={scene.words}
                 visualBeats={scene.visualBeats}
                 captionStyle={scene.captionStyle || 'focus'}
                 format="long"
                 sceneDurationInFrames={sceneDurationInFrames}
-              />
+                />
+              )}
             </Series.Sequence>
           );
         })}

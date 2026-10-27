@@ -185,7 +185,7 @@ jobs:
         run: |
           set -euo pipefail
           for name in \
-            test_image_framing.py test_canva_image_provider.py test_canva_token_handoff.py test_gemini_tts.py test_episode_voice.py test_instagram_release_caption.py test_music_engine.py test_editing_director.py \
+            test_image_framing.py test_canva_image_provider.py test_canva_token_handoff.py test_gemini_tts.py test_episode_voice.py test_instagram_release_caption.py test_music_engine.py test_editing_director.py test_story_driven_edit.py \
             test_story_visual_relevance.py \
             test_p1_storytelling.py test_preflight_payload.py test_festival_date_gate.py test_festival_timing.py test_editing_performance_learning.py \
             test_render_style_feedback.py test_editing_style_engine.py \
@@ -406,6 +406,10 @@ jobs:
           CLIP_RERANK_ENABLED: ${{ vars.CLIP_RERANK_ENABLED || 'true' }}
           HOOK_OVERLAY_ENABLED: ${{ vars.HOOK_OVERLAY_ENABLED || 'true' }}
           EDITORIAL_EDITING_ENABLED: ${{ vars.EDITORIAL_EDITING_ENABLED || 'true' }}
+          # Creator requested NO burned-in narration captions or repeat text cards.
+          # Audio word timings remain available for beat-synced cuts and SFX.
+          SUBTITLES_ENABLED: 'false'
+          EDITORIAL_TEXT_OVERLAYS_ENABLED: 'false'
           COLOR_MATCH_ENABLED: ${{ vars.COLOR_MATCH_ENABLED || 'true' }}
           SPOKEN_HINDI_STRICT: ${{ vars.SPOKEN_HINDI_STRICT || 'false' }}
           EDITING_METRICS_SCOPE: ${{ needs.preflight.outputs.pipeline }}
@@ -439,7 +443,7 @@ jobs:
       - name: Validate music files, copyright evidence and scene coverage
         run: python scripts/validate_music.py
 
-      - name: Validate narration-led editing and caption budgets
+      - name: Validate narration-led editing rhythm and subtitle-free composition
         run: python scripts/validate_editing.py
 
       - name: Validate sampled color and continuity plan

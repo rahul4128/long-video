@@ -75,6 +75,13 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
   const frame = useCurrentFrame();
   const safeShotDuration = Math.max(1, shotDurationInFrames);
   const smooth = Easing.inOut(Easing.cubic);
+  // The narrator's question, action or reveal determines the camera speed.
+  const rhythm = shot.editRhythm || 'measured';
+  const motionCurve = rhythm === 'quick'
+    ? Easing.out(Easing.cubic)
+    : rhythm === 'linger'
+      ? Easing.inOut(Easing.quad)
+      : smooth;
 
   const entry =
     isFirst || incomingTransition === 'cut' || incomingTransitionFrames <= 0
@@ -220,7 +227,7 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
   const scale =
     shotDirection === 'zoom-in'
       ? interpolate(frame, [0, safeShotDuration], [1.0, editedZoomEnd], {
-          easing: smooth,
+          easing: motionCurve,
           extrapolateLeft: 'clamp',
           extrapolateRight: 'clamp',
         })
@@ -229,7 +236,7 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
           [0, safeShotDuration],
           [panStartScale, panEndScale],
           {
-            easing: smooth,
+            easing: motionCurve,
             extrapolateLeft: 'clamp',
             extrapolateRight: 'clamp',
           },
@@ -245,7 +252,7 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
             plannedCamera === 'pan_left' ? -panDistance : panDistance,
           ],
           {
-            easing: smooth,
+            easing: motionCurve,
             extrapolateLeft: 'clamp',
             extrapolateRight: 'clamp',
           },
@@ -301,7 +308,7 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
   }
 
   const progress = interpolate(frame, [0, safeShotDuration], [0, 1], {
-    easing: smooth,
+    easing: motionCurve,
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   });
@@ -315,7 +322,9 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
 
   // Keep movement especially restrained in vertical Shorts. Large travel on
   // a narrow crop feels like a phone slideshow rather than a camera move.
-  const foregroundPush = treatment === 'impact' ? 1.085 :
+  const foregroundPush = rhythm === 'linger' ? (isShorts ? 1.035 : 1.045) :
+    rhythm === 'quick' && treatment !== 'impact' ? (isShorts ? 1.08 : 1.105) :
+    treatment === 'impact' ? 1.085 :
     treatment === 'breathing' ? 1.035 : treatment === 'detail' ? 1.07 :
     isShorts ? 1.055 : 1.075;
   const foregroundPan = isShorts ? 14 : 24;

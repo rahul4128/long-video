@@ -21,6 +21,10 @@ def main():
         ("long", "props.json"), ("shorts", "props_shorts.json"),
     ):
         props = json.loads((ROOT / "public" / filename).read_text(encoding="utf-8"))
+        # User requested no burned-in subtitles until explicitly re-enabled.
+        # An old cached payload must not turn captions back on accidentally.
+        if os.getenv("SUBTITLES_ENABLED", "false").lower() != "true" and props.get("showSubtitles") is True:
+            raise SystemExit(f"Burned-in subtitles unexpectedly enabled in {format_name}")
         scenes = props.get("scenes") or []
         if not scenes:
             raise SystemExit(f"Editorial QC missing scenes: {format_name}")
@@ -31,6 +35,9 @@ def main():
                 raise SystemExit(f"Editorial QC report coverage mismatch: {format_name}")
             for scene in scenes:
                 for shot in scene.get("shots") or []:
+                    if (os.getenv("EDITORIAL_TEXT_OVERLAYS_ENABLED", "false").lower() != "true"
+                            and (shot.get("editorialLabel") or shot.get("documentaryGraphic"))):
+                        raise SystemExit("Unrequested recurring editorial text overlays")
                     if shot.get("comparisonApproved") is True:
                         for key in ("comparisonBeforeFile", "comparisonAfterFile"):
                             candidate = ROOT / "public" / "images" / str(shot.get(key) or "")
