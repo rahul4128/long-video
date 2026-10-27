@@ -182,6 +182,8 @@ export interface DevotionalVideoProps {
   title: string;
   // Short Hindi hook shown big on screen for the first ~1.8 s (HookOverlay).
   hookText?: string;
+  // Burned-in narration subtitles are OFF unless the creator explicitly opts in.
+  showSubtitles?: boolean;
   scenes: SceneItem[];
   fps: number;
   seo_metadata?: SEOMetadata;
