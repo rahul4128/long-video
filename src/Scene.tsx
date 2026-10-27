@@ -27,7 +27,7 @@ interface SceneProps {
   smoothEntry?: boolean;
 }
 
-type TransitionStyle = 'cut' | 'crossfade' | 'blur_cut' | 'whip_pan' | 'flash_cut';
+type TransitionStyle = 'cut' | 'crossfade' | 'blur_cut' | 'whip_pan' | 'flash_cut' | 'masked_reveal';
 
 function resolveShots(scene: SceneItem): Shot[] {
   if (scene.shots && scene.shots.length > 0) {
@@ -84,7 +84,7 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
       : smooth;
 
   const entry =
-    isFirst || incomingTransition === 'cut' || incomingTransitionFrames <= 0
+    isFirst || incomingTransition === 'cut' || incomingTransition === 'masked_reveal' || incomingTransitionFrames <= 0
       ? 1
       : interpolate(frame, [0, incomingTransitionFrames], [0, 1], {
           easing: smooth,
@@ -93,7 +93,7 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
         });
 
   const exit =
-    isLast || outgoingTransition === 'cut' || outgoingTransitionFrames <= 0
+    isLast || outgoingTransition === 'cut' || outgoingTransition === 'masked_reveal' || outgoingTransitionFrames <= 0
       ? 1
       : interpolate(
           frame,
@@ -179,8 +179,16 @@ const ShotLayer: React.FC<ShotLayerProps> = ({
     ? ' brightness(' + Math.max(0.92, Math.min(1.08, mildMatch.brightness)) + ')' +
       ' saturate(' + Math.max(0.95, Math.min(1.05, mildMatch.saturation)) + ')'
     : '';
-  const visualFilter = (blurPx + whipBlur > 0
-    ? 'blur(' + (blurPx + whipBlur) + 'px) ' : '') + colorGrade + matchFilter;
+  // Pull a narration-verified detail into focus once, rather than adding
+  // arbitrary zooms or heavy filters to every shot. Max 1.8px / ~0.35s.
+  const focusPullBlur = shot.editFocusPull
+    ? interpolate(frame, [0, Math.min(10, safeShotDuration)], [1.8, 0], {
+        extrapolateLeft: 'clamp', extrapolateRight: 'clamp',
+      })
+    : 0;
+  const totalBlur = blurPx + whipBlur + focusPullBlur;
+  const visualFilter = (totalBlur > 0
+    ? 'blur(' + totalBlur + 'px) ' : '') + colorGrade + matchFilter;
 
   // Phase 5: beat-specific camera direction is authoritative for AI images.
   // Videos keep the existing scene/director behavior so this phase cannot
@@ -471,7 +479,8 @@ export const Scene: React.FC<SceneProps> = ({
       shot?.transition === 'crossfade' ||
       shot?.transition === 'blur_cut' ||
       shot?.transition === 'whip_pan' ||
-      shot?.transition === 'flash_cut'
+      shot?.transition === 'flash_cut' ||
+      shot?.transition === 'masked_reveal'
     ) {
       return shot.transition;
     }
@@ -676,7 +685,21 @@ export const Scene: React.FC<SceneProps> = ({
               durationInFrames={window.duration}
               layout="none"
             >
-              <AbsoluteFill>
+              <AbsoluteFill
+                // A low-cost Canva-style reveal: the new verified image/clip
+                // uncovers the previous shot on the same TTS word boundary.
+                // Unlike a blur or flash, no unrelated asset is introduced.
+                style={{
+                  clipPath: window.incomingTransition === 'masked_reveal'
+                    ? `inset(0 ${interpolate(
+                        frame - window.start,
+                        [0, Math.max(1, window.incomingTransitionFrames)],
+                        [100, 0],
+                        { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' },
+                      )}% 0 0)`
+                    : undefined,
+                }}
+              >
                 <ShotLayer
                   shot={window.shot}
                   shotIndex={window.index}
