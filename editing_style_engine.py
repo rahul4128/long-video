@@ -23,14 +23,14 @@ STYLES = {
         "caption": "focus",
         "accent": "amber",
         "pace": "brisk",
-        "skills": ["b_roll", "hook_reveal", "whip_transition", "blur_transition", "kinetic_text", "spotlight_blur", "sound_punctuation"],
+        "skills": ["b_roll", "hook_reveal", "whip_transition", "blur_transition", "masked_reveal", "spotlight_blur", "sound_punctuation"],
     },
     "presenter_explainer": {
         "description": "Clear key points and explanatory details, minimal distracting effects",
         "caption": "focus",
         "accent": "blue",
         "pace": "steady",
-        "skills": ["b_roll", "clean_cuts", "animated_keywords", "detail_focus", "comparisons_if_verified", "narration_beat_cuts"],
+        "skills": ["b_roll", "clean_cuts", "focus_pull", "detail_focus", "comparisons_if_verified", "narration_beat_cuts"],
     },
     "emotional_story": {
         "description": "Natural holds, soft reveals, patient typography and musical contrast",
@@ -44,7 +44,7 @@ STYLES = {
         "caption": "focus",
         "accent": "saffron",
         "pace": "brisk",
-        "skills": ["b_roll", "match_cuts", "whip_transition", "text_reveal", "color_pop", "beat_sfx", "narration_beat_cuts"],
+        "skills": ["b_roll", "match_cuts", "whip_transition", "cinematic_cutaway", "color_pop", "beat_sfx", "narration_beat_cuts"],
     },
 }
 ALIASES = {
