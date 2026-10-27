@@ -16,7 +16,7 @@ STYLES = {
         "caption": "calm",
         "accent": "gold",
         "pace": "measured",
-        "skills": ["b_roll", "clean_cuts", "depth_motion", "soft_transitions", "film_grade", "clean_captions", "music_ducking"],
+        "skills": ["b_roll", "clean_cuts", "depth_motion", "soft_transitions", "film_grade", "narration_beat_cuts", "music_ducking"],
     },
     "curiosity_reveal": {
         "description": "Visible question, purposeful suspense, timed reveal and impact",
@@ -30,21 +30,21 @@ STYLES = {
         "caption": "focus",
         "accent": "blue",
         "pace": "steady",
-        "skills": ["b_roll", "clean_cuts", "animated_keywords", "detail_focus", "comparisons_if_verified", "clean_captions"],
+        "skills": ["b_roll", "clean_cuts", "animated_keywords", "detail_focus", "comparisons_if_verified", "narration_beat_cuts"],
     },
     "emotional_story": {
         "description": "Natural holds, soft reveals, patient typography and musical contrast",
         "caption": "calm",
         "accent": "warm",
         "pace": "measured",
-        "skills": ["b_roll", "gentle_pans", "soft_transitions", "music_ducking", "quiet_pause", "clean_captions"],
+        "skills": ["b_roll", "gentle_pans", "soft_transitions", "music_ducking", "quiet_pause", "narration_beat_cuts"],
     },
     "festival_energy": {
         "description": "Celebration/action coverage with faster, controlled cuts",
         "caption": "focus",
         "accent": "saffron",
         "pace": "brisk",
-        "skills": ["b_roll", "match_cuts", "whip_transition", "text_reveal", "color_pop", "beat_sfx", "clean_captions"],
+        "skills": ["b_roll", "match_cuts", "whip_transition", "text_reveal", "color_pop", "beat_sfx", "narration_beat_cuts"],
     },
 }
 ALIASES = {
