@@ -106,14 +106,14 @@ export const DevotionalComposition: React.FC<DevotionalVideoProps> = ({
                 fadeOut={index === scenes.length - 1}
               />
               {showSubtitles && (
-              <Subtitles
+                <Subtitles
                 text={scene.narration_chunk}
                 words={scene.words}
                 visualBeats={scene.visualBeats}
                 captionStyle={scene.captionStyle || 'focus'}
                 format="long"
                 sceneDurationInFrames={sceneDurationInFrames}
-              /> 
+                />
               )}
             </Series.Sequence>
           );
