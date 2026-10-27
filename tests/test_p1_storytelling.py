@@ -1,5 +1,7 @@
 """Tests for Hindi listenability and source-grounded documentary graphics."""
 import json
+import os
+from unittest.mock import patch
 from pathlib import Path
 import tempfile
 import unittest
@@ -68,7 +70,11 @@ class DocumentaryMotionTests(unittest.TestCase):
 
     def test_explainer_progress_comes_from_story(self):
         s=example("presenter_explainer","establish")
-        with tempfile.TemporaryDirectory() as tmp:
+        # Documentary cards are now opt-in. Validate the feature with
+        # explicit opt-in without allowing cards in the creator's default.
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ, {"EDITORIAL_TEXT_OVERLAYS_ENABLED": "true"}
+        ):
             report=attach_editing([s],[],report_path=Path(tmp)/"e.json",
                 context={"seo_metadata":{"long_video_title":"पूजा कैसे करें"}})
         graphics=[x.get("documentaryGraphic") for x in s["shots"] if x.get("documentaryGraphic")]
