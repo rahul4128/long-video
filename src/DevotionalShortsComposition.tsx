@@ -58,7 +58,7 @@ export const DevotionalShortsComposition: React.FC<DevotionalVideoProps & { plat
                 smoothEntry={index > 0}
               />
               {showSubtitles && (
-              <Subtitles
+                <Subtitles
                 text={scene.narration_chunk}
                 words={scene.words}
                 visualBeats={scene.visualBeats}
@@ -66,7 +66,7 @@ export const DevotionalShortsComposition: React.FC<DevotionalVideoProps & { plat
                 format="shorts"
                 platform={platform}
                 sceneDurationInFrames={sceneDurationInFrames}
-              /> 
+                />
               )}
             </Series.Sequence>
           );
