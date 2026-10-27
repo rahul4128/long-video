@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - visual-director-v2
+      - feat/canva-inspired-masked-reveal-editor-20261027
       - feat/story-driven-subtitle-free-editor-20261027
       - fix/canva-all-beats-cooldown-20261026
       - fix/gemini-tts-model-quota-fallback-20261026
@@ -64,7 +65,7 @@ jobs:
         run: |
           set -euo pipefail
           for file in \
-            test_canva_image_provider.py test_canva_token_handoff.py test_gemini_tts.py test_episode_voice.py test_instagram_release_caption.py test_image_framing.py test_music_engine.py test_editing_director.py test_story_driven_edit.py \
+            test_canva_image_provider.py test_canva_token_handoff.py test_gemini_tts.py test_episode_voice.py test_instagram_release_caption.py test_image_framing.py test_music_engine.py test_editing_director.py test_story_driven_edit.py test_canva_style_editor.py \
             test_story_visual_relevance.py \
             test_p1_storytelling.py test_preflight_payload.py test_festival_date_gate.py test_festival_timing.py test_editing_performance_learning.py \
             test_render_style_feedback.py test_editing_style_engine.py \
