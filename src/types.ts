@@ -60,6 +60,9 @@ export interface Shot {
   // The editorial director uses these to guide movement/graphics without
   // moving real narration or altering shot times and visual sourcing.
   editTreatment?: 'clean' | 'detail' | 'impact' | 'breathing' | 'question';
+  // Varies camera acceleration by actual narration question/reveal/emotion.
+  editRhythm?: 'quick' | 'measured' | 'linger';
+  editReason?: string;
   editorialLabel?: string;
   editPurpose?: 'reveal_payoff' | 'question_setup' | 'evidence_detail' | 'establish_context' | 'narrated_support';
   documentaryGraphic?: {
