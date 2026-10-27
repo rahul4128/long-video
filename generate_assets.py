@@ -4638,8 +4638,11 @@ async def process():
     long_hook = pick_hindi(thumbnail_hook_text, seo_metadata.get("thumbnailText"), max_words=6) if hook_enabled else ""
     shorts_hook = pick_hindi(shorts_thumbnail_hook_text, thumbnail_hook_text, max_words=6) if hook_enabled else ""
 
+    subtitles_enabled = os.getenv("SUBTITLES_ENABLED", "false").strip().lower() == "true"
+    print(f"🎬 Burned-in subtitles: {'ON (explicit opt-in)' if subtitles_enabled else 'OFF (creator preference)'}", flush=True)
     long_props = {
         "title": seo_metadata.get("long_video_title", "Devotional Long Video"),
+        "showSubtitles": subtitles_enabled,
         "hookText": long_hook,
         "fps": 30,
         "scenes": enriched_long,
@@ -4648,6 +4651,7 @@ async def process():
     }
     shorts_props = {
         "title": seo_metadata.get("shorts_title", "Devotional Shorts"),
+        "showSubtitles": subtitles_enabled,
         "hookText": shorts_hook,
         "fps": 30,
         "scenes": enriched_shorts,
