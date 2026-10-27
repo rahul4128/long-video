@@ -56,13 +56,15 @@ export interface Shot {
   // for the first shot in a scene, which only cross-dissolves in from the
   // previous scene). Scene.tsx alternates crossfade/blur_cut by shot index
   // when this isn't provided, so older props.json files still render fine.
-  transition?: 'cut' | 'crossfade' | 'blur_cut' | 'whip_pan' | 'flash_cut';
+  transition?: 'cut' | 'crossfade' | 'blur_cut' | 'whip_pan' | 'flash_cut' | 'masked_reveal';
   // The editorial director uses these to guide movement/graphics without
   // moving real narration or altering shot times and visual sourcing.
   editTreatment?: 'clean' | 'detail' | 'impact' | 'breathing' | 'question';
   // Varies camera acceleration by actual narration question/reveal/emotion.
   editRhythm?: 'quick' | 'measured' | 'linger';
   editReason?: string;
+  // A restrained focus pull on a narration-confirmed close-up/detail.
+  editFocusPull?: boolean;
   editorialLabel?: string;
   editPurpose?: 'reveal_payoff' | 'question_setup' | 'evidence_detail' | 'establish_context' | 'narrated_support';
   documentaryGraphic?: {
