@@ -12,6 +12,7 @@ from editing_style_engine import select_edit_style
 
 TREATMENTS = {"clean", "detail", "impact", "breathing", "question"}
 TRANSITIONS = {"cut", "crossfade", "blur_cut", "whip_pan", "flash_cut"}
+RHYTHMS = {"quick", "measured", "linger"}
 CUE_WORDS = ("लेकिन", "असल", "यही", "तभी", "कैसे", "क्यों", "देखिए", "रहस्य", "सच", "क्या",
              "जानिए", "इसलिए", "नहीं", "पहली", "बात", "बदल", "अचानक")
 STOPWORDS = {"और", "लेकिन", "आप", "अगर", "इस", "उस", "एक", "तो", "है", "हैं", "में", "को", "के",
@@ -70,7 +71,9 @@ def _decorate_scene(scene, format_name, style_plan=None):
     pattern = str(director.get("entertainmentBeat") or scene.get("entertainmentBeat") or "")
     style = str((style_plan or {}).get("style") or "cinematic_devotional")
     scene["editStyle"] = style
+    # Keep narration word times for visual cuts, not burned-in subtitles.
     scene["captionStyle"] = (style_plan or {}).get("profile", {}).get("caption", "focus")
+    allow_editorial_text = os.getenv("EDITORIAL_TEXT_OVERLAYS_ENABLED", "false").lower() == "true"
     focus_idx = None
     # Prefer the authored meaningful visual beat over arbitrary periodic edits.
     if pattern in {"reveal", "climax", "action"}:
@@ -121,6 +124,35 @@ def _decorate_scene(scene, format_name, style_plan=None):
             "narrated_support"
         )
         shot["editAccent"] = style
+        # Move camera with the actual beat; never cut, accelerate or truncate
+        # the voiceover. Fast question/action, measured explanation, and
+        # room to absorb an emotional reveal. Deterministic given each story.
+        duration = float(shot.get("endSeconds") or 0) - float(shot.get("startSeconds") or 0)
+        if shot["editPurpose"] == "reveal_payoff" and (
+                mood == "emotional" or style in {"cinematic_devotional", "emotional_story"}):
+            rhythm = "linger"
+        elif (shot["editPurpose"] == "question_setup"
+              or shot["editTreatment"] == "impact"
+              or (format_name == "shorts" and (
+                  pattern in {"hook", "action", "curiosity"} or
+                  shot["editPurpose"] == "evidence_detail"
+              ))
+              or style == "festival_energy"):
+            rhythm = "quick"
+        elif (shot["editTreatment"] == "breathing"
+              or kind == "atmosphere"
+              or (duration >= 6 and style == "emotional_story")):
+            rhythm = "linger"
+        else:
+            rhythm = "measured"
+        shot["editRhythm"] = rhythm
+        shot["editReason"] = (
+            "hold_for_emotional_payoff" if rhythm == "linger" and
+            shot["editPurpose"] == "reveal_payoff" else
+            "give_emotional_space" if rhythm == "linger" else
+            "immediate_hook_or_action" if rhythm == "quick" else
+            "clarify_narrated_detail"
+        )
         shot["editSpotlight"] = bool(shot["editTreatment"] == "question" and
                                      style in {"curiosity_reveal", "presenter_explainer"})
         shot["editBeatSnap"] = bool(style == "festival_energy" and
@@ -150,7 +182,7 @@ def _decorate_scene(scene, format_name, style_plan=None):
         # existing kinetic typography, and never on top of a hook overlay.
         shot.pop("editorialLabel", None)
         shot.pop("documentaryGraphic", None)
-        if index == focus_idx and not beat.get("emphasisText"):
+        if allow_editorial_text and index == focus_idx and not beat.get("emphasisText"):
             start = shot.get("startSeconds")
             is_opening_hook = scene.get("scene_number") == 1 and (
                 start is None or (isinstance(start, (int, float)) and start < 1.85))
@@ -181,6 +213,8 @@ def _decorate_scene(scene, format_name, style_plan=None):
         "accent": accent_count,
         "impact": impact_count,
         "warnings": [],
+        "rhythms": dict(Counter(s.get("editRhythm") for s in shots)),
+        "subtitleText": False,
         "style": style,
         "graphics": sum(bool(s.get("documentaryGraphic")) for s in shots),
         "shotPurposes": dict(Counter(s.get("editPurpose") for s in shots)),
@@ -192,7 +226,7 @@ def _decorate_scene(scene, format_name, style_plan=None):
             ("whip_pan", shot.get("transition") == "whip_pan"),
             ("flash_cut", shot.get("transition") == "flash_cut"),
             ("soft_transition", shot.get("transition") == "crossfade"),
-            ("word_captions", True),
+            ("story_driven_motion", bool(shot.get("editRhythm"))),
             ("b_roll", True),
         ) if on}),
         "treatments": dict(Counter(s.get("editTreatment") for s in shots)),
@@ -257,6 +291,10 @@ def validate_editing(scenes):
                         raise ValueError("Privacy mask exceeds frame")
             if shot.get("editTreatment") not in TREATMENTS:
                 raise ValueError("Invalid visual treatment")
+            if shot.get("editRhythm") is not None and shot["editRhythm"] not in RHYTHMS:
+                raise ValueError("Invalid edit rhythm")
+            if len(str(shot.get("editReason") or "")) > 80:
+                raise ValueError("Invalid edit reason")
             if shot.get("transition") not in TRANSITIONS:
                 raise ValueError("Invalid edit transition")
             if shot.get("editSpotlight") not in (True, False, None):
@@ -279,8 +317,10 @@ def attach_editing(long_scenes, shorts_scenes,
                    enabled=None, context=None):
     enabled = (os.getenv("EDITORIAL_EDITING_ENABLED", "true").lower() == "true") if enabled is None else bool(enabled)
     style_plan = select_edit_style(context, long_scenes)
-    report = {"editorVersion": 2, "enabled": enabled,
-              "note": "Story-aware CPU editing, no assumption that tutorial thumbnails are trend metrics",
+    report = {"editorVersion": 3, "enabled": enabled,
+              "subtitlesEnabled": False,
+              "textCardsEnabled": os.getenv("EDITORIAL_TEXT_OVERLAYS_ENABLED", "false").lower() == "true",
+              "note": "Story-driven CPU edit: narration-timed motion; no burned-in subtitles; Canva images and finishing",
               "selectedStyle": style_plan["style"],
               "styleDecision": style_plan,
               "formats": {}}
