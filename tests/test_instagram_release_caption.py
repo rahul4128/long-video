@@ -90,8 +90,15 @@ class SharedShortsReleaseTests(unittest.TestCase):
             "long_video_description": "यह करवा चौथ की पारंपरिक कथा है।",
             "hashtags": ["#KarvaChauth", "#VratKatha"],
         }
-        self.assertEqual(instagram_caption_english(meta), "")
-        self.assertEqual(instagram_caption_english(meta, long_video=True), "")
+        for legacy_caption in (
+            "A short devotional story about Karva Chauth. Watch till the end for the complete moment.",
+            "Step into a devotional story from Vrindavan and follow the moment that gives this tale its meaning.",
+            "This devotional tale of Lord Krishna brings a memorable moment from his stories to life.",
+        ):
+            meta["instagram_caption"] = legacy_caption
+            meta["instagram_long_caption"] = legacy_caption
+            self.assertEqual(instagram_caption_english(meta), "")
+            self.assertEqual(instagram_caption_english(meta, long_video=True), "")
         pack = build(meta)
         self.assertIn("CAPTION NOT GENERATED", pack)
         self.assertNotIn("Watch till the end for the complete moment", pack)
