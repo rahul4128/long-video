@@ -12,6 +12,7 @@ Never fails the workflow (exit 0 on any problem).
 """
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
