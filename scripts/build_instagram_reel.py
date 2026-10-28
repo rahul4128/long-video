@@ -146,6 +146,11 @@ def build(root=ROOT):
     # Reuse the same story-specific, English SEO caption builder as the
     # YouTube upload pack. No hard-coded per-deity caption/hashtag lookup.
     description = instagram_caption_english(meta)
+    if not description:
+        reasons.append("missing_story_specific_english_instagram_caption")
+        status["reasons"] = sorted(set(reasons))
+        status["status"] = "review_required"
+        description = "CAPTION NOT GENERATED — do not post until story-specific English copy is added."
     (out / "instagram_post.txt").write_text(description + "\n", encoding="utf-8")
     (out / "instagram_status.json").write_text(
         json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
