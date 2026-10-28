@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 import unittest
 
-from scripts.youtube_pack import build, instagram_caption_english
+from scripts.youtube_pack import _append_missing_hashtags, build, instagram_caption_english
 from spoken_hindi_qc import assess_text
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,6 +53,55 @@ class SharedShortsReleaseTests(unittest.TestCase):
         self.assertIn("#KarvaChauth", caption)
         self.assertIn("#VeervatiKatha", caption)
         self.assertNotIn("Watch till the end for the complete moment", caption)
+
+    def test_youtube_descriptions_append_only_missing_episode_hashtags(self):
+        tags = ["#KarvaChauth", "#VratKatha", "#IndianMythology"]
+        long_desc = _append_missing_hashtags(
+            "Veervati's Karva Chauth story.\\n\\n#KarvaChauth", tags
+        )
+        short_desc = _append_missing_hashtags(
+            "A short retelling of the vrat katha.\\n\\n#vratkatha", tags
+        )
+        self.assertEqual(long_desc.lower().count("#karvachauth"), 1)
+        self.assertEqual(long_desc.lower().count("#vratkatha"), 1)
+        self.assertEqual(long_desc.lower().count("#indianmythology"), 1)
+        self.assertEqual(short_desc.lower().count("#vratkatha"), 1)
+        self.assertEqual(short_desc.lower().count("#karvachauth"), 1)
+        self.assertEqual(short_desc.lower().count("#indianmythology"), 1)
+
+    def test_instagram_fallback_never_leaks_hindi_or_stuffs_keywords_as_hashtags(self):
+        meta = {
+            "shorts_title": "करवा चौथ की कथा",
+            "shorts_description": "करवा चौथ की कथा में फिर क्या हुआ?",
+            "primaryKeyword": "Karva Chauth vrat katha",
+            "secondaryKeywords": ["Veervati story", "Karva Chauth tradition"],
+            "hashtags": ["#KarvaChauth", "#VratKatha"],
+        }
+        caption = instagram_caption_english(meta)
+        self.assertNotRegex(caption, r"[\u0900-\u097f]")
+        self.assertIn("Karva Chauth vrat katha", caption)
+        self.assertIn("#KarvaChauth", caption)
+        self.assertIn("#VratKatha", caption)
+        self.assertNotIn("#KarvaChauthvratkatha", caption)
+        self.assertNotIn("#Veervatistory", caption)
+
+    def test_pack_uses_generated_instagram_captions_and_does_not_duplicate_youtube_tags(self):
+        meta = {
+            "shorts_title": "करवा चौथ की कथा",
+            "long_video_title": "करवा चौथ व्रत कथा",
+            "long_video_description": "A detailed Karva Chauth story.\\n\\n#KarvaChauth",
+            "shorts_description": "Veervati hears that the moon has risen.\\n\\n#VratKatha",
+            "instagram_caption": "Veervati's first Karva Chauth takes an unexpected turn. What happens next is the heart of this traditional vrat katha.",
+            "instagram_long_caption": "Explore Veervati's story and the meaning behind the Karva Chauth vrat katha.",
+            "hashtags": ["#KarvaChauth", "#VratKatha", "#IndianMythology"],
+            "tags": ["Karva Chauth", "Veervati"],
+        }
+        pack = build(meta)
+        self.assertIn("Veervati's first Karva Chauth takes an unexpected turn", pack)
+        self.assertEqual(pack.lower().count("#karvachauth"), 2)
+        # One occurrence in the long-video description and one in Instagram caption.
+        self.assertEqual(pack.lower().count("#vratkatha"), 2)
+        self.assertIn("Explore Veervati's story and the meaning behind the Karva Chauth vrat katha.", pack)
 
     def test_no_false_generic_krishna_default_in_artwork(self):
         src = (ROOT / "generate_assets.py").read_text(encoding="utf-8")
