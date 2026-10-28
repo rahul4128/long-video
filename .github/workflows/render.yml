@@ -1073,22 +1073,18 @@ jobs:
           echo "thumb_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="thumbnail.jpg") | .browser_download_url')" >> "$GITHUB_OUTPUT"
           echo "shorts_thumb_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="thumbnail_shorts_final.jpg") | .browser_download_url')" >> "$GITHUB_OUTPUT"
 
-      # Uploads are manual: with no MAKE_YOUTUBE_WEBHOOK_URL secret this step
-      # just skips. If the secret exists but the webhook is dead, it only warns -
-      # it can never turn a finished run red.
-      - name: Notify Make.com ONLY after explicit review approval
+      # Automatic publishing is enabled only when Make sends review_approved=true.
+      # For an approved production run, missing/broken uploader configuration must fail loudly.
+      - name: Notify Make.com after all QC gates pass and publication is approved
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.review_approved == true }}
-        continue-on-error: true
         env:
           MAKE_WEBHOOK_URL: ${{ secrets.MAKE_YOUTUBE_WEBHOOK_URL }}
-          # Private review by default for either Make repository_dispatch or manual tests.
-          # Public upload requires a separate explicit and reviewed workflow decision.
           YOUTUBE_PRIVACY: ${{ inputs.privacy || 'private' }}
         run: |
-          set -e
+          set -euo pipefail
           if [ -z "$MAKE_WEBHOOK_URL" ]; then
-            echo "::warning::MAKE_YOUTUBE_WEBHOOK_URL is not set - videos are in the GitHub Release (and Canva) but were NOT sent for YouTube upload."
-            exit 0
+            echo "::error::MAKE_YOUTUBE_WEBHOOK_URL is not set - render completed but videos were NOT uploaded to YouTube."
+            exit 1
           fi
           CANVA_JSON=$( [ -f out/canva_assets.json ] && cat out/canva_assets.json || echo '{}' )
           jq -n \
