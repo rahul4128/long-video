@@ -68,6 +68,21 @@ def _hashtags(tags):
 def _block(text):
     return "```\n" + (text or "").strip() + "\n```"
 
+def _append_missing_hashtags(description, tags):
+    """Append hashtags missing from a description, deduplicating case-insensitively."""
+    text = str(description or "").strip()
+    normalized = _hashtags(tags)
+    existing = {
+        tag.lower()
+        for tag in re.findall(r"(?<!\\w)#[\\w]+", text, flags=re.UNICODE)
+    }
+    missing = [tag for tag in normalized if tag.lower() not in existing]
+    if not missing:
+        return text
+    return f"{text}\\n\\n{' '.join(missing)}".strip()
+
+
+
 
 
 def instagram_caption_english(meta: dict, *, long_video: bool = False) -> str:
@@ -79,8 +94,8 @@ def instagram_caption_english(meta: dict, *, long_video: bool = False) -> str:
     caption_key = "instagram_long_caption" if long_video else "instagram_caption"
     caption = str(meta.get(caption_key) or "").strip()
 
-    # Backward-compatible fallback for old cached episodes: reuse the
-    # episode-specific YouTube description rather than a canned topic template.
+    # Older cached episodes may not have Instagram captions. Reuse an episode-specific
+    # English description when possible; never leak a Hindi title/description into IG.
     if not caption:
         source_keys = (
             ("long_video_description", "description")
@@ -89,24 +104,45 @@ def instagram_caption_english(meta: dict, *, long_video: bool = False) -> str:
         )
         for key in source_keys:
             value = str(meta.get(key) or "").strip()
-            if value:
-                lines = []
-                for line in value.splitlines():
-                    line = line.strip()
-                    if not line or re.match(r"^\d{1,2}:\d{2}(?::\d{2})?\b", line):
-                        continue
-                    if line.lower().startswith(("chapters:", "timestamps:")):
-                        break
-                    lines.append(line)
-                caption = "\n".join(lines).strip()
-                if caption:
+            if not value or re.search(r"[\\u0900-\\u097F]", value):
+                continue
+            lines = []
+            for line in value.splitlines():
+                line = line.strip()
+                if not line or re.match(r"^\\d{1,2}:\\d{2}(?::\\d{2})?\\b", line):
+                    continue
+                if line.lower().startswith(("chapters:", "timestamps:")):
                     break
+                lines.append(line)
+            candidate = "\\n".join(lines).strip()
+            if candidate and re.search(r"[A-Za-z]", candidate):
+                caption = candidate
+                break
+        # Final, conservative fallback for an old episode with no English copy.
         if not caption:
-            title_key = "long_video_title" if long_video else "shorts_title"
-            caption = str(meta.get(title_key) or meta.get("long_video_title") or "").strip()
+            keywords = []
+            if meta.get("primaryKeyword"):
+                keywords.append(str(meta.get("primaryKeyword")).strip())
+            keywords.extend(str(x).strip() for x in _list(meta.get("secondaryKeywords")))
+            anchor = next(
+                (x for x in keywords if x and not re.search(r"[\\u0900-\\u097F]", x) and re.search(r"[A-Za-z]", x)),
+                ""
+            )
+            if anchor:
+                caption = f"{anchor.rstrip('.!?')} — what detail stands out to you?"
+            else:
+                caption = "Which detail from this story stood out to you? Share your thoughts in the comments."
 
-    # Hashtags should be episode-specific: keep the generated ones first,
-    # then use supplied SEO hashtags and keywords only when more are needed.
+    # Keep generated caption hashtags first, then append only the approved
+    # episode-specific SEO hashtags. Do not turn raw keyword phrases into tags.
+    caption_tags = re.findall(r"(?<!\\w)#[\\w]+", caption, flags=re.UNICODE)
+    body = re.sub(r"(?<!\\w)#[\\w]+", "", caption, flags=re.UNICODE)
+    body = re.sub(r"[ \\t]{2,}", " ", body)
+    body = re.sub(r"\\n[ \\t]*\\n(?:[ \\t]*\\n)+", "\\n\\n", body).strip()
+
+    candidate_tags = list(caption_tags)
+    candidate_tags.extend(_hashtags(_list(meta.get("hashtags"))))
+
     caption_tags = re.findall(r"(?<!\w)#[\w]+", caption, flags=re.UNICODE)
     body = re.sub(r"(?<!\w)#[\w]+", "", caption, flags=re.UNICODE)
     body = re.sub(r"[ \t]{2,}", " ", body)
@@ -138,11 +174,13 @@ def build(meta: dict) -> str:
     variants = [t for t in (_title_text(v) for v in _list(meta.get("titleVariants"))) if t and t != long_title]
     tags = _tags_within_limit(_list(meta.get("tags")))
     hashtags = _hashtags(_list(meta.get("hashtags")))
-    long_desc = (meta.get("long_video_description") or meta.get("description") or "").strip()
-    if hashtags and not any(h in long_desc for h in hashtags):
-        long_desc = f"{long_desc}\n\n{' '.join(hashtags[:3])}".strip()
-    shorts_desc = (meta.get("shorts_description") or "").strip()
-    shorts_desc = f"{shorts_desc}\n\n{' '.join(hashtags)}".strip()
+    long_desc = (meta.get("long_video_description") or meta.get("description") or long_title).strip()
+    long_desc = _append_missing_hashtags(long_desc, hashtags)
+    shorts_desc = (
+        meta.get("shorts_description") or meta.get("long_video_description")
+        or meta.get("description") or shorts_title or long_title
+    )
+    shorts_desc = _append_missing_hashtags(shorts_desc, hashtags)
     thumbs = meta.get("thumbnailVariants") or [{"id": "a", "file": "thumbnail.jpg"}]
     facts = meta.get("factCheck") or []
     m = meta.get("meta") or {}
