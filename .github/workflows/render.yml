@@ -1123,13 +1123,13 @@ jobs:
               long_video: {
                 downloadUrl: $longUrl,
                 title: $meta[0].long_video_title,
-                description: append_missing_tags($meta[0].long_video_description; $meta[0].hashtags),
+                description: append_missing_tags($meta[0].long_video_description // $meta[0].description // $meta[0].long_video_title; $meta[0].hashtags),
                 tags: ($meta[0].tags // [])
               },
               shorts: {
                 downloadUrl: $shortsUrl,
                 title: $meta[0].shorts_title,
-                description: append_missing_tags($meta[0].shorts_description; $meta[0].hashtags),
+                description: append_missing_tags($meta[0].shorts_description // $meta[0].long_video_description // $meta[0].shorts_title // $meta[0].long_video_title; $meta[0].hashtags),
                 tags: ($meta[0].tags // []),
                 thumbnailUrl: $shortsThumbUrl
               },
