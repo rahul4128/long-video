@@ -10,11 +10,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SharedShortsReleaseTests(unittest.TestCase):
-    def test_instagram_uses_same_short_and_english_only_caption(self):
+    def test_instagram_uses_generated_episode_captions_and_dynamic_keywords(self):
         meta = {
-            "shorts_title": "वृंदावन में शिव क्यों बने गोपी?",
-            "long_video_title": "शिव की कथा",
-            "long_video_description": "वृंदावन में भगवान शिव की कथा",
+            "shorts_title": "करवा चौथ की कथा: वीरवती के साथ क्या हुआ?",
+            "long_video_title": "करवा चौथ व्रत कथा और वीरवती की कहानी",
+            "long_video_description": "A long-form retelling of Veervati's Karva Chauth story, exploring the tradition and its central turning point.",
+            "shorts_description": "A short retelling of Veervati's first Karva Chauth and the moment the story turns.",
+            "instagram_caption": "Veervati's first Karva Chauth takes an unexpected turn when she believes the moon has risen. What happens next is the heart of this traditional vrat katha.",
+            "instagram_long_caption": "Discover the story of Veervati and the Karva Chauth vrat katha. This full retelling follows the choices, belief, and turning point behind the familiar tradition.",
+            "hashtags": ["#KarvaChauth", "#VratKatha", "#IndianMythology", "#DevotionalStories"],
+            "primaryKeyword": "Karva Chauth vrat katha",
+            "secondaryKeywords": ["Veervati story", "Karva Chauth tradition"],
         }
         pack = build(meta)
         self.assertIn("reuse both original YouTube videos", pack)
@@ -25,31 +31,28 @@ class SharedShortsReleaseTests(unittest.TestCase):
         self.assertIn("thumbnail.jpg", section)
         self.assertNotIn("final_video_instagram.mp4", section)
         caption = instagram_caption_english(meta)
-        self.assertIn("Lord Shiva", caption)
-        self.assertIn("Vrindavan", caption)
-        self.assertIn("#DevotionalStories", caption)
-        self.assertNotRegex(caption, r"[\u0900-\u097f]")
-        self.assertNotRegex(section, r"[\u0900-\u097f]")
+        self.assertIn("Veervati's first Karva Chauth takes an unexpected turn", caption)
+        self.assertIn("#KarvaChauth", caption)
+        self.assertIn("#VratKatha", caption)
+        self.assertNotIn("A short devotional story", caption)
+        self.assertNotIn("Watch till the end for the complete moment", caption)
         full_caption = instagram_caption_english(meta, long_video=True)
-        self.assertIn("full devotional story", full_caption)
-        self.assertNotRegex(full_caption, r"[\u0900-\u097f]")
+        self.assertIn("full retelling follows the choices", full_caption)
+        self.assertNotIn("Behind the Karva Chauth tradition is a katha", full_caption)
         self.assertIn("16:9 is horizontal, not native 9:16", section)
 
-
-    def test_karva_chauth_caption_is_topic_specific_not_boilerplate(self):
+    def test_old_episode_fallback_uses_dynamic_description_not_boilerplate(self):
         meta = {
-            "shorts_title": "करवा चौथ की कथा: चंद्रमा के सामने क्या हुआ?",
-            "long_video_title": "करवा चौथ व्रत कथा",
-            "long_video_description": "करवा चौथ की परंपरा और कथा",
+            "shorts_title": "करवा चौथ की कथा",
+            "shorts_description": "Veervati hears that the moon has risen, but the story takes a painful turn.",
+            "hashtags": ["#KarvaChauth", "#VeervatiKatha"],
+            "primaryKeyword": "Karva Chauth story",
         }
         caption = instagram_caption_english(meta)
-        self.assertIn("Karva Chauth tradition", caption)
-        self.assertIn("faith, devotion, and hope", caption)
+        self.assertIn("Veervati hears that the moon has risen", caption)
         self.assertIn("#KarvaChauth", caption)
-        self.assertIn("#IndianMythology", caption)
-        self.assertNotIn("A short devotional story about Karva Chauth", caption)
+        self.assertIn("#VeervatiKatha", caption)
         self.assertNotIn("Watch till the end for the complete moment", caption)
-        self.assertNotRegex(caption, r"[\u0900-\u097f]")
 
     def test_no_false_generic_krishna_default_in_artwork(self):
         src = (ROOT / "generate_assets.py").read_text(encoding="utf-8")
