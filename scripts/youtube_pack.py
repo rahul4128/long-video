@@ -102,10 +102,8 @@ def instagram_caption_english(meta: dict, *, long_video: bool = False) -> str:
                 if caption:
                     break
         if not caption:
-            caption = str(
-                meta.get("long_video_title") if long_video
-                else meta.get("shorts_title") or meta.get("long_video_title") or ""
-            ).strip()
+            title_key = "long_video_title" if long_video else "shorts_title"
+            caption = str(meta.get(title_key) or meta.get("long_video_title") or "").strip()
 
     # Hashtags should be episode-specific: keep the generated ones first,
     # then use supplied SEO hashtags and keywords only when more are needed.
