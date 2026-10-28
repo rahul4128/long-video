@@ -35,6 +35,22 @@ class SharedShortsReleaseTests(unittest.TestCase):
         self.assertNotRegex(full_caption, r"[\u0900-\u097f]")
         self.assertIn("16:9 is horizontal, not native 9:16", section)
 
+
+    def test_karva_chauth_caption_is_topic_specific_not_boilerplate(self):
+        meta = {
+            "shorts_title": "करवा चौथ की कथा: चंद्रमा के सामने क्या हुआ?",
+            "long_video_title": "करवा चौथ व्रत कथा",
+            "long_video_description": "करवा चौथ की परंपरा और कथा",
+        }
+        caption = instagram_caption_english(meta)
+        self.assertIn("Karva Chauth tradition", caption)
+        self.assertIn("faith, devotion, and hope", caption)
+        self.assertIn("#KarvaChauth", caption)
+        self.assertIn("#IndianMythology", caption)
+        self.assertNotIn("A short devotional story about Karva Chauth", caption)
+        self.assertNotIn("Watch till the end for the complete moment", caption)
+        self.assertNotRegex(caption, r"[\\u0900-\\u097f]")
+
     def test_no_false_generic_krishna_default_in_artwork(self):
         src = (ROOT / "generate_assets.py").read_text(encoding="utf-8")
         self.assertIn("episode_subject = (seo_metadata.get", src)
