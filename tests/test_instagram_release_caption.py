@@ -57,10 +57,10 @@ class SharedShortsReleaseTests(unittest.TestCase):
     def test_youtube_descriptions_append_only_missing_episode_hashtags(self):
         tags = ["#KarvaChauth", "#VratKatha", "#IndianMythology"]
         long_desc = _append_missing_hashtags(
-            "Veervati's Karva Chauth story.\\n\\n#KarvaChauth", tags
+            "Veervati's Karva Chauth story.\n\n#KarvaChauth", tags
         )
         short_desc = _append_missing_hashtags(
-            "A short retelling of the vrat katha.\\n\\n#vratkatha", tags
+            "A short retelling of the vrat katha.\n\n#vratkatha", tags
         )
         self.assertEqual(long_desc.lower().count("#karvachauth"), 1)
         self.assertEqual(long_desc.lower().count("#vratkatha"), 1)
@@ -89,8 +89,8 @@ class SharedShortsReleaseTests(unittest.TestCase):
         meta = {
             "shorts_title": "करवा चौथ की कथा",
             "long_video_title": "करवा चौथ व्रत कथा",
-            "long_video_description": "A detailed Karva Chauth story.\\n\\n#KarvaChauth",
-            "shorts_description": "Veervati hears that the moon has risen.\\n\\n#VratKatha",
+            "long_video_description": "A detailed Karva Chauth story.\n\n#KarvaChauth",
+            "shorts_description": "Veervati hears that the moon has risen.\n\n#VratKatha",
             "instagram_caption": "Veervati's first Karva Chauth takes an unexpected turn. What happens next is the heart of this traditional vrat katha.",
             "instagram_long_caption": "Explore Veervati's story and the meaning behind the Karva Chauth vrat katha.",
             "hashtags": ["#KarvaChauth", "#VratKatha", "#IndianMythology"],
@@ -98,9 +98,14 @@ class SharedShortsReleaseTests(unittest.TestCase):
         }
         pack = build(meta)
         self.assertIn("Veervati's first Karva Chauth takes an unexpected turn", pack)
-        self.assertEqual(pack.lower().count("#karvachauth"), 2)
-        # One occurrence in the long-video description and one in Instagram caption.
-        self.assertEqual(pack.lower().count("#vratkatha"), 2)
+        fence = chr(96) * 3
+        long_desc = pack.split("**Description** (chapters included)", 1)[1].split(fence, 2)[1]
+        short_section = pack.split("## 2. Short", 1)[1]
+        short_desc = short_section.split("**Description**", 1)[1].split(fence, 2)[1]
+        self.assertEqual(long_desc.lower().count("#karvachauth"), 1)
+        self.assertEqual(long_desc.lower().count("#vratkatha"), 1)
+        self.assertEqual(short_desc.lower().count("#karvachauth"), 1)
+        self.assertEqual(short_desc.lower().count("#vratkatha"), 1)
         self.assertIn("Explore Veervati's story and the meaning behind the Karva Chauth vrat katha.", pack)
 
     def test_no_false_generic_krishna_default_in_artwork(self):
@@ -115,6 +120,8 @@ class SharedShortsReleaseTests(unittest.TestCase):
         self.assertNotIn("InstagramReelComposition", workflow)
         self.assertIn("DevotionalShortsComposition", workflow)
         self.assertIn("per_segment_gemini_first", workflow)
+        self.assertIn("append_missing_tags($meta[0].long_video_description; $meta[0].hashtags)", workflow)
+        self.assertIn("append_missing_tags($meta[0].shorts_description; $meta[0].hashtags)", workflow)
 
     def test_colloquial_hindi_check_flags_stiff_words(self):
         result = assess_text("तत्पश्चात राजा ने सभी को अवगत कराया।")
