@@ -70,71 +70,68 @@ def _block(text):
 
 
 def instagram_caption_english(meta: dict, *, long_video: bool = False) -> str:
-    """Build a topic-aware English Instagram caption from the approved story metadata."""
-    raw = " ".join(str(meta.get(key) or "") for key in (
-        "shorts_title", "long_video_title", "long_video_description"
-    )).lower()
-    # Topic-specific copy avoids the same empty "watch till the end" line for
-    # every episode while staying within claims supported by the identified story.
-    entities = [
-        (("करवा चौथ", "karwa"), "Karva Chauth", "#KarvaChauth",
-         "Behind the Karva Chauth tradition is a katha remembered for faith, devotion, and hope. This retelling follows the story to the moment that brings it together.",
-         "Explore the Karva Chauth katha and the devotional meaning behind the tradition. This full retelling follows the story to its key moment."),
-        (("वृंदावन", "vrindavan"), "Vrindavan", "#Vrindavan",
-         "Step into a devotional story from Vrindavan and follow the moment that gives this tale its meaning.",
-         "Explore this devotional story from Vrindavan and the meaning behind its central moment."),
-        (("कृष्ण", "krishna", "कान्हा", "गोविंद"), "Lord Krishna", "#Krishna",
-         "This devotional tale of Lord Krishna brings a memorable moment from his stories to life. Watch how the story unfolds.",
-         "Explore this devotional tale of Lord Krishna and the meaning behind its central moment."),
-        (("राधा", "radha"), "Radha", "#RadhaKrishna",
-         "A devotional tale of Radha and Krishna brings love, faith, and devotion into focus. Stay with the story to its key moment.",
-         "Explore a devotional tale of Radha and Krishna and the meaning carried through the story."),
-        (("शिव", "महादेव", "shiva"), "Lord Shiva", "#LordShiva",
-         "Enter a devotional story of Lord Shiva and follow the details that reveal why this moment matters.",
-         "Explore this devotional story of Lord Shiva and the meaning behind its central moment."),
-        (("राम", "ramayan", "rama"), "Lord Rama", "#Ramayana",
-         "This story from Lord Rama's tradition brings a moment of duty, faith, and devotion into focus.",
-         "Explore this devotional story from the Ramayana and reflect on the meaning of its central moment."),
-        (("हनुमान", "hanuman"), "Lord Hanuman", "#Hanuman",
-         "This devotional tale of Lord Hanuman celebrates courage, faith, and selfless devotion. Watch how the story unfolds.",
-         "Explore this devotional tale of Lord Hanuman and the meaning behind its central moment."),
-        (("दुर्गा", "नवरात्र", "siddhidatri", "सिद्धिदात्री"), "Goddess Durga", "#Navratri",
-         "This devotional story of Goddess Durga reflects the strength and protection remembered in the tradition.",
-         "Explore this devotional story of Goddess Durga and the meaning behind its central moment."),
-        (("विष्णु", "vishnu"), "Lord Vishnu", "#Vishnu",
-         "Follow this devotional tale of Lord Vishnu to the moment that gives the story its meaning.",
-         "Explore this devotional tale of Lord Vishnu and the meaning behind its central moment."),
-        (("महाभारत", "mahabharat"), "the Mahabharata", "#Mahabharata",
-         "This moment from the Mahabharata brings a timeless question of duty and devotion into focus.",
-         "Explore this story from the Mahabharata and reflect on the choices and meaning at its heart."),
-    ]
-    found = [item for item in entities if any(term in raw for term in item[0])]
-    if found:
-        primary = found[0]
-        topic_tags = [item[2] for item in found[:2]]
-        hook = primary[4] if long_video else primary[3]
-    else:
-        topic_tags = []
-        hook = (
-            "Explore the full devotional story and the meaning behind its turning point."
+    """Use the episode-specific AI-written Instagram caption, SEO keywords and tags.
+
+    The LLM writes the actual story copy upstream. This function should package
+    that copy, not invent the same generic story summary for every upload.
+    """
+    caption_key = "instagram_long_caption" if long_video else "instagram_caption"
+    caption = str(meta.get(caption_key) or "").strip()
+
+    # Backward-compatible fallback for old cached episodes: reuse the
+    # episode-specific YouTube description rather than a canned topic template.
+    if not caption:
+        source_keys = (
+            ("long_video_description", "description")
             if long_video else
-            "Follow this devotional story to its turning point and discover what makes the moment meaningful."
+            ("shorts_description", "long_video_description", "description")
         )
+        for key in source_keys:
+            value = str(meta.get(key) or "").strip()
+            if value:
+                lines = []
+                for line in value.splitlines():
+                    line = line.strip()
+                    if not line or re.match(r"^\d{1,2}:\d{2}(?::\d{2})?\b", line):
+                        continue
+                    if line.lower().startswith(("chapters:", "timestamps:")):
+                        break
+                    lines.append(line)
+                caption = "\n".join(lines).strip()
+                if caption:
+                    break
+        if not caption:
+            caption = str(
+                meta.get("long_video_title") if long_video
+                else meta.get("shorts_title") or meta.get("long_video_title") or ""
+            ).strip()
+
+    # Hashtags should be episode-specific: keep the generated ones first,
+    # then use supplied SEO hashtags and keywords only when more are needed.
+    caption_tags = re.findall(r"(?<!\w)#[\w]+", caption, flags=re.UNICODE)
+    body = re.sub(r"(?<!\w)#[\w]+", "", caption, flags=re.UNICODE)
+    body = re.sub(r"[ \t]{2,}", " ", body)
+    body = re.sub(r"\n[ \t]*\n(?:[ \t]*\n)+", "\n\n", body).strip()
+
+    candidate_tags = list(caption_tags)
+    candidate_tags.extend(_hashtags(_list(meta.get("hashtags"))))
+    keyword_values = []
+    if meta.get("primaryKeyword"):
+        keyword_values.append(meta.get("primaryKeyword"))
+    keyword_values.extend(_list(meta.get("secondaryKeywords")))
+    candidate_tags.extend(_hashtags(keyword_values))
+
     hashtags = []
-    for tag in topic_tags + ["#DevotionalStories", "#IndianMythology", "#SanatanDharma"]:
-        if tag not in hashtags and len(hashtags) < 5:
-            hashtags.append(tag)
-    if long_video:
-        cta = (
-            "Which part of the story resonated with you? Share your thoughts in the comments. "
-            "Follow for more Indian devotional stories, save this video, and share it with someone who would enjoy it."
-        )
-    else:
-        cta = (
-            "Which moment stayed with you? Share your thoughts in the comments. "
-            "Follow for more Indian devotional stories, save this Reel, and send it to someone who loves these stories."
-        )
-    return f"{hook}\n\n{cta}\n\n{' '.join(hashtags)}"
+    for tag in candidate_tags:
+        normalized = "#" + str(tag).strip().lstrip("#").replace(" ", "")
+        if len(normalized) > 1 and normalized.lower() not in {x.lower() for x in hashtags}:
+            hashtags.append(normalized)
+        if len(hashtags) >= 8:
+            break
+
+    if body and hashtags:
+        return f"{body}\n\n{' '.join(hashtags)}"
+    return body or " ".join(hashtags)
 
 def build(meta: dict) -> str:
     long_title = (meta.get("long_video_title") or "").strip()
