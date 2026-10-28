@@ -1110,14 +1110,14 @@ jobs:
               long_video: {
                 downloadUrl: $longUrl,
                 title: $meta[0].long_video_title,
-                description: $meta[0].long_video_description,
-                tags: $meta[0].tags
+                description: (($meta[0].long_video_description // "") + "\n\n" + (($meta[0].hashtags // []) | join(" "))),
+                tags: ($meta[0].tags // [])
               },
               shorts: {
                 downloadUrl: $shortsUrl,
                 title: $meta[0].shorts_title,
-                description: $meta[0].shorts_description,
-                tags: $meta[0].hashtags,
+                description: (($meta[0].shorts_description // "") + "\n\n" + (($meta[0].hashtags // []) | join(" "))),
+                tags: ($meta[0].tags // []),
                 thumbnailUrl: $shortsThumbUrl
               },
               thumbnail: {
