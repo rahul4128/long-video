@@ -1,6 +1,6 @@
 {
   "account": "oflifepart31",
-  "generatedAt": "2026-10-23T09:04:53.302701+00:00",
+  "generatedAt": "2026-10-28T06:57:19.191813+00:00",
   "matchedVideos": [],
   "rejected": [
     {
@@ -14,7 +14,7 @@
       "githubRunId": "38510397633"
     },
     {
-      "reason": "not_mature_or_predates_render",
+      "reason": "missing_or_duplicate_video_metrics",
       "format": "long",
       "githubRunId": "39049259713"
     },
@@ -24,32 +24,32 @@
       "githubRunId": "39049259713"
     },
     {
-      "reason": "not_mature_or_predates_render",
+      "reason": "missing_or_duplicate_video_metrics",
       "format": "long",
       "githubRunId": "39094121098"
     },
     {
-      "reason": "not_mature_or_predates_render",
+      "reason": "missing_or_duplicate_video_metrics",
       "format": "shorts",
       "githubRunId": "39094121098"
     },
     {
-      "reason": "not_mature_or_predates_render",
+      "reason": "missing_or_duplicate_video_metrics",
       "format": "long",
       "githubRunId": "39185514833"
     },
     {
-      "reason": "not_mature_or_predates_render",
+      "reason": "missing_or_duplicate_video_metrics",
       "format": "shorts",
       "githubRunId": "39185514833"
     },
     {
-      "reason": "not_mature_or_predates_render",
+      "reason": "missing_or_duplicate_video_metrics",
       "format": "long",
       "githubRunId": "39382937625"
     },
     {
-      "reason": "not_mature_or_predates_render",
+      "reason": "missing_or_duplicate_video_metrics",
       "format": "shorts",
       "githubRunId": "39382937625"
     },
@@ -69,9 +69,59 @@
       "githubRunId": "39625300413"
     },
     {
-      "reason": "not_mature_or_predates_render",
+      "reason": "ambiguous_or_unpublished_title",
       "format": "shorts",
       "githubRunId": "39625300413"
+    },
+    {
+      "reason": "ambiguous_or_unpublished_title",
+      "format": "long",
+      "githubRunId": "39934556546"
+    },
+    {
+      "reason": "ambiguous_or_unpublished_title",
+      "format": "shorts",
+      "githubRunId": "39934556546"
+    },
+    {
+      "reason": "not_mature_or_predates_render",
+      "format": "long",
+      "githubRunId": "40053585865"
+    },
+    {
+      "reason": "ambiguous_or_unpublished_title",
+      "format": "shorts",
+      "githubRunId": "40053585865"
+    },
+    {
+      "reason": "not_mature_or_predates_render",
+      "format": "long",
+      "githubRunId": "40290621933"
+    },
+    {
+      "reason": "ambiguous_or_unpublished_title",
+      "format": "shorts",
+      "githubRunId": "40290621933"
+    },
+    {
+      "reason": "ambiguous_or_unpublished_title",
+      "format": "long",
+      "githubRunId": "40454299810"
+    },
+    {
+      "reason": "ambiguous_or_unpublished_title",
+      "format": "shorts",
+      "githubRunId": "40454299810"
+    },
+    {
+      "reason": "ambiguous_or_unpublished_title",
+      "format": "long",
+      "githubRunId": "40633600641"
+    },
+    {
+      "reason": "ambiguous_or_unpublished_title",
+      "format": "shorts",
+      "githubRunId": "40633600641"
     }
   ],
   "eligibleGroups": 0,
