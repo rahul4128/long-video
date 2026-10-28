@@ -1111,7 +1111,7 @@ jobs:
                 | ($tags | map(. as $tag
                     | select(((($desc | ascii_downcase) | contains($tag | ascii_downcase)) | not)))) as $missing
                 | ($desc
-                    + (if (($desc | length) > 0) and (($missing | length) > 0) then "\\n\\n" else "" end)
+                    + (if (($desc | length) > 0) and (($missing | length) > 0) then "\n\n" else "" end)
                     + ($missing | join(" ")));
               {
               releaseTag: $releaseTag,
