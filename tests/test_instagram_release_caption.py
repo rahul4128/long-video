@@ -80,6 +80,8 @@ class SharedShortsReleaseTests(unittest.TestCase):
         }
         self.assertEqual(instagram_caption_english(meta), "")
         self.assertEqual(instagram_caption_english(meta, long_video=True), "")
+        meta["instagram_caption"] = "#KarvaChauth #VratKatha"
+        self.assertEqual(instagram_caption_english(meta), "")
 
     def test_generic_legacy_caption_is_rejected_not_reused(self):
         meta = {
