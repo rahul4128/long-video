@@ -1,11 +1,13 @@
 """Free offline contract tests: no Gemini, Canva, YouTube, or render job."""
 import json
+import re
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from scripts.build_instagram_reel import compact_hook, rejection_reasons, topic_hashtags, build
+from scripts.build_instagram_reel import compact_hook, rejection_reasons, build
+from scripts.youtube_pack import instagram_caption_english
 from scripts.validate_instagram_reel import validate
 
 
@@ -21,7 +23,14 @@ class InstagramContentTests(unittest.TestCase):
                  "durationInSeconds": 17},
             ],
         }
-        self.meta = {"shorts_title": "वृंदावन में शिव बने गोपी"}
+        self.meta = {
+            "shorts_title": "वृंदावन में शिव बने गोपी",
+            "primaryKeyword": "Vrindavan Shiva story",
+            "secondaryKeywords": ["Lord Shiva as a Gopi", "Vrindavan devotional katha"],
+            "instagram_caption": "Why did Lord Shiva become a Gopi in Vrindavan? This story explores a moment of devotion and the reason behind it.",
+            "instagram_long_caption": "Explore the devotional story of Lord Shiva in Vrindavan and the meaning behind this unusual moment.",
+            "hashtags": ["#Vrindavan", "#LordShiva", "#DevotionalStories", "#IndianMythology"],
+        }
 
     def test_hindi_words_are_never_split_through_matras(self):
         cover = compact_hook("शिव गोपी क्यों बने?")
@@ -51,10 +60,15 @@ class InstagramContentTests(unittest.TestCase):
         self.assertIn("outside_preferred_20_to_40_second_window",
                       rejection_reasons(self.props, self.meta)[0])
 
-    def test_hashtags_are_topic_specific_with_limit(self):
-        tags = topic_hashtags("वृंदावन में कृष्ण और शिव की कथा")
-        self.assertIn("#कृष्णकथा", tags)
-        self.assertTrue(3 <= len(tags) <= 5)
+    def test_instagram_caption_reuses_dynamic_story_seo_and_topic_hashtags(self):
+        caption = instagram_caption_english(self.meta)
+        tags = re.findall(r"(?<!\w)#[\w]+", caption, flags=re.UNICODE)
+        self.assertIn("Why did Lord Shiva become a Gopi in Vrindavan?", caption)
+        self.assertIn("#Vrindavan", tags)
+        self.assertIn("#LordShiva", tags)
+        self.assertIn("#DevotionalStories", tags)
+        self.assertLessEqual(len(tags), 8)
+        self.assertNotRegex(caption, r"[\u0900-\u097f]")
 
     def test_builder_does_not_create_publish_ready_on_missing_media(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -70,6 +84,11 @@ class InstagramContentTests(unittest.TestCase):
             self.assertIn("cover_requires_verified_replacement", state["reasons"])
             self.assertFalse((root / "public/props_instagram.json").exists())
             self.assertTrue((root / "out/instagram_post.txt").exists())
+            caption = (root / "out/instagram_post.txt").read_text(encoding="utf-8")
+            self.assertIn("Why did Lord Shiva become a Gopi in Vrindavan?", caption)
+            self.assertIn("#Vrindavan", caption)
+            self.assertNotRegex(caption, r"[\u0900-\u097f]")
+            self.assertNotIn("कथा का कौन-सा पल", caption)
             self.assertFalse(state["automatic_publish"])
 
     def test_validator_fails_closed_on_horizontal_video(self):
