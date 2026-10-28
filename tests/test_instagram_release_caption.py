@@ -108,6 +108,20 @@ class SharedShortsReleaseTests(unittest.TestCase):
         self.assertEqual(short_desc.lower().count("#vratkatha"), 1)
         self.assertIn("Explore Veervati's story and the meaning behind the Karva Chauth vrat katha.", pack)
 
+    def test_missing_english_story_copy_does_not_create_a_generic_instagram_caption(self):
+        meta = {
+            "shorts_title": "करवा चौथ की कथा",
+            "long_video_title": "करवा चौथ व्रत कथा",
+            "shorts_description": "करवा चौथ की कथा में फिर क्या हुआ?",
+            "long_video_description": "यह करवा चौथ की पारंपरिक कथा है।",
+        }
+        self.assertEqual(instagram_caption_english(meta), "")
+        self.assertEqual(instagram_caption_english(meta, long_video=True), "")
+        pack = build(meta)
+        self.assertIn("CAPTION NOT GENERATED", pack)
+        self.assertNotIn("A short devotional story about", pack)
+        self.assertNotIn("Watch till the end for the complete moment", pack)
+
     def test_no_false_generic_krishna_default_in_artwork(self):
         src = (ROOT / "generate_assets.py").read_text(encoding="utf-8")
         self.assertIn("episode_subject = (seo_metadata.get", src)
@@ -120,8 +134,8 @@ class SharedShortsReleaseTests(unittest.TestCase):
         self.assertNotIn("InstagramReelComposition", workflow)
         self.assertIn("DevotionalShortsComposition", workflow)
         self.assertIn("per_segment_gemini_first", workflow)
-        self.assertIn("append_missing_tags($meta[0].long_video_description; $meta[0].hashtags)", workflow)
-        self.assertIn("append_missing_tags($meta[0].shorts_description; $meta[0].hashtags)", workflow)
+        self.assertIn("append_missing_tags($meta[0].long_video_description // $meta[0].description // $meta[0].long_video_title; $meta[0].hashtags)", workflow)
+        self.assertIn("append_missing_tags($meta[0].shorts_description // $meta[0].long_video_description // $meta[0].shorts_title // $meta[0].long_video_title; $meta[0].hashtags)", workflow)
 
     def test_colloquial_hindi_check_flags_stiff_words(self):
         result = assess_text("तत्पश्चात राजा ने सभी को अवगत कराया।")
