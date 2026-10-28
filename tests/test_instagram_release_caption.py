@@ -69,21 +69,32 @@ class SharedShortsReleaseTests(unittest.TestCase):
         self.assertEqual(short_desc.lower().count("#karvachauth"), 1)
         self.assertEqual(short_desc.lower().count("#indianmythology"), 1)
 
-    def test_instagram_fallback_never_leaks_hindi_or_stuffs_keywords_as_hashtags(self):
+    def test_missing_english_copy_fails_closed_instead_of_keyword_template(self):
         meta = {
             "shorts_title": "करवा चौथ की कथा",
             "shorts_description": "करवा चौथ की कथा में फिर क्या हुआ?",
+            "long_video_description": "यह करवा चौथ की पारंपरिक कथा है।",
             "primaryKeyword": "Karva Chauth vrat katha",
             "secondaryKeywords": ["Veervati story", "Karva Chauth tradition"],
             "hashtags": ["#KarvaChauth", "#VratKatha"],
         }
-        caption = instagram_caption_english(meta)
-        self.assertNotRegex(caption, r"[\u0900-\u097f]")
-        self.assertIn("Karva Chauth vrat katha", caption)
-        self.assertIn("#KarvaChauth", caption)
-        self.assertIn("#VratKatha", caption)
-        self.assertNotIn("#KarvaChauthvratkatha", caption)
-        self.assertNotIn("#Veervatistory", caption)
+        self.assertEqual(instagram_caption_english(meta), "")
+        self.assertEqual(instagram_caption_english(meta, long_video=True), "")
+
+    def test_generic_legacy_caption_is_rejected_not_reused(self):
+        meta = {
+            "shorts_title": "करवा चौथ की कथा",
+            "instagram_caption": "A short devotional story about Karva Chauth. Watch till the end for the complete moment.",
+            "instagram_long_caption": "Discover this devotional story about Karva Chauth.",
+            "shorts_description": "करवा चौथ की कथा में फिर क्या हुआ?",
+            "long_video_description": "यह करवा चौथ की पारंपरिक कथा है।",
+            "hashtags": ["#KarvaChauth", "#VratKatha"],
+        }
+        self.assertEqual(instagram_caption_english(meta), "")
+        self.assertEqual(instagram_caption_english(meta, long_video=True), "")
+        pack = build(meta)
+        self.assertIn("CAPTION NOT GENERATED", pack)
+        self.assertNotIn("Watch till the end for the complete moment", pack)
 
     def test_pack_uses_generated_instagram_captions_and_does_not_duplicate_youtube_tags(self):
         meta = {
