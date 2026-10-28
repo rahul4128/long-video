@@ -1096,7 +1096,24 @@ jobs:
             --arg thumbUrl "${{ steps.assets.outputs.thumb_url }}" \
             --arg shortsThumbUrl "${{ steps.assets.outputs.shorts_thumb_url }}" \
             --slurpfile meta "assets/out/metadata.json" \
-            '{
+            '
+              def normalize_tags:
+                reduce (. // [])[] as $raw
+                  ([]; ($raw | tostring | sub("^#+"; "") | gsub("\\s+"; "")) as $clean
+                    | if $clean == "" then .
+                      else (("#" + $clean) as $tag
+                        | if (map(ascii_downcase) | index($tag | ascii_downcase)) != null
+                          then . else . + [$tag] end)
+                      end);
+              def append_missing_tags($description; $hashtags):
+                ($description // "") as $desc
+                | ($hashtags | normalize_tags) as $tags
+                | ($tags | map(. as $tag
+                    | select(((($desc | ascii_downcase) | contains($tag | ascii_downcase)) | not)))) as $missing
+                | ($desc
+                    + (if (($desc | length) > 0) and (($missing | length) > 0) then "\\n\\n" else "" end)
+                    + ($missing | join(" ")));
+              {
               releaseTag: $releaseTag,
               privacyStatus: $privacy,
               canva: {
@@ -1106,13 +1123,13 @@ jobs:
               long_video: {
                 downloadUrl: $longUrl,
                 title: $meta[0].long_video_title,
-                description: (($meta[0].long_video_description // "") + "\n\n" + (($meta[0].hashtags // []) | join(" "))),
+                description: append_missing_tags($meta[0].long_video_description; $meta[0].hashtags),
                 tags: ($meta[0].tags // [])
               },
               shorts: {
                 downloadUrl: $shortsUrl,
                 title: $meta[0].shorts_title,
-                description: (($meta[0].shorts_description // "") + "\n\n" + (($meta[0].hashtags // []) | join(" "))),
+                description: append_missing_tags($meta[0].shorts_description; $meta[0].hashtags),
                 tags: ($meta[0].tags // []),
                 thumbnailUrl: $shortsThumbUrl
               },
