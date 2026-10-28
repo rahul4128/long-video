@@ -10,6 +10,8 @@ from pathlib import Path
 import re
 import subprocess
 
+from scripts.youtube_pack import instagram_caption_english
+
 
 ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_CTA = re.compile(r"सब्सक्राइब|subscribe|चैनल को सब्सक्राइब", re.I)
@@ -41,25 +43,6 @@ def compact_hook(raw, max_words=4, max_line_chars=18):
     if not re.search(r"[\u0900-\u097f]", text):
         raise ValueError("Instagram cover needs readable Hindi hook")
     return text
-
-
-def topic_hashtags(title):
-    rules = [
-        (r"करवा|चौथ", "#करवाचौथकथा"),
-        (r"नवरात्र|दुर्गा|माता", "#माताकीकथा"),
-        (r"कृष्ण|वृंदावन|राधा", "#कृष्णकथा"),
-        (r"राम|हनुमान|काकासुर", "#रामायणकथा"),
-        (r"महाभारत|अर्जुन|भीष्म", "#महाभारतकथा"),
-        (r"शिव|महादेव|शंकर", "#शिवकथा"),
-        (r"मंदिर", "#मंदिरकथा"),
-    ]
-    tags = [tag for pattern, tag in rules if re.search(pattern, title, re.I)]
-    for general in ["#सनातनधर्म", "#हिंदूकथाएं", "#भक्तिकथा"]:
-        if len(tags) >= 5:
-            break
-        if general not in tags:
-            tags.append(general)
-    return tags[:5]
 
 
 def rejection_reasons(props, metadata):
@@ -157,12 +140,9 @@ def build(root=ROOT):
                        ensure_ascii=False, indent=2), encoding="utf-8")
         status["status"] = "ready_for_manual_review"
 
-    title = str(meta.get("shorts_title") or props.get("title") or "").strip()
-    # Platform-specific CTA in the caption. The spoken track is checked above.
-    description = (f"{title}\n\nआपको कथा का कौन-सा पल सबसे अच्छा लगा? "
-                   "कमेंट में बताएं।\nऐसी कथाओं के लिए फॉलो करें, सेव करें "
-                   "और अपने दोस्तों को शेयर करें।\n\n"
-                   + " ".join(topic_hashtags(title)))
+    # Reuse the same story-specific, English SEO caption builder as the
+    # YouTube upload pack. No hard-coded per-deity caption/hashtag lookup.
+    description = instagram_caption_english(meta)
     (out / "instagram_post.txt").write_text(description + "\n", encoding="utf-8")
     (out / "instagram_status.json").write_text(
         json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
