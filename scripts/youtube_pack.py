@@ -70,46 +70,71 @@ def _block(text):
 
 
 def instagram_caption_english(meta: dict, *, long_video: bool = False) -> str:
-    """English-only release copy; Hindi stays in the actual narrated video."""
+    """Build a topic-aware English Instagram caption from the approved story metadata."""
     raw = " ".join(str(meta.get(key) or "") for key in (
         "shorts_title", "long_video_title", "long_video_description"
     )).lower()
+    # Topic-specific copy avoids the same empty "watch till the end" line for
+    # every episode while staying within claims supported by the identified story.
     entities = [
-        (("वृंदावन", "vrindavan"), "Vrindavan", "#Vrindavan"),
-        (("कृष्ण", "krishna", "कान्हा", "गोविंद"), "Lord Krishna", "#Krishna"),
-        (("राधा", "radha"), "Radha", "#RadhaKrishna"),
-        (("शिव", "महादेव", "shiva"), "Lord Shiva", "#LordShiva"),
-        (("राम", "ramayan", "rama"), "Lord Rama", "#Ramayana"),
-        (("हनुमान", "hanuman"), "Lord Hanuman", "#Hanuman"),
-        (("दुर्गा", "नवरात्र", "siddhidatri", "सिद्धिदात्री"), "Goddess Durga", "#Navratri"),
-        (("विष्णु", "vishnu"), "Lord Vishnu", "#Vishnu"),
-        (("महाभारत", "mahabharat"), "the Mahabharata", "#Mahabharata"),
-        (("करवा चौथ", "karwa"), "Karva Chauth", "#KarvaChauth"),
+        (("करवा चौथ", "karwa"), "Karva Chauth", "#KarvaChauth",
+         "Behind the Karva Chauth tradition is a katha remembered for faith, devotion, and hope. This retelling follows the story to the moment that brings it together.",
+         "Explore the Karva Chauth katha and the devotional meaning behind the tradition. This full retelling follows the story to its key moment."),
+        (("वृंदावन", "vrindavan"), "Vrindavan", "#Vrindavan",
+         "Step into a devotional story from Vrindavan and follow the moment that gives this tale its meaning.",
+         "Explore this devotional story from Vrindavan and the meaning behind its central moment."),
+        (("कृष्ण", "krishna", "कान्हा", "गोविंद"), "Lord Krishna", "#Krishna",
+         "This devotional tale of Lord Krishna brings a memorable moment from his stories to life. Watch how the story unfolds.",
+         "Explore this devotional tale of Lord Krishna and the meaning behind its central moment."),
+        (("राधा", "radha"), "Radha", "#RadhaKrishna",
+         "A devotional tale of Radha and Krishna brings love, faith, and devotion into focus. Stay with the story to its key moment.",
+         "Explore a devotional tale of Radha and Krishna and the meaning carried through the story."),
+        (("शिव", "महादेव", "shiva"), "Lord Shiva", "#LordShiva",
+         "Enter a devotional story of Lord Shiva and follow the details that reveal why this moment matters.",
+         "Explore this devotional story of Lord Shiva and the meaning behind its central moment."),
+        (("राम", "ramayan", "rama"), "Lord Rama", "#Ramayana",
+         "This story from Lord Rama's tradition brings a moment of duty, faith, and devotion into focus.",
+         "Explore this devotional story from the Ramayana and reflect on the meaning of its central moment."),
+        (("हनुमान", "hanuman"), "Lord Hanuman", "#Hanuman",
+         "This devotional tale of Lord Hanuman celebrates courage, faith, and selfless devotion. Watch how the story unfolds.",
+         "Explore this devotional tale of Lord Hanuman and the meaning behind its central moment."),
+        (("दुर्गा", "नवरात्र", "siddhidatri", "सिद्धिदात्री"), "Goddess Durga", "#Navratri",
+         "This devotional story of Goddess Durga reflects the strength and protection remembered in the tradition.",
+         "Explore this devotional story of Goddess Durga and the meaning behind its central moment."),
+        (("विष्णु", "vishnu"), "Lord Vishnu", "#Vishnu",
+         "Follow this devotional tale of Lord Vishnu to the moment that gives the story its meaning.",
+         "Explore this devotional tale of Lord Vishnu and the meaning behind its central moment."),
+        (("महाभारत", "mahabharat"), "the Mahabharata", "#Mahabharata",
+         "This moment from the Mahabharata brings a timeless question of duty and devotion into focus.",
+         "Explore this story from the Mahabharata and reflect on the choices and meaning at its heart."),
     ]
-    found = [(label, tag) for terms, label, tag in entities if any(term in raw for term in terms)]
-    subjects = [label for label, _ in found[:2]]
-    subject_text = " and ".join(subjects) if subjects else "Indian devotional traditions"
-    hashtags = [tag for _, tag in found[:2]]
-    for tag in ("#DevotionalStories", "#IndianMythology", "#SanatanDharma"):
+    found = [item for item in entities if any(term in raw for term in item[0])]
+    if found:
+        primary = found[0]
+        topic_tags = [item[2] for item in found[:2]]
+        hook = primary[4] if long_video else primary[3]
+    else:
+        topic_tags = []
+        hook = (
+            "Explore the full devotional story and the meaning behind its turning point."
+            if long_video else
+            "Follow this devotional story to its turning point and discover what makes the moment meaningful."
+        )
+    hashtags = []
+    for tag in topic_tags + ["#DevotionalStories", "#IndianMythology", "#SanatanDharma"]:
         if tag not in hashtags and len(hashtags) < 5:
             hashtags.append(tag)
-    # No automatic Hindi-to-English transliteration or fabricated plot summary.
-    # The actual YouTube Hindi title/story stays unchanged.
-    opening = (
-        f"Watch this full devotional story about {subject_text}. "
-        "Discover the complete story and its meaning."
-        if long_video else
-        f"A short devotional story about {subject_text}. "
-        "Watch till the end for the complete moment."
-    )
-    return (
-        opening + "\\n\\n"
-        "What part of this story stayed with you? Tell us in the comments. "
-        "Follow for more Indian mythology stories, save this video, "
-        "and share it with a friend.\\n\\n"
-        + " ".join(hashtags)
-    ).replace("\\n", "\n")
-
+    if long_video:
+        cta = (
+            "Which part of the story resonated with you? Share your thoughts in the comments. "
+            "Follow for more Indian devotional stories, save this video, and share it with someone who would enjoy it."
+        )
+    else:
+        cta = (
+            "Which moment stayed with you? Share your thoughts in the comments. "
+            "Follow for more Indian devotional stories, save this Reel, and send it to someone who loves these stories."
+        )
+    return f"{hook}\n\n{cta}\n\n{' '.join(hashtags)}"
 
 def build(meta: dict) -> str:
     long_title = (meta.get("long_video_title") or "").strip()
