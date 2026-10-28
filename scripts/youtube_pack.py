@@ -82,6 +82,17 @@ def _append_missing_hashtags(description, tags):
     return f"{text}\n\n{' '.join(missing)}".strip()
 
 
+def _is_generic_instagram_caption(value):
+    """Reject old boilerplate rather than presenting it as story-specific copy."""
+    normalized = re.sub(r"\s+", " ", str(value or "")).strip().casefold()
+    return (
+        normalized.startswith("a short devotional story about")
+        or normalized.startswith("discover this devotional story")
+        or "watch till the end for the complete moment" in normalized
+        or normalized.startswith("behind the karva chauth tradition is a katha remembered")
+    )
+
+
 def instagram_caption_english(meta: dict, *, long_video: bool = False) -> str:
     """Package story-specific Instagram copy generated with the episode SEO metadata."""
     caption_key = "instagram_long_caption" if long_video else "instagram_caption"
@@ -89,7 +100,7 @@ def instagram_caption_english(meta: dict, *, long_video: bool = False) -> str:
 
     # Refuse non-English generated captions; Instagram copies are deliberately
     # English while the actual video can remain in Hindi.
-    if re.search(r"[\u0900-\u097F]", caption):
+    if re.search(r"[\u0900-\u097F]", caption) or _is_generic_instagram_caption(caption):
         caption = ""
 
     # Older cached episodes may not have Instagram captions. Reuse an
@@ -102,7 +113,8 @@ def instagram_caption_english(meta: dict, *, long_video: bool = False) -> str:
         )
         for key in source_keys:
             value = str(meta.get(key) or "").strip()
-            if not value or re.search(r"[\u0900-\u097F]", value):
+            if (not value or re.search(r"[\u0900-\u097F]", value)
+                    or _is_generic_instagram_caption(value)):
                 continue
             lines = []
             for line in value.splitlines():
@@ -117,22 +129,8 @@ def instagram_caption_english(meta: dict, *, long_video: bool = False) -> str:
                 caption = candidate
                 break
 
-    # Final conservative fallback for old episodes with no English copy:
-    # use a real English SEO keyword, never a Hindi title or fixed topic template.
-    if not caption:
-        keywords = []
-        if meta.get("primaryKeyword"):
-            keywords.append(str(meta.get("primaryKeyword")).strip())
-        keywords.extend(str(x).strip() for x in _list(meta.get("secondaryKeywords")))
-        anchor = next(
-            (x for x in keywords if x and not re.search(r"[\u0900-\u097F]", x) and re.search(r"[A-Za-z]", x)),
-            ""
-        )
-        if anchor:
-            caption = f"{anchor.rstrip('.!?')} — what detail stands out to you?"
-        else:
-            caption = ""
-
+    # No template fallback: if neither generated Instagram copy nor a genuine
+    # English episode description exists, leave the caption unavailable.
     if not caption.strip():
         return ""
 
