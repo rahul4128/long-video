@@ -74,28 +74,26 @@ def _append_missing_hashtags(description, tags):
     normalized = _hashtags(tags)
     existing = {
         tag.lower()
-        for tag in re.findall(r"(?<!\\w)#[\\w]+", text, flags=re.UNICODE)
+        for tag in re.findall(r"(?<!\w)#[\w]+", text, flags=re.UNICODE)
     }
     missing = [tag for tag in normalized if tag.lower() not in existing]
     if not missing:
         return text
-    return f"{text}\\n\\n{' '.join(missing)}".strip()
-
-
-
+    return f"{text}\n\n{' '.join(missing)}".strip()
 
 
 def instagram_caption_english(meta: dict, *, long_video: bool = False) -> str:
-    """Use the episode-specific AI-written Instagram caption, SEO keywords and tags.
-
-    The LLM writes the actual story copy upstream. This function should package
-    that copy, not invent the same generic story summary for every upload.
-    """
+    """Package story-specific Instagram copy generated with the episode SEO metadata."""
     caption_key = "instagram_long_caption" if long_video else "instagram_caption"
     caption = str(meta.get(caption_key) or "").strip()
 
-    # Older cached episodes may not have Instagram captions. Reuse an episode-specific
-    # English description when possible; never leak a Hindi title/description into IG.
+    # Refuse non-English generated captions; Instagram copies are deliberately
+    # English while the actual video can remain in Hindi.
+    if re.search(r"[\u0900-\u097F]", caption):
+        caption = ""
+
+    # Older cached episodes may not have Instagram captions. Reuse an
+    # episode-specific English description when possible.
     if not caption:
         source_keys = (
             ("long_video_description", "description")
@@ -104,45 +102,40 @@ def instagram_caption_english(meta: dict, *, long_video: bool = False) -> str:
         )
         for key in source_keys:
             value = str(meta.get(key) or "").strip()
-            if not value or re.search(r"[\\u0900-\\u097F]", value):
+            if not value or re.search(r"[\u0900-\u097F]", value):
                 continue
             lines = []
             for line in value.splitlines():
                 line = line.strip()
-                if not line or re.match(r"^\\d{1,2}:\\d{2}(?::\\d{2})?\\b", line):
+                if not line or re.match(r"^\d{1,2}:\d{2}(?::\d{2})?\b", line):
                     continue
                 if line.lower().startswith(("chapters:", "timestamps:")):
                     break
                 lines.append(line)
-            candidate = "\\n".join(lines).strip()
+            candidate = "\n".join(lines).strip()
             if candidate and re.search(r"[A-Za-z]", candidate):
                 caption = candidate
                 break
-        # Final, conservative fallback for an old episode with no English copy.
-        if not caption:
-            keywords = []
-            if meta.get("primaryKeyword"):
-                keywords.append(str(meta.get("primaryKeyword")).strip())
-            keywords.extend(str(x).strip() for x in _list(meta.get("secondaryKeywords")))
-            anchor = next(
-                (x for x in keywords if x and not re.search(r"[\\u0900-\\u097F]", x) and re.search(r"[A-Za-z]", x)),
-                ""
-            )
-            if anchor:
-                caption = f"{anchor.rstrip('.!?')} — what detail stands out to you?"
-            else:
-                caption = "Which detail from this story stood out to you? Share your thoughts in the comments."
 
-    # Keep generated caption hashtags first, then append only the approved
-    # episode-specific SEO hashtags. Do not turn raw keyword phrases into tags.
-    caption_tags = re.findall(r"(?<!\\w)#[\\w]+", caption, flags=re.UNICODE)
-    body = re.sub(r"(?<!\\w)#[\\w]+", "", caption, flags=re.UNICODE)
-    body = re.sub(r"[ \\t]{2,}", " ", body)
-    body = re.sub(r"\\n[ \\t]*\\n(?:[ \\t]*\\n)+", "\\n\\n", body).strip()
+    # Final conservative fallback for old episodes with no English copy:
+    # use a real English SEO keyword, never a Hindi title or fixed topic template.
+    if not caption:
+        keywords = []
+        if meta.get("primaryKeyword"):
+            keywords.append(str(meta.get("primaryKeyword")).strip())
+        keywords.extend(str(x).strip() for x in _list(meta.get("secondaryKeywords")))
+        anchor = next(
+            (x for x in keywords if x and not re.search(r"[\u0900-\u097F]", x) and re.search(r"[A-Za-z]", x)),
+            ""
+        )
+        if anchor:
+            caption = f"{anchor.rstrip('.!?')} — what detail stands out to you?"
+        else:
+            caption = "Which detail from this story stood out to you? Share your thoughts in the comments."
 
-    candidate_tags = list(caption_tags)
-    candidate_tags.extend(_hashtags(_list(meta.get("hashtags"))))
-
+    # Keep hashtags supplied by the story-writing model first, followed by
+    # approved episode hashtags. Do not convert raw multiword SEO keywords
+    # into awkward hashtags; keywords belong naturally in the caption itself.
     caption_tags = re.findall(r"(?<!\w)#[\w]+", caption, flags=re.UNICODE)
     body = re.sub(r"(?<!\w)#[\w]+", "", caption, flags=re.UNICODE)
     body = re.sub(r"[ \t]{2,}", " ", body)
@@ -150,12 +143,6 @@ def instagram_caption_english(meta: dict, *, long_video: bool = False) -> str:
 
     candidate_tags = list(caption_tags)
     candidate_tags.extend(_hashtags(_list(meta.get("hashtags"))))
-    keyword_values = []
-    if meta.get("primaryKeyword"):
-        keyword_values.append(meta.get("primaryKeyword"))
-    keyword_values.extend(_list(meta.get("secondaryKeywords")))
-    candidate_tags.extend(_hashtags(keyword_values))
-
     hashtags = []
     for tag in candidate_tags:
         normalized = "#" + str(tag).strip().lstrip("#").replace(" ", "")
@@ -167,6 +154,7 @@ def instagram_caption_english(meta: dict, *, long_video: bool = False) -> str:
     if body and hashtags:
         return f"{body}\n\n{' '.join(hashtags)}"
     return body or " ".join(hashtags)
+
 
 def build(meta: dict) -> str:
     long_title = (meta.get("long_video_title") or "").strip()
