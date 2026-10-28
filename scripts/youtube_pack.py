@@ -131,7 +131,10 @@ def instagram_caption_english(meta: dict, *, long_video: bool = False) -> str:
         if anchor:
             caption = f"{anchor.rstrip('.!?')} — what detail stands out to you?"
         else:
-            caption = "Which detail from this story stood out to you? Share your thoughts in the comments."
+            caption = ""
+
+    if not caption.strip():
+        return ""
 
     # Keep hashtags supplied by the story-writing model first, followed by
     # approved episode hashtags. Do not convert raw multiword SEO keywords
@@ -173,6 +176,9 @@ def build(meta: dict) -> str:
     facts = meta.get("factCheck") or []
     m = meta.get("meta") or {}
     cta = (meta.get("cta") or "").strip()
+    instagram_short_caption = instagram_caption_english(meta)
+    instagram_long_caption = instagram_caption_english(meta, long_video=True)
+    missing_caption_note = "_CAPTION NOT GENERATED — do not post to Instagram until story-specific English copy is added._"
 
     lines = ["# 📋 YouTube upload pack (copy-paste)", ""]
     lines += ["## 1. Long video — `final_video.mp4`", "", "**Title**", _block(long_title)]
@@ -201,13 +207,13 @@ def build(meta: dict) -> str:
               "- Cover: `thumbnail_shorts_final.jpg` (check Instagram profile crop).",
               "- Video narration can remain in natural everyday Hindi; Instagram captions are English.",
               "", "**English Instagram Short caption (copy and paste)**",
-              _block(instagram_caption_english(meta)),
+              _block(instagram_short_caption) if instagram_short_caption else missing_caption_note,
               "", "### Long video — same original 16:9 YouTube Long",
               "- Upload `final_video.mp4` without creating a second video or audio track.",
               "- Cover: `thumbnail.jpg` (check Instagram's cover/crop preview).",
               "- 16:9 is horizontal, not native 9:16: expect empty space or cropping in Instagram Reels. Review in-app before posting.",
               "", "**English Instagram Long caption (copy and paste)**",
-              _block(instagram_caption_english(meta, long_video=True)),
+              _block(instagram_long_caption) if instagram_long_caption else missing_caption_note,
               "- Review deity identity, festival/date references, video length and rights before either post."]
 
     # Audit trail: source/creator/rights for all selected music is stored in
