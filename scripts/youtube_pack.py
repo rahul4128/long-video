@@ -85,12 +85,25 @@ def _append_missing_hashtags(description, tags):
 def _is_generic_instagram_caption(value):
     """Reject old boilerplate rather than presenting it as story-specific copy."""
     normalized = re.sub(r"\s+", " ", str(value or "")).strip().casefold()
-    return (
-        normalized.startswith("a short devotional story about")
-        or normalized.startswith("discover this devotional story")
-        or "watch till the end for the complete moment" in normalized
-        or normalized.startswith("behind the karva chauth tradition is a katha remembered")
+    generic_openings = (
+        "a short devotional story about",
+        "discover this devotional story",
+        "step into a devotional story",
+        "explore this devotional story",
+        "enter a devotional story",
+        "a devotional tale of",
+        "this devotional tale of",
+        "this devotional story of",
+        "follow this devotional tale of",
+        "this story from lord rama's tradition",
+        "this moment from the mahabharata",
+        "behind the karva chauth tradition is a katha remembered",
     )
+    generic_ctas = (
+        "watch till the end for the complete moment",
+        "what part of this story stayed with you? tell us in the comments",
+    )
+    return normalized.startswith(generic_openings) or any(phrase in normalized for phrase in generic_ctas)
 
 
 def instagram_caption_english(meta: dict, *, long_video: bool = False) -> str:
