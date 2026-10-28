@@ -9,11 +9,14 @@ import json
 from pathlib import Path
 import re
 import subprocess
-
-from scripts.youtube_pack import instagram_caption_english
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.youtube_pack import instagram_caption_english
 FORBIDDEN_CTA = re.compile(r"सब्सक्राइब|subscribe|चैनल को सब्सक्राइब", re.I)
 GENERIC_WELLNESS = re.compile(r"क्या (खाएं|न खाएं)|डाइट|तनाव (कम|दूर)|कमजोरी|थकान|एनर्जी|सरगी में (क्या|ये)", re.I)
 STORY_SIGNAL = re.compile(r"कथा|कहानी|पौराणिक|पुराण|रामायण|महाभारत|गाथा|किसने|क्यों|देवी|देवता|कृष्ण|राम|शिव|दुर्गा|वृंदावन", re.I)
