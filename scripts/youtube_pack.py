@@ -154,6 +154,8 @@ def instagram_caption_english(meta: dict, *, long_video: bool = False) -> str:
     body = re.sub(r"(?<!\w)#[\w]+", "", caption, flags=re.UNICODE)
     body = re.sub(r"[ \t]{2,}", " ", body)
     body = re.sub(r"\n[ \t]*\n(?:[ \t]*\n)+", "\n\n", body).strip()
+    if not body:
+        return ""
 
     candidate_tags = list(caption_tags)
     candidate_tags.extend(_hashtags(_list(meta.get("hashtags"))))
