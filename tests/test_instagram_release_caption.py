@@ -49,7 +49,7 @@ class SharedShortsReleaseTests(unittest.TestCase):
         self.assertIn("#IndianMythology", caption)
         self.assertNotIn("A short devotional story about Karva Chauth", caption)
         self.assertNotIn("Watch till the end for the complete moment", caption)
-        self.assertNotRegex(caption, r"[\\u0900-\\u097f]")
+        self.assertNotRegex(caption, r"[\u0900-\u097f]")
 
     def test_no_false_generic_krishna_default_in_artwork(self):
         src = (ROOT / "generate_assets.py").read_text(encoding="utf-8")
