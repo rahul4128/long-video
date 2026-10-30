@@ -103,7 +103,7 @@ def recommend_playlist(meta: dict, *, is_short: bool = False) -> dict:
 def _add_instagram_link(description: str) -> str:
     text = str(description or "").strip()
     if INSTAGRAM_URL not in text:
-        text = f"{text}\\n\\nInstagram: {INSTAGRAM_URL}".strip()
+        text = f"{text}\n\nInstagram: {INSTAGRAM_URL}".strip()
     return text
 
 
