@@ -7,7 +7,7 @@ Long and Short files must match rendered scene timings and their own duration/wo
    narration length + scene padding, exactly what Remotion renders),
    +/- 10 % (min 3 s). Catches cut-off, padded or frozen renders.
 2. Story-length check uses both narration words and final runtime:
-     long  : fail < 900 or > 1,650 words; target 1,050–1,450 and 8–12 minutes
+     long  : 360–430 words; approximately 3 minutes
      Short : fail < 15 or > 200 words; target 70–110 and 25–60 seconds
 3. Final videos must have an audio track; thumbnails need real dimensions.
 """
@@ -42,11 +42,11 @@ def expected_seconds(props_path):
 
 # path -> (props file, label, word fail min, word fail max, word warn min, word warn max)
 DURATION_RULES = {
-    LONG_PATH: ("public/props.json", "long video", 900, 1650, 1050, 1450),
+    LONG_PATH: ("public/props.json", "long video", 360, 430, 360, 430),
     SHORTS_PATH: ("public/props_shorts.json", "Short", 15, 200, 70, 110),
 }
 ABSOLUTE_DURATION_SECONDS = {
-    LONG_PATH: (480, 720),  # 8–12 minutes
+    LONG_PATH: (150, 210),  # approximately 3 minutes
     SHORTS_PATH: (25, 60),  # one standalone 35–55 second Short, with small timing tolerance
 }
 
