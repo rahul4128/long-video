@@ -1,6 +1,6 @@
 """Automated media QC for generated devotional videos.
 
-Everything is DYNAMIC - no repo variables, nothing depends on voice speed.
+Long and Short files must match rendered scene timings and their own duration/word targets.
 
 1. Render check: each video must match the length of its own scenes in
    public/props.json / props_shorts.json (sum of durationInSeconds = real
@@ -44,8 +44,12 @@ def expected_seconds(props_path):
 
 # path -> (props file, label, word fail min, word fail max, word warn min, word warn max)
 DURATION_RULES = {
-    LONG_PATH: ("public/props.json", "long video", 250, 650, 360, 520),
-    SHORTS_PATH: ("public/props_shorts.json", "Short", 15, 200, 40, 120),
+    LONG_PATH: ("public/props.json", "long video", 900, 1650, 1050, 1450),
+    SHORTS_PATH: ("public/props_shorts.json", "Short", 15, 200, 70, 110),
+}
+ABSOLUTE_DURATION_SECONDS = {
+    LONG_PATH: (480, 720),  # 8–12 minutes
+    SHORTS_PATH: (25, 60),  # one standalone 35–55 second Short, with small timing tolerance
 }
 
 
@@ -74,6 +78,10 @@ def check_duration(p, path, duration):
     if duration < 5:
         ok = False
         errors.append(f"{label} is only {duration:.1f}s - empty render")
+    min_seconds, max_seconds = ABSOLUTE_DURATION_SECONDS[path]
+    if not (min_seconds <= duration <= max_seconds):
+        ok = False
+        errors.append(f"{label} runtime is {duration:.1f}s; required {min_seconds}-{max_seconds}s")
 
     words = narration_words(props)
     p["narrationWords"] = words
