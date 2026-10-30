@@ -74,6 +74,20 @@ class SharedShortsReleaseTests(unittest.TestCase):
         self.assertEqual(chosen["name"], "श्रीकृष्ण लीला और वृंदावन | Krishna Leela, Vrindavan")
         self.assertEqual(chosen["also_add_to"], "पौराणिक Shorts: छोटी कथा, बड़ा अर्थ | Mythology Shorts Hindi")
 
+    def test_upload_pack_shows_canva_thumbnail_concepts_without_claiming_three_renders(self):
+        pack = build({
+            "long_video_title": "मंदिर की प्राचीन ध्वनि का रहस्य",
+            "shorts_title": "मंदिर में गूंजती ध्वनि का रहस्य",
+            "thumbnailConcepts": [
+                {"text": "ध्वनि का रहस्य", "visualSubject": "पत्थर का मंदिर", "emotionAction": "आश्चर्य", "composition": "मंदिर का क्लोजअप"},
+                {"text": "कैसे गूंजती है?", "visualSubject": "मंदिर का गलियारा", "emotionAction": "जिज्ञासा", "composition": "लंबा perspective"},
+                {"text": "प्राचीन तकनीक?", "visualSubject": "मंदिर वास्तुकला", "emotionAction": "खोज", "composition": "वास्तु का detail"},
+            ],
+        })
+        self.assertIn("Canva-ready alternative concepts", pack)
+        self.assertIn("ध्वनि का रहस्य", pack)
+        self.assertIn("this run renders one final thumbnail", pack)
+
     def test_upload_pack_contains_exact_playlist_names_and_fixed_instagram_link(self):
         pack = build({
             "long_video_title": "छठ पूजा में सूर्य को अर्घ्य क्यों दिया जाता है?",
