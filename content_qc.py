@@ -169,26 +169,20 @@ def validate_payload(payload):
     if len(shorts_scenes) != 5:
         issues.append(f"short_scene_count_must_be_5:{len(shorts_scenes)}")
 
-    # Growth-oriented packaging/originality guardrails. These are warnings rather than
-    # hard failures so a legitimate episode is never blocked solely by metadata.
+    # Long-form length gate and standalone Short length gate.
     all_scene_text = " ".join(_norm(s.get("text") or s.get("narration_chunk")) for s in scenes)
+    words = all_scene_text.split() if all_scene_text else []
+    short_words = sum(
+        len(str(scene.get("text") or scene.get("narration_chunk") or "").split())
+        for scene in shorts_scenes
+    )
     if all_scene_text:
-        words = all_scene_text.split()
         if len(words) > 1650:
             issues.append(f"long_narration_too_long:{len(words)}_words_maximum_1650")
         if len(words) < 900:
             issues.append(f"long_narration_too_short:{len(words)}_words_minimum_900")
         elif not (1050 <= len(words) <= 1450):
             warnings.append(f"long_narration_outside_1050_1450_target:{len(words)}")
-    short_words = sum(
-        len(str(scene.get("text") or scene.get("narration_chunk") or "").split())
-        for scene in shorts_scenes
-    )
-    if shorts_scenes:
-        if short_words < 50 or short_words > 150:
-            issues.append(f"short_narration_outside_50_150_words:{short_words}")
-        elif not (70 <= short_words <= 110):
-            warnings.append(f"short_narration_outside_70_110_target:{short_words}")
         # Repeated long phrases are a useful proxy for templated/mass-produced narration.
         ngrams = {}
         for i in range(max(0, len(words) - 5)):
@@ -197,6 +191,11 @@ def validate_payload(payload):
         repeated_ngrams = sum(1 for v in ngrams.values() if v > 1)
         if repeated_ngrams >= 3:
             warnings.append("repeated_six_word_phrases_detected")
+    if shorts_scenes:
+        if short_words < 50 or short_words > 150:
+            issues.append(f"short_narration_outside_50_150_words:{short_words}")
+        elif not (70 <= short_words <= 110):
+            warnings.append(f"short_narration_outside_70_110_target:{short_words}")
 
     # Detect obvious generic filler that tends to weaken retention.
     filler = ("आज की इस वीडियो में", "नमस्कार दोस्तों", "स्वागत है दोस्तों",
