@@ -166,6 +166,29 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends ffmpeg
           pip install -r requirements.txt pynacl
 
+      # Run the exact pre-render content gate on the cached Make payload.
+      # Validate Long/Short scene counts, 8–12 minute Long narration,
+      # standalone Short length and required metadata BEFORE paid media.
+      - name: Enforce Long + Short content contract before media generation
+        if: ${{ !inputs.preflight_only || inputs.payload != '' || inputs.story_file != '' || inputs.reuse_run_id != '' }}
+        env:
+          DISPATCH_PAYLOAD: ${{ toJson(steps.store.outputs.payload) }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DISPATCH_PAYLOAD:-}" ]; then
+            DISPATCH_PAYLOAD="$(python -c 'import json; print(json.dumps(json.load(open("out/replay_inputs.json", encoding="utf-8"))["payload"], ensure_ascii=False))')"
+            export DISPATCH_PAYLOAD
+          fi
+          python content_qc.py
+      - name: Save pre-render content-QC report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: content-qc-preflight-${{ github.run_id }}
+          path: out/content_qc_report.json
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Type-check Remotion scenes and motion graphics (no video render)
         uses: actions/setup-node@v4
         with:
@@ -190,7 +213,7 @@ jobs:
             test_p1_storytelling.py test_preflight_payload.py test_festival_date_gate.py test_festival_timing.py test_editing_performance_learning.py \
             test_render_style_feedback.py test_editing_style_engine.py \
             test_verified_edit_skills.py test_color_continuity.py \
-            test_master_final_audio.py test_validate_final_audio.py; do
+            test_master_final_audio.py test_validate_final_audio.py test_qc_duration.py test_content_qc.py; do
             python -m unittest discover -s tests -p "$name" -v
           done
 
