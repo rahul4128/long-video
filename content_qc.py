@@ -1,4 +1,4 @@
-"""Pre-render content quality gate for short-form devotional episodes.
+"""Pre-render content quality gate for 8–12 minute Long + standalone Short devotional episodes.
 
 This is intentionally heuristic: it catches structural problems before spending
 GitHub Actions time on media generation, but it does not claim to predict views.
@@ -56,6 +56,7 @@ def validate_payload(payload):
     seo = _merged_seo(payload)
     long_video = payload.get("long_video") or {}
     scenes = long_video.get("scenes") or []
+    shorts_scenes = ((payload.get("shorts") or {}).get("scenes") or [])
     title = _norm(seo.get("long_video_title"))
     description = _norm(seo.get("long_video_description"))
     tags = seo.get("tags") or []
@@ -163,22 +164,31 @@ def validate_payload(payload):
         ]
         if strict_missing:
             issues.append("strict_visual_scene_missing_entity:" + ",".join(strict_missing))
-        if len(scenes) < 5:
-            warnings.append("fewer_than_5_scenes_for_3_minute_format")
-        if len(scenes) > 12:
-            warnings.append("too_many_scenes_for_3_minute_format")
+        if len(scenes) != 6:
+            issues.append(f"long_scene_count_must_be_6:{len(scenes)}")
+    if len(shorts_scenes) != 5:
+        issues.append(f"short_scene_count_must_be_5:{len(shorts_scenes)}")
 
     # Growth-oriented packaging/originality guardrails. These are warnings rather than
     # hard failures so a legitimate episode is never blocked solely by metadata.
     all_scene_text = " ".join(_norm(s.get("text") or s.get("narration_chunk")) for s in scenes)
     if all_scene_text:
         words = all_scene_text.split()
-        if len(words) > 520:
-            warnings.append("narration_over_520_words")
-        if len(words) < 250:
-            issues.append(f"long_narration_too_short:{len(words)}_words_minimum_250")
-        elif len(words) < 280:
-            warnings.append("narration_under_280_words")
+        if len(words) > 1650:
+            issues.append(f"long_narration_too_long:{len(words)}_words_maximum_1650")
+        if len(words) < 900:
+            issues.append(f"long_narration_too_short:{len(words)}_words_minimum_900")
+        elif not (1050 <= len(words) <= 1450):
+            warnings.append(f"long_narration_outside_1050_1450_target:{len(words)}")
+    short_words = sum(
+        len(str(scene.get("text") or scene.get("narration_chunk") or "").split())
+        for scene in shorts_scenes
+    )
+    if shorts_scenes:
+        if short_words < 50 or short_words > 150:
+            issues.append(f"short_narration_outside_50_150_words:{short_words}")
+        elif not (70 <= short_words <= 110):
+            warnings.append(f"short_narration_outside_70_110_target:{short_words}")
         # Repeated long phrases are a useful proxy for templated/mass-produced narration.
         ngrams = {}
         for i in range(max(0, len(words) - 5)):
@@ -203,6 +213,10 @@ def validate_payload(payload):
         "warnings": warnings,
         "issues": issues,
         "sceneCount": len(scenes),
+        "shortSceneCount": len(shorts_scenes),
+        "longNarrationWords": len(all_scene_text.split()) if all_scene_text else 0,
+        "shortNarrationWords": short_words,
+        "targetLongMinutes": [8, 12],
         "hasHindi": any(DEVANAGARI.search(str(s.get("text") or "")) for s in scenes),
         "entertainmentAngle": entertainment_angle,
         "festivalPriority": festival_priority,
