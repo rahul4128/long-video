@@ -167,7 +167,7 @@ jobs:
           pip install -r requirements.txt pynacl
 
       # Run the exact pre-render content gate on the cached Make payload.
-      # Validate Long/Short scene counts, 8–12 minute Long narration,
+      # Validate Long/Short scene counts, 3-minute Long narration (360–430 words),
       # standalone Short length and required metadata BEFORE paid media.
       - name: Enforce Long + Short content contract before media generation
         if: ${{ !inputs.preflight_only || inputs.payload != '' || inputs.story_file != '' || inputs.reuse_run_id != '' }}
