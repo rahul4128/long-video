@@ -1,4 +1,4 @@
-"""Pre-render content quality gate for 8–12 minute Long + standalone Short devotional episodes.
+"""Pre-render content quality gate for approximately 3-minute Long + standalone Short devotional episodes.
 
 This is intentionally heuristic: it catches structural problems before spending
 GitHub Actions time on media generation, but it does not claim to predict views.
@@ -177,12 +177,12 @@ def validate_payload(payload):
         for scene in shorts_scenes
     )
     if all_scene_text:
-        if len(words) > 1650:
-            issues.append(f"long_narration_too_long:{len(words)}_words_maximum_1650")
-        if len(words) < 900:
-            issues.append(f"long_narration_too_short:{len(words)}_words_minimum_900")
-        elif not (1050 <= len(words) <= 1450):
-            warnings.append(f"long_narration_outside_1050_1450_target:{len(words)}")
+        scene_word_counts = [len(text.split()) for text in texts]
+        for index, scene_words in enumerate(scene_word_counts, start=1):
+            if not (55 <= scene_words <= 75):
+                issues.append(f"long_scene_{index}_word_count_outside_55_75:{scene_words}")
+        if not (360 <= len(words) <= 430):
+            issues.append(f"long_narration_outside_360_430_words:{len(words)}")
         # Repeated long phrases are a useful proxy for templated/mass-produced narration.
         ngrams = {}
         for i in range(max(0, len(words) - 5)):
@@ -215,7 +215,8 @@ def validate_payload(payload):
         "shortSceneCount": len(shorts_scenes),
         "longNarrationWords": len(all_scene_text.split()) if all_scene_text else 0,
         "shortNarrationWords": short_words,
-        "targetLongMinutes": [8, 12],
+        "targetLongMinutes": 3,
+        "targetLongSeconds": [150, 210],
         "hasHindi": any(DEVANAGARI.search(str(s.get("text") or "")) for s in scenes),
         "entertainmentAngle": entertainment_angle,
         "festivalPriority": festival_priority,
