@@ -4682,8 +4682,9 @@ async def process():
     ]
     metadata_for_upload["meta"] = {
         k: meta_data.get(k) for k in (
-            "category", "track", "content_role", "festival_angle", "experiment_id",
-            "experiment_hypothesis", "agent_critique", "qc_verdict", "next_episode_angle",
+            "category", "track", "content_role", "series_id", "festival_angle",
+            "festival_priority", "experiment_id", "experiment_hypothesis",
+            "agent_critique", "qc_verdict", "next_episode_angle", "decisionBasis",
         ) if meta_data.get(k)
     }
     metadata_for_upload["factCheck"] = fact_check_items(payload)
