@@ -56,6 +56,16 @@ class SharedShortsReleaseTests(unittest.TestCase):
             self.assertEqual(chosen["name"], expected)
             self.assertTrue(chosen["status"].startswith(status))
 
+    def test_ancient_india_science_has_a_separate_playlist(self):
+        chosen = recommend_playlist({
+            "long_video_title": "प्राचीन मंदिरों की ध्वनि और वास्तुकला का विज्ञान"
+        })
+        self.assertEqual(
+            chosen["name"],
+            "प्राचीन भारत का विज्ञान और मंदिर वास्तुकला | Ancient India Science & Temple Engineering",
+        )
+        self.assertTrue(chosen["status"].startswith("CREATE"))
+
     def test_short_is_added_to_topic_and_shorts_collection(self):
         chosen = recommend_playlist(
             {"long_video_title": "श्रीकृष्ण लीला: वृंदावन का प्रसंग"},
