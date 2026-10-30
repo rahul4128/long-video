@@ -276,6 +276,7 @@ def build(meta: dict) -> str:
     )
     shorts_desc = _append_missing_hashtags(_add_instagram_link(shorts_desc), hashtags)
     thumbs = meta.get("thumbnailVariants") or [{"id": "a", "file": "thumbnail.jpg"}]
+    thumbnail_concepts = _list(meta.get("thumbnailConcepts"))
     facts = meta.get("factCheck") or []
     m = meta.get("meta") or {}
     cta = (meta.get("cta") or "").strip()
@@ -292,8 +293,21 @@ def build(meta: dict) -> str:
         lines += [f"- {v}" for v in variants[:2]]
     lines += ["", "**Description** (chapters included)", _block(long_desc)]
     lines += ["", "**Tags** (paste into *Tags*, under the 500-character limit)", _block(", ".join(tags))]
-    lines += ["", "**Thumbnail** — one final creator-style thumbnail:"]
+    lines += ["", "**Thumbnail** — one final rendered creator-style thumbnail:"]
     lines += [f"- `{t.get('file')}` — {t.get('hookText', '')}" for t in thumbs[:1]]
+    if thumbnail_concepts:
+        lines += ["", "**Canva-ready alternative concepts** (ideas only; this run renders one final thumbnail)"]
+        for index, concept in enumerate(thumbnail_concepts[:3], start=1):
+            if isinstance(concept, dict):
+                lines.append(
+                    f"- **Concept {index}:** text={concept.get('text', '')}; "
+                    f"subject={concept.get('visualSubject', '')}; "
+                    f"emotion/action={concept.get('emotionAction', '')}; "
+                    f"composition={concept.get('composition', '')}"
+                )
+            else:
+                lines.append(f"- **Concept {index}:** {concept}")
+
     lines += ["", "**Settings checklist**",
               "- Video language: Hindi. Choose the category that accurately describes this episode.",
               "- Audience: choose Made for kids only when the video is actually directed to children; family-friendly alone does not decide this.",
