@@ -69,7 +69,7 @@ on:
         required: false
         type: string
       review_approved:
-        description: 'Explicit human approval to publish the release and notify YouTube (defaults to review-only draft)'
+        description: 'Approve a QC-passed GitHub release package. YouTube auto-upload remains disabled unless YOUTUBE_AUTO_UPLOAD_ENABLED=true.'
         required: false
         type: boolean
         default: false
@@ -1073,10 +1073,13 @@ jobs:
           echo "thumb_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="thumbnail.jpg") | .browser_download_url')" >> "$GITHUB_OUTPUT"
           echo "shorts_thumb_url=$(echo "$JSON" | jq -r '.assets[] | select(.name=="thumbnail_shorts_final.jpg") | .browser_download_url')" >> "$GITHUB_OUTPUT"
 
-      # Automatic publishing is enabled only when Make sends review_approved=true.
-      # For an approved production run, missing/broken uploader configuration must fail loudly.
-      - name: Notify Make.com after all QC gates pass and publication is approved
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.review_approved == true }}
+      # MANUAL-UPLOAD DEFAULT: notify the Make uploader only after an explicit
+      # repository-variable opt-in. The normal Make payload may approve a public
+      # GitHub release package, but that must not silently publish to YouTube.
+      # Enable YOUTUBE_AUTO_UPLOAD_ENABLED=true only if the creator later chooses
+      # to restore automated YouTube publishing.
+      - name: Optional YouTube auto-upload bridge (explicit opt-in only)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.review_approved == true && vars.YOUTUBE_AUTO_UPLOAD_ENABLED == 'true' }}
         env:
           MAKE_WEBHOOK_URL: ${{ secrets.MAKE_YOUTUBE_WEBHOOK_URL }}
           YOUTUBE_PRIVACY: ${{ inputs.privacy || 'private' }}
