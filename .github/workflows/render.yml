@@ -171,14 +171,9 @@ jobs:
       # standalone Short length and required metadata BEFORE paid media.
       - name: Enforce Long + Short content contract before media generation
         if: ${{ !inputs.preflight_only || inputs.payload != '' || inputs.story_file != '' || inputs.reuse_run_id != '' }}
-        env:
-          DISPATCH_PAYLOAD: ${{ toJson(steps.store.outputs.payload) }}
         run: |
           set -euo pipefail
-          if [ -z "${DISPATCH_PAYLOAD:-}" ]; then
-            DISPATCH_PAYLOAD="$(python -c 'import json; print(json.dumps(json.load(open("out/replay_inputs.json", encoding="utf-8"))["payload"], ensure_ascii=False))')"
-            export DISPATCH_PAYLOAD
-          fi
+          export DISPATCH_PAYLOAD="$(python -c 'import json; print(json.dumps(json.load(open("out/replay_inputs.json", encoding="utf-8"))["payload"], ensure_ascii=False))')"
           python content_qc.py
       - name: Save pre-render content-QC report
         if: always()
