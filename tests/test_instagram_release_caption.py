@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 import unittest
 
-from scripts.youtube_pack import _append_missing_hashtags, build, instagram_caption_english
+from scripts.youtube_pack import _append_missing_hashtags, build, instagram_caption_english, recommend_playlist
 from spoken_hindi_qc import assess_text
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,6 +40,45 @@ class SharedShortsReleaseTests(unittest.TestCase):
         self.assertIn("full retelling follows the choices", full_caption)
         self.assertNotIn("Behind the Karva Chauth tradition is a katha", full_caption)
         self.assertIn("16:9 is horizontal, not native 9:16", section)
+
+    def test_playlist_mapping_uses_exact_existing_and_new_channel_names(self):
+        cases = [
+            ("करवा चौथ 2026: चाँद न दिखे तो व्रत कैसे खोलें?", "करवा चौथ 2026: कथा, सरगी और व्रत नियम | Karwa Chauth 2026", "EXISTS"),
+            ("गरुड़ पुराण में पितृ पक्ष का महत्व", "गरुड़ पुराण और पितृ पक्ष | Garud Puran, Pitru Paksha", "EXISTS"),
+            ("छठ पूजा में सूर्य को अर्घ्य क्यों दिया जाता है?", "छठ पूजा: कथा, अर्घ्य और परंपरा | Chhath Puja Hindi", "CREATE"),
+            ("तुलसी विवाह की पौराणिक कथा", "तुलसी विवाह और देवउठनी एकादशी | Tulsi Vivah Katha", "CREATE"),
+            ("काशी की देव दीपावली का महत्व", "देव दीपावली और कार्तिक पूर्णिमा | Dev Deepawali Hindi", "CREATE"),
+            ("महाभारत में कर्ण का दान", "महाभारत: धर्म, कर्म और कथाएँ | Mahabharat Stories Hindi", "EXISTS"),
+            ("हनुमान जी की अनसुनी कथा", "हनुमान जी की कथाएँ और रहस्य | Hanuman Katha Hindi", "CREATE"),
+        ]
+        for title, expected, status in cases:
+            chosen = recommend_playlist({"long_video_title": title})
+            self.assertEqual(chosen["name"], expected)
+            self.assertTrue(chosen["status"].startswith(status))
+
+    def test_short_is_added_to_topic_and_shorts_collection(self):
+        chosen = recommend_playlist(
+            {"long_video_title": "श्रीकृष्ण लीला: वृंदावन का प्रसंग"},
+            is_short=True,
+        )
+        self.assertEqual(chosen["name"], "श्रीकृष्ण लीला और वृंदावन | Krishna Leela, Vrindavan")
+        self.assertEqual(chosen["also_add_to"], "पौराणिक Shorts: छोटी कथा, बड़ा अर्थ | Mythology Shorts Hindi")
+
+    def test_upload_pack_contains_exact_playlist_names_and_fixed_instagram_link(self):
+        pack = build({
+            "long_video_title": "छठ पूजा में सूर्य को अर्घ्य क्यों दिया जाता है?",
+            "shorts_title": "छठ में अर्घ्य क्यों देते हैं?",
+            "long_video_description": "छठ पूजा की परंपरा और सूर्य अर्घ्य का अर्थ सरल हिंदी में।",
+            "shorts_description": "छठ में सूर्य अर्घ्य की परंपरा का अर्थ जानिए।",
+            "instagram_caption": "Chhath Puja honours the setting and rising sun through a family tradition of gratitude.",
+            "instagram_long_caption": "Explore the meaning of Chhath Puja and the tradition of offering arghya to the sun.",
+            "hashtags": ["#ChhathPuja", "#ChhathiMaiya", "#IndianTraditions"],
+        })
+        self.assertIn("छठ पूजा: कथा, अर्घ्य और परंपरा | Chhath Puja Hindi", pack)
+        self.assertIn("CREATE BEFORE UPLOAD", pack)
+        self.assertIn("https://www.instagram.com/velvet_bunny.vb/", pack)
+        self.assertNotIn("[PASTE YOUTUBE URL]", pack)
+        self.assertNotIn("VIDEO_ID", pack)
 
     def test_old_episode_fallback_uses_dynamic_description_not_boilerplate(self):
         meta = {
