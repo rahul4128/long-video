@@ -40,6 +40,7 @@ NEW_PLAYLISTS = {
     "ganesh": "श्री गणेश कथा और रहस्य | Ganesh Katha Hindi",
     "devi": "देवी और शक्ति की कथाएँ | Devi Shakti Katha",
     "mythology": "पौराणिक कथाएँ और अनसुने प्रसंग | Hindi Mythology Stories",
+    "ancient_science": "प्राचीन भारत का विज्ञान और मंदिर वास्तुकला | Ancient India Science & Temple Engineering",
 }
 
 
@@ -86,6 +87,8 @@ def recommend_playlist(meta: dict, *, is_short: bool = False) -> dict:
         key, exists = "mahabharat", True
     elif has("रामायण", "ramayan", "ramayana", "श्रीराम", "सीता", "रामचरितमानस"):
         key, exists = "ramayan", True
+    elif has("प्राचीन भारत का विज्ञान", "प्राचीन विज्ञान", "मंदिर इंजीनियरिंग", "temple engineering", "ancient india science", "ancient temple engineering", "मंदिर की ध्वनि", "acoustics", "architectural science"):
+        key, exists = "ancient_science", False
     elif has("मंदिर", "temple", "लेपाक्षी", "स्थापत्य", "मंदिरों"):
         key, exists = "temple", True
     elif has("व्रत", "एकादशी", "पूजा", "त्योहार", "व्रत कथा", "festival", "vrat"):
