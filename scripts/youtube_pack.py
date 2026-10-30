@@ -18,6 +18,93 @@ from pathlib import Path
 
 META = os.getenv("PACK_METADATA_JSON", "out/metadata.json")
 OUT = os.getenv("PACK_OUTPUT", "out/youtube_pack.md")
+INSTAGRAM_URL = "https://www.instagram.com/velvet_bunny.vb/"
+SHORTS_PLAYLIST = "पौराणिक Shorts: छोटी कथा, बड़ा अर्थ | Mythology Shorts Hindi"
+EXISTING_PLAYLISTS = {
+    "temple": "मंदिरों के रहस्य और पौराणिक कथाएँ | Temple Mysteries Hindi",
+    "garud": "गरुड़ पुराण और पितृ पक्ष | Garud Puran, Pitru Paksha",
+    "krishna": "श्रीकृष्ण लीला और वृंदावन | Krishna Leela, Vrindavan",
+    "mahabharat": "महाभारत: धर्म, कर्म और कथाएँ | Mahabharat Stories Hindi",
+    "ramayan": "रामायण की कथाएँ और रहस्य | Ramayan Katha in Hindi",
+    "navratri": "नवरात्रि कथा और माँ दुर्गा | Navratri Katha",
+    "vrat": "व्रत-त्योहार कथा और नियम | Vrat Katha & Festival Guide",
+    "karwa": "करवा चौथ 2026: कथा, सरगी और व्रत नियम | Karwa Chauth 2026",
+}
+NEW_PLAYLISTS = {
+    "diwali": "दीपावली और लक्ष्मी पूजा | Diwali, Dhanteras Hindi",
+    "chhath": "छठ पूजा: कथा, अर्घ्य और परंपरा | Chhath Puja Hindi",
+    "tulsi": "तुलसी विवाह और देवउठनी एकादशी | Tulsi Vivah Katha",
+    "dev_deepawali": "देव दीपावली और कार्तिक पूर्णिमा | Dev Deepawali Hindi",
+    "shiv": "शिव और महादेव की कथाएँ | Shiv Mahadev Katha",
+    "hanuman": "हनुमान जी की कथाएँ और रहस्य | Hanuman Katha Hindi",
+    "ganesh": "श्री गणेश कथा और रहस्य | Ganesh Katha Hindi",
+    "devi": "देवी और शक्ति की कथाएँ | Devi Shakti Katha",
+    "mythology": "पौराणिक कथाएँ और अनसुने प्रसंग | Hindi Mythology Stories",
+}
+
+
+def recommend_playlist(meta: dict, *, is_short: bool = False) -> dict:
+    """Return an exact channel playlist name from story evidence, not model free-text."""
+    info = meta.get("meta") or meta.get("_meta") or {}
+    title = str(meta.get("long_video_title") or meta.get("shorts_title") or "")
+    decision = str(info.get("decisionBasis") or info.get("decision_basis") or "")
+    category = str(info.get("category") or "")
+    keywords = " ".join(str(x) for x in _list(meta.get("secondaryKeywords")))
+    topic = " ".join((title, decision, category, keywords)).casefold()
+
+    def has(*terms):
+        return any(term.casefold() in topic for term in terms)
+
+    # Narrow festival playlists take precedence over broad deity/genre lists.
+    if has("करवा चौथ", "karwa chauth", "karva chauth"):
+        key, exists = "karwa", True
+    elif has("छठ पूजा", "छठ महापर्व", "chhath puja", "chhath"):
+        key, exists = "chhath", False
+    elif has("तुलसी विवाह", "tulsi vivah", "देवउठनी", "देव उठनी", "प्रबोधिनी एकादशी", "dev uthani"):
+        key, exists = "tulsi", False
+    elif has("देव दीपावली", "देवदीपावली", "dev deepawali", "dev diwali", "कार्तिक पूर्णिमा", "kartik purnima"):
+        key, exists = "dev_deepawali", False
+    elif has("धनतेरस", "dhanteras", "दीपावली", "दिवाली", "deepawali", "diwali", "लक्ष्मी पूजा", "lakshmi puja"):
+        key, exists = "diwali", False
+    elif has("गोवर्धन पूजा", "भाई दूज", "भाईदूज", "govardhan puja", "bhai dooj"):
+        key, exists = "vrat", True
+    elif has("पितृ पक्ष", "पितृपक्ष", "गरुड़ पुराण", "गरुड पुराण", "garud puran", "pitru paksha"):
+        key, exists = "garud", True
+    elif has("नवरात्रि", "navratri", "दुर्गा", "durga"):
+        key, exists = "navratri", True
+    elif has("हनुमान", "hanuman", "बजरंगबली", "bajrangbali"):
+        key, exists = "hanuman", False
+    elif has("महादेव", "शिव", "शिव पुराण", "mahadev", "shiv", "shiva"):
+        key, exists = "shiv", False
+    elif has("गणेश", "गणपति", "ganesh", "ganapati"):
+        key, exists = "ganesh", False
+    elif has("देवी", "शक्ति", "काली", "पार्वती", "देवी भागवत", "shakti", "devi"):
+        key, exists = "devi", False
+    elif has("श्रीकृष्ण", "कृष्ण", "वृंदावन", "राधा", "krishna", "vrindavan", "radha"):
+        key, exists = "krishna", True
+    elif has("महाभारत", "mahabharat", "कर्ण", "अर्जुन", "द्रौपदी", "भीष्म", "कुरुक्षेत्र"):
+        key, exists = "mahabharat", True
+    elif has("रामायण", "ramayan", "ramayana", "श्रीराम", "सीता", "रामचरितमानस"):
+        key, exists = "ramayan", True
+    elif has("मंदिर", "temple", "लेपाक्षी", "स्थापत्य", "मंदिरों"):
+        key, exists = "temple", True
+    elif has("व्रत", "एकादशी", "पूजा", "त्योहार", "व्रत कथा", "festival", "vrat"):
+        key, exists = "vrat", True
+    else:
+        key, exists = "mythology", False
+
+    name = (EXISTING_PLAYLISTS if exists else NEW_PLAYLISTS)[key]
+    result = {"name": name, "status": "EXISTS — select this playlist" if exists else "CREATE BEFORE UPLOAD — exact name below"}
+    if is_short:
+        result["also_add_to"] = SHORTS_PLAYLIST
+    return result
+
+
+def _add_instagram_link(description: str) -> str:
+    text = str(description or "").strip()
+    if INSTAGRAM_URL not in text:
+        text = f"{text}\\n\\nInstagram: {INSTAGRAM_URL}".strip()
+    return text
 
 
 def _list(value):
@@ -179,16 +266,18 @@ def build(meta: dict) -> str:
     tags = _tags_within_limit(_list(meta.get("tags")))
     hashtags = _hashtags(_list(meta.get("hashtags")))
     long_desc = (meta.get("long_video_description") or meta.get("description") or long_title).strip()
-    long_desc = _append_missing_hashtags(long_desc, hashtags)
+    long_desc = _append_missing_hashtags(_add_instagram_link(long_desc), hashtags)
     shorts_desc = (
         meta.get("shorts_description") or meta.get("long_video_description")
         or meta.get("description") or shorts_title or long_title
     )
-    shorts_desc = _append_missing_hashtags(shorts_desc, hashtags)
+    shorts_desc = _append_missing_hashtags(_add_instagram_link(shorts_desc), hashtags)
     thumbs = meta.get("thumbnailVariants") or [{"id": "a", "file": "thumbnail.jpg"}]
     facts = meta.get("factCheck") or []
     m = meta.get("meta") or {}
     cta = (meta.get("cta") or "").strip()
+    long_playlist = recommend_playlist(meta, is_short=False)
+    short_playlist = recommend_playlist(meta, is_short=True)
     instagram_short_caption = instagram_caption_english(meta)
     instagram_long_caption = instagram_caption_english(meta, long_video=True)
     missing_caption_note = "_CAPTION NOT GENERATED — do not post to Instagram until story-specific English copy is added._"
@@ -203,17 +292,24 @@ def build(meta: dict) -> str:
     lines += ["", "**Thumbnail** — one final creator-style thumbnail:"]
     lines += [f"- `{t.get('file')}` — {t.get('hookText', '')}" for t in thumbs[:1]]
     lines += ["", "**Settings checklist**",
-              "- Language: Hindi · Caption language: Hindi · Category: Education (or Entertainment)",
-              "- *Altered or synthetic content*: **Yes** (AI voice / AI images) — protects monetization",
-              "- Audience: Not made for kids · Add to the matching series playlist",
-              "- End screen: *Best for viewer* video + Subscribe; add a card at the climax to a related video"]
+              "- Video language: Hindi. Choose the category that accurately describes this episode.",
+              "- Audience: choose Made for kids only when the video is actually directed to children; family-friendly alone does not decide this.",
+              "- Altered/synthetic disclosure: answer from the actual visuals/audio. AI assistance alone does not automatically mean Yes; disclose realistic synthetic or materially altered scenes/people/events where YouTube requires it.",
+              "- Add to the exact playlist shown below. Add an end screen to a relevant next video/playlist plus Subscribe when available."]
     if cta:
         lines += ["", "**Pinned comment**", _block(cta)]
 
-    lines += ["", "## 2. Short — `final_video_shorts.mp4`", "", "**Title**", _block(shorts_title),
+    lines += ["", "**Long video playlist**",
+              f"- {long_playlist['name']}",
+              f"- Status: {long_playlist['status']}",
+              "", "## 2. Short — `final_video_shorts.mp4`", "", "**Title**", _block(shorts_title),
               "", "**Description**", _block(shorts_desc),
-              "", "**Thumbnail/cover:** `thumbnail_shorts_final.jpg` (pick it as the cover frame in the app)",
-              "- *Related video*: link the long video above (this is what turns Shorts views into watch hours)",
+              "", "**Short playlist placement**",
+              f"- Primary topic playlist: {short_playlist['name']}",
+              f"- Status: {short_playlist['status']}",
+              f"- Also add to: {short_playlist['also_add_to']}",
+              "- Keep the Short in the topic playlist as well as the Shorts collection.",
+              "", "**Thumbnail/cover:** `thumbnail_shorts_final.jpg` (select the cover frame in YouTube's Shorts upload flow where available)",
               "", "## 3. Instagram — reuse both original YouTube videos",
               "### Short / Reel — same original 9:16 YouTube Short",
               "- Upload `final_video_shorts.mp4` directly to Instagram (do not generate another Reel).",
@@ -276,11 +372,21 @@ def build(meta: dict) -> str:
         for key in strategy_keys:
             lines.append(f"- **{key}**: {strategy.get(key) or 'NOT PROVIDED — review before upload'}")
     else:
-        lines += ["- **Story strategy:** NOT PROVIDED — check metadata and choose playlist manually."]
+        lines += ["- **Story strategy:** NOT PROVIDED — review topic and sources before upload."]
+    lines += ["", "**Exact playlist to select for the Long**",
+              f"- {long_playlist['name']}",
+              f"- {long_playlist['status']}",
+              "", "**Exact playlist to select for the Short**",
+              f"- {short_playlist['name']}",
+              f"- {short_playlist['status']}",
+              f"- Additional Shorts collection: {short_playlist['also_add_to']}",
+              "", "**No video ID or URL input is needed.** These playlist names are chosen from the story topic. Create any playlist marked CREATE BEFORE UPLOAD in YouTube Studio, then select it during manual upload."]
     lines += ["", "**Creator checklist**",
-              "- Confirm the suggested playlist exists in YouTube Studio.",
-              "- Add each video to a relevant topical playlist; link the Short to the Long.",
-              "- Verify event dates and regional variations before publishing.",
+              "- Select the exact Long and Short playlists printed above; create any missing playlist with the exact supplied name first.",
+              "- Check auto-generated chapters against the narration and remove any inaccurate chapter.",
+              "- Paste the pinned comment after publication; no YouTube URL or video ID is required by this workflow.",
+              "- Verify event dates, scripture/story attribution, regional variations, visual identity and music rights before publishing.",
+              "- Keep the upload manual. Do not treat a completed GitHub Release as a published YouTube video.",
               "- Track 7/30/90-day performance by content bucket, excluding one-off outliers."]
 
     if m:
