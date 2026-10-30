@@ -6,11 +6,9 @@ Long and Short files must match rendered scene timings and their own duration/wo
    public/props.json / props_shorts.json (sum of durationInSeconds = real
    narration length + scene padding, exactly what Remotion renders),
    +/- 10 % (min 3 s). Catches cut-off, padded or frozen renders.
-2. Story-length check: counted in narration WORDS, not seconds, so a slower
-   (Natasha/IndicF5) or faster (Edge) voice never changes the verdict.
-     long  : fail < 250 or > 650 words, warn outside 360-520 (target 400-460)
-     Short : fail < 15  or > 200 words, warn outside 40-120
-   A runaway 7-minute script fails here; a tight 147 s story passes.
+2. Story-length check uses both narration words and final runtime:
+     long  : fail < 900 or > 1,650 words; target 1,050–1,450 and 8–12 minutes
+     Short : fail < 15 or > 200 words; target 70–110 and 25–60 seconds
 3. Final videos must have an audio track; thumbnails need real dimensions.
 """
 import json, os, subprocess, sys
