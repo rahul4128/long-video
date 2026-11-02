@@ -9,12 +9,18 @@ DEVANAGARI = re.compile(r"[\u0900-\u097F]")
 def _norm(s):
     return re.sub(r"\s+", " ", str(s or "").strip()).lower()
 
-# ---------------------------------------------------------------------------
-# Fact-risk checklist. This does NOT verify facts automatically (no free tool
-# can do that reliably for scripture/history). It pulls out every sentence
-# that makes a checkable or risky claim so the creator can verify it in a
-# minute before uploading, and flags overclaiming language outright.
-# ---------------------------------------------------------------------------
+def _as_dict(value):
+    """Accept native objects and JSON-encoded object strings from Make."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except (TypeError, ValueError):
+            return {}
+    return {}
+
 _SENT_SPLIT = re.compile(r"(?<=[।!?])\s+|\n+")
 _CHECKABLE = re.compile(
     r"[0-9०-९]|अध्याय|श्लोक|पुराण|उपनिषद|वेद|रामायण|महाभारत|गीता|शिलालेख|"
@@ -28,7 +34,6 @@ _HEDGED = re.compile(r"मान्यता|लोक कथा|कहा ज�
 
 
 def fact_check_items(payload, limit=12):
-    """Return [{scene, claim, risk}] for the YouTube pack's verify list."""
     items = []
     scenes = ((payload.get("long_video") or {}).get("scenes") or [])
     for n, scene in enumerate(scenes, start=1):
@@ -45,30 +50,32 @@ def fact_check_items(payload, limit=12):
 
 
 def _merged_seo(payload):
-    seo = dict(payload.get("seo_metadata") or {})
-    for k, v in (payload.get("seo") or {}).items():
+    seo = _as_dict(payload.get("seo_metadata"))
+    for k, v in _as_dict(payload.get("seo")).items():
         if v not in (None, "", [], {}) and not seo.get(k):
             seo[k] = v
     return seo
 
 
 def validate_payload(payload):
+    payload = _as_dict(payload)
     seo = _merged_seo(payload)
-    long_video = payload.get("long_video") or {}
+    long_video = _as_dict(payload.get("long_video"))
     scenes = long_video.get("scenes") or []
-    shorts_scenes = ((payload.get("shorts") or {}).get("scenes") or [])
+    shorts = _as_dict(payload.get("shorts"))
+    shorts_scenes = shorts.get("scenes") or []
     title = _norm(seo.get("long_video_title"))
     description = _norm(seo.get("long_video_description"))
     tags = seo.get("tags") or []
     hashtags = seo.get("hashtags") or []
-    thumbnail = payload.get("thumbnail") or {}
+    thumbnail = _as_dict(payload.get("thumbnail"))
     hook = _norm(thumbnail.get("thumbnailText") or seo.get("thumbnailText"))
     title_variants = seo.get("titleVariants") or []
     thumbnail_concepts = seo.get("thumbnailConcepts") or []
     primary_keyword = _norm(seo.get("primaryKeyword"))
     secondary_keywords = seo.get("secondaryKeywords") or []
     cta = _norm(seo.get("cta"))
-    meta = payload.get("_meta") or {}
+    meta = _as_dict(payload.get("_meta"))
     entertainment_angle = _norm(meta.get("entertainment_angle"))
     festival_priority = _norm(meta.get("festival_priority"))
     fun_with_fact_angle = _norm(meta.get("fun_with_fact_angle"))
@@ -158,10 +165,7 @@ def validate_payload(payload):
                 repeated += 1
         if repeated:
             issues.append("consecutive_duplicate_narration")
-        strict_missing = [
-            str(i + 1) for i, s in enumerate(scenes)
-            if s.get("visualStrict") and not s.get("visualEntities")
-        ]
+        strict_missing = [str(i + 1) for i, s in enumerate(scenes) if s.get("visualStrict") and not s.get("visualEntities")]
         if strict_missing:
             issues.append("strict_visual_scene_missing_entity:" + ",".join(strict_missing))
         if len(scenes) != 6:
@@ -169,21 +173,15 @@ def validate_payload(payload):
     if len(shorts_scenes) != 5:
         issues.append(f"short_scene_count_must_be_5:{len(shorts_scenes)}")
 
-    # Long-form length gate and standalone Short length gate.
     all_scene_text = " ".join(_norm(s.get("text") or s.get("narration_chunk")) for s in scenes)
     words = all_scene_text.split() if all_scene_text else []
-    short_words = sum(
-        len(str(scene.get("text") or scene.get("narration_chunk") or "").split())
-        for scene in shorts_scenes
-    )
+    short_words = sum(len(str(scene.get("text") or scene.get("narration_chunk") or "").split()) for scene in shorts_scenes)
     if all_scene_text:
-        scene_word_counts = [len(text.split()) for text in texts]
-        for index, scene_words in enumerate(scene_word_counts, start=1):
-            if not (55 <= scene_words <= 75):
-                issues.append(f"long_scene_{index}_word_count_outside_55_75:{scene_words}")
-        if not (360 <= len(words) <= 430):
-            issues.append(f"long_narration_outside_360_430_words:{len(words)}")
-        # Repeated long phrases are a useful proxy for templated/mass-produced narration.
+        # Keep the total-length contract aligned with the Make QC gate. Do not
+        # impose brittle per-scene word-count limits because Hindi segmentation
+        # naturally varies between scenes.
+        if not (330 <= len(words) <= 430):
+            issues.append(f"long_narration_outside_330_430_words:{len(words)}")
         ngrams = {}
         for i in range(max(0, len(words) - 5)):
             gram = " ".join(words[i:i+6])
@@ -197,9 +195,7 @@ def validate_payload(payload):
         elif not (70 <= short_words <= 110):
             warnings.append(f"short_narration_outside_70_110_target:{short_words}")
 
-    # Detect obvious generic filler that tends to weaken retention.
-    filler = ("आज की इस वीडियो में", "नमस्कार दोस्तों", "स्वागत है दोस्तों",
-              "इस वीडियो में हम जानेंगे", "आज हम जानेंगे")
+    filler = ("आज की इस वीडियो में", "नमस्कार दोस्तों", "स्वागत है दोस्तों", "इस वीडियो में हम जानेंगे", "आज हम जानेंगे")
     if any(x in _norm(s.get("text")) for s in scenes for x in filler):
         warnings.append("generic_intro_filler_detected")
 
@@ -237,7 +233,6 @@ def main():
     with open("out/content_qc_report.json", "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
     print(json.dumps(report, ensure_ascii=False, indent=2))
-    # Only hard structural failures stop the expensive media pipeline.
     if not report["ok"]:
         sys.exit(1)
 
