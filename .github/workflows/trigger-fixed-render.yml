@@ -26,4 +26,4 @@ jobs:
             -f pipeline=canva-updated-flow \
             -f review_approved=false
       - name: Confirm dispatch
-        run: echo "Render dispatched after packaging-regression fix using approved story from run 41401801372; Make was not rerun."
+        run: echo "Render dispatched after preflight regression fixes; approved story from run 41401801372 reused and Make was not rerun."
