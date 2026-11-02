@@ -26,4 +26,5 @@ jobs:
             -f pipeline=canva-updated-flow \
             -f review_approved=false
       - name: Confirm dispatch
-        run: echo "Render dispatched after preflight regression fixes; approved story from run 41401801372 reused and Make was not rerun."
+        run: echo "Render dispatched using the same approved story from run 41401801372; Make/Gemini story generation was not rerun."
+      # Replay trigger remains tied to the approved historical story and is intentionally non-publishing.
