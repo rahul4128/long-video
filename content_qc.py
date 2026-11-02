@@ -135,7 +135,14 @@ def validate_payload(payload):
         warnings.append("missing_fun_with_fact_angle")
     if festival_priority in ("high", "medium") and not meta.get("festival_angle"):
         warnings.append("festival_priority_without_festival_angle")
-    if content_role not in ("discovery", "retention", "conversion", "loyalty", "authority"):
+    # Content-role values are authored strategy labels, not a closed enum.
+    # Keep the core taxonomy while accepting the explicit exploratory role
+    # produced by the current Visual Director / Make pipeline.
+    valid_content_roles = {
+        "discovery", "retention", "conversion", "loyalty", "authority",
+        "primary_long_and_short_explorer", "educational_presenter",
+    }
+    if content_role not in valid_content_roles:
         warnings.append("missing_or_invalid_content_role")
     if not experiment_hypothesis:
         warnings.append("missing_experiment_hypothesis")
@@ -177,9 +184,6 @@ def validate_payload(payload):
     words = all_scene_text.split() if all_scene_text else []
     short_words = sum(len(str(scene.get("text") or scene.get("narration_chunk") or "").split()) for scene in shorts_scenes)
     if all_scene_text:
-        # Keep the total-length contract aligned with the Make QC gate. Do not
-        # impose brittle per-scene word-count limits because Hindi segmentation
-        # naturally varies between scenes.
         if not (330 <= len(words) <= 430):
             issues.append(f"long_narration_outside_330_430_words:{len(words)}")
         ngrams = {}
