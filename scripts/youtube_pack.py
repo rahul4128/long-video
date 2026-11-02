@@ -87,7 +87,7 @@ def recommend_playlist(meta: dict, *, is_short: bool = False) -> dict:
         key, exists = "mahabharat", True
     elif has("रामायण", "ramayan", "ramayana", "श्रीराम", "सीता", "रामचरितमानस"):
         key, exists = "ramayan", True
-    elif has("प्राचीन भारत का विज्ञान", "प्राचीन विज्ञान", "मंदिर इंजीनियरिंग", "temple engineering", "ancient india science", "ancient temple engineering", "मंदिर की ध्वनि", "acoustics", "architectural science"):
+    elif has("प्राचीन भारत का विज्ञान", "प्राचीन विज्ञान", "प्राचीन मंदिरों", "प्राचीन मंदिर", "मंदिर इंजीनियरिंग", "temple engineering", "ancient india science", "ancient temple engineering", "मंदिर की ध्वनि", "मंदिरों की ध्वनि", "वास्तुकला का विज्ञान", "acoustics", "architectural science"):
         key, exists = "ancient_science", False
     elif has("मंदिर", "temple", "लेपाक्षी", "स्थापत्य", "मंदिरों"):
         key, exists = "temple", True
