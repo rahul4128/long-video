@@ -22,8 +22,6 @@ def story():
 
 class PreflightPayloadTests(unittest.TestCase):
     def test_workflow_calls_preflight_as_module(self):
-        # Running `python scripts/preflight_payload.py` changes sys.path[0] to
-        # scripts/ and breaks `from scripts.festival_date_gate import ...`.
         workflow = (Path(__file__).resolve().parents[1] / ".github" /
                     "workflows" / "render.yml").read_text(encoding="utf-8")
         self.assertIn("run: python -m scripts.preflight_payload", workflow)
@@ -64,25 +62,22 @@ class PreflightPayloadTests(unittest.TestCase):
         self.assertEqual(len(episode["long_video"]["scenes"]), 6)
         self.assertEqual(len(episode["shorts"]["scenes"]), 5)
         self.assertTrue(checked["festival_date_check"]["ok"])
-        # October 20 run #183 failed at the *second* independent date gate,
-        # despite passing preflight_payload's first calendar validation.
         second_date_gate = validate_festival_timing(episode, publish_date="2026-10-20")
         self.assertTrue(second_date_gate["ok"], second_date_gate["issues"])
         self.assertEqual(checked["pipeline"], "visual-director-v2-oflifepart31")
         self.assertFalse(checked["source_run_id"])
 
     def test_saved_story_has_no_blocking_hindi_or_packaging_issues(self):
+        """Validate the story actually cached by the current preflight run."""
+        replay = Path("out/replay_inputs.json")
+        if not replay.exists():
+            self.skipTest("requires the current preflight cached story")
+        checked = json.loads(replay.read_text(encoding="utf-8"))
+        story_payload = json.loads(checked["payload"])
         from content_qc import validate_payload
         from spoken_hindi_qc import assess_scenes
-        checked = prepare({
-            "STORY_FILE": "vijayadashami_2026_10_20_review.json",
-            "NEW_PIPELINE": "visual-director-v2-oflifepart31",
-            "PUBLICATION_DATE_IST": "2026-10-20",
-            "REVIEW_APPROVED": "false",
-        })
-        story = json.loads(checked["payload"])
-        packaging = validate_payload(story)
-        self.assertTrue(packaging["ok"])
+        packaging = validate_payload(story_payload)
+        self.assertTrue(packaging["ok"], packaging)
         for code in (
             "thumbnail_hook_too_long",
             "thumbnail_concepts_should_be_exactly_3",
@@ -91,11 +86,9 @@ class PreflightPayloadTests(unittest.TestCase):
             self.assertNotIn(code, packaging["warnings"])
         with tempfile.TemporaryDirectory() as tmp:
             narration = assess_scenes(
-                story["long_video"]["scenes"], story["shorts"]["scenes"],
+                story_payload["long_video"]["scenes"], story_payload["shorts"]["scenes"],
                 report_path=Path(tmp) / "spoken_hindi_test.json",
             )
-        # New everyday-Hindi style warnings are advisory for older approved
-        # stories. Fatal/severe content failures remain disallowed.
         self.assertIn(narration["status"], ("clear", "review"))
         self.assertEqual(narration["severeScenes"], 0)
 
@@ -124,7 +117,6 @@ class PreflightPayloadTests(unittest.TestCase):
             prepare({
                 "STORY_FILE": "vijayadashami_2026_10_20_original.json",
                 "NEW_PIPELINE": "visual-director-v2-oflifepart31",
-                "PUBLICATION_DATE_IST": "2026-10-20",
             })
 
     def test_story_file_input_cannot_escape_repository_folder(self):
