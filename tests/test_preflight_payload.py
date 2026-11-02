@@ -113,10 +113,13 @@ class PreflightPayloadTests(unittest.TestCase):
         self.assertTrue(second["ok"], second["issues"])
 
     def test_original_uncorrected_story_remains_blocked_by_dates(self):
+        # This historical fixture must be evaluated on its original publication
+        # date; using today's date would make a stale-date regression test pass.
         with self.assertRaisesRegex(ValueError, "Festival-date preflight BLOCKED"):
             prepare({
                 "STORY_FILE": "vijayadashami_2026_10_20_original.json",
                 "NEW_PIPELINE": "visual-director-v2-oflifepart31",
+                "PUBLICATION_DATE_IST": "2026-10-20",
             })
 
     def test_story_file_input_cannot_escape_repository_folder(self):
