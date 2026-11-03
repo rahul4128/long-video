@@ -1,0 +1,28 @@
+name: One-time replay previous approved payload
+
+on:
+  push:
+    branches: [visual-director-v2]
+
+jobs:
+  dispatch-replay:
+    if: ${{ startsWith(github.event.head_commit.message, '[replay-41409587354]') }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch existing render workflow with cached approved payload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run render.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref visual-director-v2 \
+            -f reuse_run_id=41409587354 \
+            -f use_canva_images=true \
+            -f tts_engine=gemini \
+            -f pipeline=canva-updated-flow \
+            -f review_approved=false
+          echo "Dispatched render.yml using cached approved payload from run 41409587354."
