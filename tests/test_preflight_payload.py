@@ -112,17 +112,15 @@ class PreflightPayloadTests(unittest.TestCase):
         second = validate_festival_timing(story_payload, publish_date="2026-10-20")
         self.assertTrue(second["ok"], second["issues"])
 
-    def test_original_historical_fixture_is_still_replayable(self):
-        """Historical fixture must remain loadable; date blocking is covered by run-191."""
-        checked = prepare({
-            "STORY_FILE": "vijayadashami_2026_10_20_original.json",
-            "NEW_PIPELINE": "visual-director-v2-oflifepart31",
-            "PUBLICATION_DATE_IST": "2026-10-20",
-            "REVIEW_APPROVED": "false",
-        })
-        self.assertTrue(checked["festival_date_check"]["ok"])
-        story_payload = json.loads(checked["payload"])
-        self.assertEqual((len(story_payload["long_video"]["scenes"]), len(story_payload["shorts"]["scenes"])), (6, 5))
+    def test_original_historical_fixture_is_blocked_when_its_date_claim_is_contradictory(self):
+        """The original historical fixture must remain blocked by the festival-date gate."""
+        with self.assertRaisesRegex(ValueError, "Festival-date preflight BLOCKED"):
+            prepare({
+                "STORY_FILE": "vijayadashami_2026_10_20_original.json",
+                "NEW_PIPELINE": "visual-director-v2-oflifepart31",
+                "PUBLICATION_DATE_IST": "2026-10-20",
+                "REVIEW_APPROVED": "false",
+            })
 
     def test_story_file_input_cannot_escape_repository_folder(self):
         for filename in ("../../.git/config", "../secrets.json", "/tmp/test.json", "bad.json/"):
