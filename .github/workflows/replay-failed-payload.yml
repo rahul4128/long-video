@@ -6,7 +6,6 @@ on:
 
 jobs:
   dispatch-replay:
-    if: ${{ startsWith(github.event.head_commit.message, '[replay-41409587354]') }}
     runs-on: ubuntu-latest
     permissions:
       actions: write
