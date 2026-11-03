@@ -1,32 +1,13 @@
 name: One-time replay previous approved payload
 
-# Temporary replay helper: uses the exact cached approved payload from run 41409587354.
-# It intentionally does not call Make/Gemini to generate new story data.
-# Replay trigger refreshed after the historical fixture date-test fix.
-# Triggered after commit da9ac52 so the replay uses the corrected regression test.
+# Retired temporary helper. Kept only as a manual, non-production workflow.
+# Production renders must come from the Make-dispatched payload.
 
 on:
-  push:
-    branches: [visual-director-v2]
+  workflow_dispatch:
 
 jobs:
-  dispatch-replay:
+  disabled:
     runs-on: ubuntu-latest
-    permissions:
-      actions: write
-      contents: read
     steps:
-      - name: Dispatch existing render workflow with cached approved payload
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh workflow run render.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref visual-director-v2 \
-            -f reuse_run_id=41409587354 \
-            -f use_canva_images=true \
-            -f tts_engine=gemini \
-            -f pipeline=canva-updated-flow \
-            -f review_approved=false
-          echo "Dispatched render.yml using cached approved payload from run 41409587354."
+      - run: echo "Temporary replay helper is retired; use the Make-dispatched production payload."
