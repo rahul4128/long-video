@@ -3,6 +3,7 @@ name: One-time replay previous approved payload
 # Temporary replay helper: uses the exact cached approved payload from run 41409587354.
 # It intentionally does not call Make/Gemini to generate new story data.
 # Replay trigger refreshed after the historical fixture date-test fix.
+# Triggered after commit da9ac52 so the replay uses the corrected regression test.
 
 on:
   push:
