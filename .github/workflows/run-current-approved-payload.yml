@@ -1,0 +1,30 @@
+name: One-time current payload replay
+
+# One-time bridge for the approved production payload captured in Make-dispatched run 41591213572.
+# This does not call Make or Gemini; it reuses the exact current Tulsi Vivah payload.
+
+on:
+  push:
+    branches: [visual-director-v2]
+
+jobs:
+  dispatch-current:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch current approved production payload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run render.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref visual-director-v2 \
+            -f reuse_run_id=41591213572 \
+            -f use_canva_images=true \
+            -f tts_engine=gemini \
+            -f pipeline=canva-updated-flow \
+            -f review_approved=false
+          echo "Dispatched render.yml using current Make-approved payload from run 41591213572."
