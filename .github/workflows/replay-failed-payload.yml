@@ -1,5 +1,8 @@
 name: One-time replay previous approved payload
 
+# Temporary replay helper: uses the exact cached approved payload from run 41409587354.
+# It intentionally does not call Make/Gemini to generate new story data.
+
 on:
   push:
     branches: [visual-director-v2]
