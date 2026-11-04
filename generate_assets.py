@@ -2210,15 +2210,25 @@ _CANVA_IMAGES_REQUESTED = 0
 
 def _canva_image_enabled() -> bool:
     # Explicit opt-in: each POST consumes Canva AI allowances; avoid surprise
-    # charges/credits on scheduled devotional productiodef _try_canva_image(prompt: str, dest: str, aspect_ratio: str) -> bool:
+    # charges/credits on scheduled production jobs.
+    return os.getenv("CANVA_IMAGE_FALLBACK_ENABLED", "false").lower() == "true"
+
+
+def _canva_image_budget() -> int:
+    try:
+        return max(1, min(200, int(os.getenv("CANVA_IMAGE_MAX_PER_RUN", "80"))))
+    except (ValueError, TypeError):
+        return 80
+
+
+def _try_canva_image(prompt: str, dest: str, aspect_ratio: str) -> bool:
     """Generate a Canva image serially, stopping immediately on account-level errors."""
     global _CANVA_IMAGES_REQUESTED
     if not _canva_image_enabled():
         return False
 
-    # Keep the complete check -> request -> failure update sequence atomic
-    # across ThreadPool workers. A second worker must re-check the circuit
-    # after acquiring this lock, not rely on a stale pre-lock check.
+    # Keep check -> request -> failure update atomic across scene-worker threads.
+    # Workers queued behind a failed request re-check the circuit before posting.
     with _CANVA_IMAGE_REQUEST_LOCK:
         if not _ai_provider_allowed("canva"):
             return False
@@ -2243,8 +2253,6 @@ def _canva_image_enabled() -> bool:
             return True
         except CanvaImageError as exc:
             print(f"  ⚠️ Canva image: {exc}", flush=True)
-            # Billing, credit, permission and preview-feature errors are
-            # account/configuration failures: do not retry later scene beats.
             if exc.code in {
                 "credit_quota_exceeded", "credit_quota_cooldown", "permission_denied",
                 "missing_scope", "user_role_required", "missing_token", "invalid_access_token",
@@ -2253,14 +2261,7 @@ def _canva_image_enabled() -> bool:
                 _ai_provider_mark_unavailable("canva", f"{exc.code}: {str(exc)[:130]}")
             else:
                 _ai_provider_record("canva", False)
-            return Falsecess_token",
-            "payment_required", "http_402", "http_401", "model_not_available",
-        }:
-            _ai_provider_mark_unavailable("canva", f"{exc.code}: {str(exc)[:130]}")
-        else:
-            _ai_provider_record("canva", False)
-        return False
-
+            return False
 
 def _local_visual_dimensions(orientation: str):
     return (1080, 1920) if orientation == "portrait" else (1920, 1080)
