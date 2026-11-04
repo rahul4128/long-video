@@ -39,7 +39,15 @@ def _title(text):
 def _json_array(text, max_size=54000):
     if not isinstance(text, str) or len(text) > max_size:
         raise ValueError("Invalid input size or content")
-    result = json.loads(text)
+    try:
+        result = json.loads(text)
+    except json.JSONDecodeError:
+        # Backward compatibility for Make's previous join() mapping, which
+        # emitted a literal backslash-v between array items instead of JSON
+        # commas. Repair only that exact legacy delimiter; reject other errors.
+        if "\\v" not in text:
+            raise
+        result = json.loads(text.replace("\\v", '","'))
     if not isinstance(result, list):
         raise ValueError("Expected JSON array from real YouTube source")
     return result
