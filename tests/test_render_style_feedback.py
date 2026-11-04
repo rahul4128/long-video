@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from scripts.render_style_attribution import append_actual_style, scope_from_pipeline
-from scripts.ingest_editing_feedback import compute_channel_signals
+from scripts.ingest_editing_feedback import _json_array, compute_channel_signals
 
 
 NOW = datetime(2026, 11, 1, tzinfo=timezone.utc)
@@ -94,6 +94,12 @@ class RenderAttributionTests(unittest.TestCase):
 
 
 class AnalyticsAttributionTests(unittest.TestCase):
+    def test_legacy_make_backslash_v_array_delimiter(self):
+        self.assertEqual(
+            _json_array(r'["videoOne\\vvideoTwo"]'),
+            ["videoOne", "videoTwo"],
+        )
+
     def test_only_own_account_and_mature_exact_matches(self):
         args = evidence()
         signals, audit = compute_channel_signals(*args, scope="oflifepart31", now=NOW)
