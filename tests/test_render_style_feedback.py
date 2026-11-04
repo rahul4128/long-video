@@ -96,7 +96,7 @@ class RenderAttributionTests(unittest.TestCase):
 class AnalyticsAttributionTests(unittest.TestCase):
     def test_legacy_make_backslash_v_array_delimiter(self):
         self.assertEqual(
-            _json_array(r'["videoOne\\vvideoTwo"]'),
+            _json_array(r'["videoOne\vvideoTwo"]'),
             ["videoOne", "videoTwo"],
         )
 
