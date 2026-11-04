@@ -2201,50 +2201,59 @@ def _ai_provider_record(name: str, success: bool) -> None:
 
 
 _CANVA_IMAGE_COUNTER_LOCK = threading.Lock()
+# Serialize Canva generation across scene-worker threads. Without this gate,
+# several workers can pass the availability check before the first 402 opens
+# the provider circuit breaker, causing repeated quota-rejected POSTs.
+_CANVA_IMAGE_REQUEST_LOCK = threading.Lock()
 _CANVA_IMAGES_REQUESTED = 0
 
 
 def _canva_image_enabled() -> bool:
     # Explicit opt-in: each POST consumes Canva AI allowances; avoid surprise
-    # charges/credits on scheduled devotional production jobs.
-    return os.getenv("CANVA_IMAGE_FALLBACK_ENABLED", "false").lower() == "true"
-
-
-def _canva_image_budget() -> int:
-    try:
-        return max(1, min(200, int(os.getenv("CANVA_IMAGE_MAX_PER_RUN", "80"))))
-    except (ValueError, TypeError):
-        return 80
-
-
-def _try_canva_image(prompt: str, dest: str, aspect_ratio: str) -> bool:
-    """Generate all needed Canva-backed beats up to run cap or account credits."""
+    # charges/credits on scheduled devotional productiodef _try_canva_image(prompt: str, dest: str, aspect_ratio: str) -> bool:
+    """Generate a Canva image serially, stopping immediately on account-level errors."""
     global _CANVA_IMAGES_REQUESTED
-    if not _canva_image_enabled() or not _ai_provider_allowed("canva"):
+    if not _canva_image_enabled():
         return False
-    if not os.getenv("CANVA_ACCESS_TOKEN", "").strip():
-        _ai_provider_mark_unavailable("canva", "OAuth access token unavailable; inspect Canva refresh step")
-        return False
-    with _CANVA_IMAGE_COUNTER_LOCK:
-        if _CANVA_IMAGES_REQUESTED >= _canva_image_budget():
-            exhausted = True
-        else:
-            exhausted = False
-            _CANVA_IMAGES_REQUESTED += 1
-    if exhausted:
-        _ai_provider_mark_unavailable("canva", f"Configured per-run limit of {_canva_image_budget()} image(s) reached")
-        return False
-    try:
-        generate_canva_image(prompt, dest, aspect_ratio=aspect_ratio)
-        print(f"  ✅ Canva AI image {_CANVA_IMAGES_REQUESTED}/{_canva_image_budget()} ready", flush=True)
-        return True
-    except CanvaImageError as exc:
-        print(f"  ⚠️ Canva image: {exc}", flush=True)
-        # Billing, credit, permission and preview-feature errors must never be
-        # retried through the remainder of this run.
-        if exc.code in {
-            "credit_quota_exceeded", "credit_quota_cooldown", "permission_denied",
-            "missing_scope", "user_role_required", "missing_token", "invalid_access_token",
+
+    # Keep the complete check -> request -> failure update sequence atomic
+    # across ThreadPool workers. A second worker must re-check the circuit
+    # after acquiring this lock, not rely on a stale pre-lock check.
+    with _CANVA_IMAGE_REQUEST_LOCK:
+        if not _ai_provider_allowed("canva"):
+            return False
+        if not os.getenv("CANVA_ACCESS_TOKEN", "").strip():
+            _ai_provider_mark_unavailable("canva", "OAuth access token unavailable; inspect Canva refresh step")
+            return False
+
+        with _CANVA_IMAGE_COUNTER_LOCK:
+            if _CANVA_IMAGES_REQUESTED >= _canva_image_budget():
+                exhausted = True
+            else:
+                exhausted = False
+                _CANVA_IMAGES_REQUESTED += 1
+                request_number = _CANVA_IMAGES_REQUESTED
+        if exhausted:
+            _ai_provider_mark_unavailable("canva", f"Configured per-run limit of {_canva_image_budget()} image(s) reached")
+            return False
+
+        try:
+            generate_canva_image(prompt, dest, aspect_ratio=aspect_ratio)
+            print(f"  ✅ Canva AI image {request_number}/{_canva_image_budget()} ready", flush=True)
+            return True
+        except CanvaImageError as exc:
+            print(f"  ⚠️ Canva image: {exc}", flush=True)
+            # Billing, credit, permission and preview-feature errors are
+            # account/configuration failures: do not retry later scene beats.
+            if exc.code in {
+                "credit_quota_exceeded", "credit_quota_cooldown", "permission_denied",
+                "missing_scope", "user_role_required", "missing_token", "invalid_access_token",
+                "payment_required", "http_402", "http_401", "model_not_available",
+            }:
+                _ai_provider_mark_unavailable("canva", f"{exc.code}: {str(exc)[:130]}")
+            else:
+                _ai_provider_record("canva", False)
+            return Falsecess_token",
             "payment_required", "http_402", "http_401", "model_not_available",
         }:
             _ai_provider_mark_unavailable("canva", f"{exc.code}: {str(exc)[:130]}")
