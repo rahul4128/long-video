@@ -43,11 +43,11 @@ def _json_array(text, max_size=54000):
         result = json.loads(text)
     except json.JSONDecodeError:
         # Backward compatibility for Make's previous join() mapping, which
-        # emitted a literal backslash-v between array items instead of JSON
-        # commas. Repair only that exact legacy delimiter; reject other errors.
-        if "\\v" not in text:
+        # emitted a literal backslash between array items instead of JSON
+        # commas. Repair only this legacy delimiter; reject other errors.
+        if "\\" not in text:
             raise
-        result = json.loads(text.replace("\\v", '","'))
+        result = json.loads(text.replace("\\", '","'))
     if not isinstance(result, list):
         raise ValueError("Expected JSON array from real YouTube source")
     return result
